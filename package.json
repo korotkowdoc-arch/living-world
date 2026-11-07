@@ -1,0 +1,11 @@
+{
+  "name": "living-world",
+  "private": true,
+  "version": "0.5.0",
+  "type": "module",
+  "description": "Open-source, mobile-first interactive fiction world simulator",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check public/app.js && node --check public/continuity.mjs && node --check public/logic.mjs"
+  }
+}

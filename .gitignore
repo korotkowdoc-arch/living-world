@@ -1,0 +1,16 @@
+# Never publish secrets, personal stories, exports or local config
+.env
+.env.*
+!.env.example
+*.local
+*.sqlite
+*.sqlite3
+*.db
+node_modules/
+coverage/
+.DS_Store
+*.log
+*backup*.json
+*export*.json
+personal-worlds/
+secrets/
