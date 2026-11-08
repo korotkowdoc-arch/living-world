@@ -383,7 +383,7 @@ test('website diagnostic writes, retries, reads back, then deletes only its disp
    method:'POST',headers:{origin:'https://livingworld-35q.pages.dev',
      authorization:'Bearer '+token}
   }),cfg);
-  assert.equal(response.status,200);
+  assert.equal(response.status,200,JSON.stringify(await response.clone().json()));
   const result=await response.json();
   assert.equal(result.ok,true);
   assert.equal(result.temporary_world_removed,true);
