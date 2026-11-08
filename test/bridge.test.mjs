@@ -34,7 +34,7 @@ test('initialize and tools/list work without a Bearer token',async()=>{
  assert.equal(r.status,200);
  const d=(await r.json()).result;
  assert.equal(d.resultType,'complete');
- assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_story_context','save_reference_document','get_character_memory','get_reference_catalog','get_reference_document','get_scene_preflight','get_companion_state','get_branch_history']);
+ assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_scene_receipt','get_story_context','save_reference_document','get_character_memory','get_reference_catalog','get_reference_document','get_scene_preflight','get_companion_state','get_branch_history']);
  assert.ok(d.tools.every(t=>t._meta.securitySchemes[0].type==='oauth2'));
 });
 test('real data calls are forbidden without a validated OAuth token',async()=>{
@@ -221,7 +221,7 @@ test('companion MCP excludes invalidated branch purchases and reads precise ledg
 test('one-call autosave is forbidden unless owner opted in for this world',async()=>{
  const live={...env,BRIDGE_WRITES_ENABLED:'true'};
  const head=null;const requestId='10000000-0000-4000-8000-000000000090';
- let allow=false,writeCount=0,lastBody=null;
+ let allow=false,writeCount=0,lastBody=null,savedRow=null;
  const prev=globalThis.fetch;
  globalThis.fetch=async (url,opts={})=>{
   const u=String(url);
@@ -230,9 +230,12 @@ test('one-call autosave is forbidden unless owner opted in for this world',async
    world:{id:worldId,name:'Сцена в мире',genesis_choices:{auto_save_enabled:allow}},
    branch:{id:branchId,head_scene_id:head}
   });
-  if(u.includes('/rest/v1/lw_scenes?'))return Response.json([]);
+  if(u.includes('/rest/v1/lw_scenes?'))return Response.json(u.includes('id=eq.')&&savedRow?[savedRow]:[]);
   if(u.endsWith('/rest/v1/rpc/lw_bridge_v2_append')){
-   writeCount++;lastBody=JSON.parse(opts.body);return Response.json('10000000-0000-4000-8000-000000000091');
+   writeCount++;lastBody=JSON.parse(opts.body);
+   savedRow={id:lastBody.p_id,world_id:lastBody.p_world,branch_id:lastBody.p_branch,
+    parent_scene_id:lastBody.p_head,body:lastBody.p_body,world_time:lastBody.p_time,prompt_note:lastBody.p_note};
+   return Response.json(lastBody.p_id);
   }
   throw Error('Unexpected '+u);
  };
@@ -246,10 +249,20 @@ test('one-call autosave is forbidden unless owner opted in for this world',async
   const allowed=await call('tools/call',{name:'save_scene_auto',arguments:args},{authorization:'Bearer '+testJwt('authenticated')},live);
   const data=(await allowed.json()).result.structuredContent;
   assert.equal(data.persisted,true);
-  assert.equal(data.scene_id,'10000000-0000-4000-8000-000000000091');
+  assert.equal(data.scene_id,requestId);
   assert.equal(lastBody.p_id,requestId);
   assert.equal(lastBody.p_time,'1999-06');
   assert.ok(lastBody.p_note.includes('GALLEON'));
+  assert.equal(writeCount,1);
+  const saved=await call('tools/call',{name:'get_scene_receipt',arguments:{world_id:worldId,request_id:requestId}},{authorization:'Bearer '+testJwt('authenticated')},live);
+  const receipt=(await saved.json()).result.structuredContent;
+  assert.equal(receipt.saved,true);
+  assert.equal(receipt.scene_id,requestId);
+  const repeated=await call('tools/call',{name:'save_scene_auto',arguments:args},{authorization:'Bearer '+testJwt('authenticated')},live);
+  assert.equal((await repeated.json()).result.structuredContent.already_saved,true);
+  assert.equal(writeCount,1);
+  const changed=await call('tools/call',{name:'save_scene_auto',arguments:{...args,scene:'Совсем другая сцена.'}},{authorization:'Bearer '+testJwt('authenticated')},live);
+  assert.equal((await changed.json()).result.isError,true);
   assert.equal(writeCount,1);
  } finally {globalThis.fetch=prev;}
 });
