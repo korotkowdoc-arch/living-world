@@ -84,7 +84,8 @@ export function quickGenesisPrompt(world,choices) {
   const setting=cleanText(choices.world_idea||world.premise||'',3000);
   const worldName=cleanText(choices.world_title||world.name,140);
   const base=genesisPrompt({...world,name:worldName,premise:setting},{...choices,hero_name:hero,npc_count:String(npcCount)});
-  return `БЫСТРЫЙ СТАРТ LIVING WORLD — построй полноценный генезис, а не анкету-заглушку.
+  const atBirth=Number(choices.hero_age)===0&&choices.simulation_mode==='life';
+  return `БЫСТРЫЙ СТАРТ LIVING WORLD — построй ${atBirth?'исходную ситуацию при рождении, без выдуманных прожитых лет':'полноценный генезис, а не анкету-заглушку'}.
 Я выбираю только направление. Ты САМОСТОЯТЕЛЬНО создаёшь причинно связанную биографию героя и ${npcCount} автономных NPC с собственными целями, ошибками, отношениями, ресурсами и событиями вне кадра.
 
 МИР / ЖАНР: ${worldName} / ${world.genre||'Фэнтези'}
@@ -95,7 +96,7 @@ export function quickGenesisPrompt(world,choices) {
 ЧЕТЫРЕ РЕШЕНИЯ В КОРОТКОЙ СИМУЛЯЦИИ:
 ${JSON.stringify(decisions,null,2)}
 
-ВАЖНО: эти решения показывают склонности героя и желательную динамику, но НЕ означают, что указанные ситуации буквально произошли до начала истории. Преврати выборы в правдоподобные качества и жизненные обстоятельства, не объявляя сами вымышленные задания каноном.
+ВАЖНО: эти решения показывают пожелания о возможной динамике, но НЕ означают, что указанные ситуации буквально произошли до начала истории. ${atBirth?'У младенца НЕТ сыгранных решений и сформировавшейся взрослой личности: не назначай будущих черт, отношений и навыков заранее. Эти четыре выбора — только пожелания режиссёра, а не психология ребёнка.':'Преврати выборы в правдоподобные качества и жизненные обстоятельства, не объявляя сами вымышленные задания каноном.'}
 Дай каждому NPC независимую жизнь, отношения и реальные знания с каналами получения; не делай всех спутниками или поклонниками героя. Пусть хотя бы часть NPC знает друг друга независимо от героя, если это причинно оправданно. Их жизненные обстоятельства должны вытекать из среды и решений, а не выбираться случайно без причин. Если перечислены имена, включи этих людей в пределах заданного количества; остальные персонажи — твой выбор.
 Не задавай мне дополнительные вопросы: решение за ИИ. Не придумывай будущие исходы и не подменяй уже сыгранные факты.
 
@@ -105,7 +106,9 @@ ${base}`;
 export function genesisPrompt(world,choices) {
   const npcCount=Math.min(10,Math.max(1,Number(choices.npc_count)||4));
   const hero=cleanText(choices.hero_name||'Главный герой',100);
-  return `Создай стартовую причинную модель интерактивной вселенной. НЕ сцену. В мире есть самостоятельные люди, знания не перетекают между ними, исходы не предопределены. Развилка биографии героя меняет жизнь других только через правдоподобные причинные каналы. Если исходный канон указан, учитывай его ядро, но не копируй сюжет автоматически.\n\nМИР:\n${JSON.stringify({name:world.name,genre:world.genre,premise:world.premise,world_rules:world.world_rules,history:world.history,timeline:world.timeline,clock_start:world.clock_start},null,2)}\n\nВЫБОРЫ ГЕРОЯ:\n${JSON.stringify(choices,null,2)}\n\nВерни ТОЛЬКО валидный JSON, без пояснений и Markdown, со свойствами: summary:string, past_changes:string[], open_threads:string[], opening:string, uncertainties:string[], characters:array. В characters ровно ${npcCount+1} объектов: первый role="hero", name="${hero}", далее ровно ${npcCount} самостоятельных NPC role="npc" с уникальными именами. У КАЖДОГО обязательно строковые поля: ${GENESIS_FIELDS.join(', ')}. Не приписывай NPC знания без канала. Отделяй факты прошлого от намерений, рисков и неопределённостей. Для существующего мира не выдумывай противоречащие канону факты. Не создавай список обязательных будущих событий.`;
+  const atBirth=Number(choices.hero_age)===0&&choices.simulation_mode==='life';
+  const birthConstraint=atBirth?'СТАРТ С РОЖДЕНИЯ: герою 0 лет. Генезис фиксирует только известные на момент рождения обстоятельства и существующих вокруг него людей. Не придумывай его детство, будущие поступки, знакомства, отношения, характер, обученные навыки или решения. past_changes содержит только реально заданные факты, произошедшие НЕ ПОЗЖЕ старта. Для незафиксированного — uncertainties. Характер будет развиваться через сцены прогона жизни.':'';
+  return `Создай стартовую причинную модель интерактивной вселенной. НЕ сцену. В мире есть самостоятельные люди, знания не перетекают между ними, исходы не предопределены. Развилка биографии героя меняет жизнь других только через правдоподобные причинные каналы. Если исходный канон указан, учитывай его ядро, но не копируй сюжет автоматически.\n${birthConstraint}\n\nМИР:\n${JSON.stringify({name:world.name,genre:world.genre,premise:world.premise,world_rules:world.world_rules,history:world.history,timeline:world.timeline,clock_start:world.clock_start},null,2)}\n\nВЫБОРЫ ГЕРОЯ:\n${JSON.stringify(choices,null,2)}\n\nВерни ТОЛЬКО валидный JSON, без пояснений и Markdown, со свойствами: summary:string, past_changes:string[], open_threads:string[], opening:string, uncertainties:string[], characters:array. В characters ровно ${npcCount+1} объектов: первый role="hero", name="${hero}", далее ровно ${npcCount} самостоятельных NPC role="npc" с уникальными именами. У КАЖДОГО обязательно строковые поля: ${GENESIS_FIELDS.join(', ')}. Не приписывай NPC знания без канала. Отделяй факты прошлого от намерений, рисков и неопределённостей. Для существующего мира не выдумывай противоречащие канону факты. Не создавай список обязательных будущих событий.`;
 }
 export function scenePrompt(world,characters,scenes,mode='story',directorNote='',length='large') {
   const requestedModel=String(mode==='relationship'?world.model_relationships||'gpt-5.6':world.model_story||'gpt-6').toUpperCase();
