@@ -39,7 +39,7 @@ create policy "lw_reference_docs_insert" on public.lw_reference_docs for insert 
     select 1 from public.lw_worlds w where w.id=world_id and w.owner_id=(select auth.uid())
   ));
 
--- Enforce append-only documents even for members with broader table permissions.
+-- Enforce immutable document content on UPDATE; INSERT creates a new revision.\n-- Authenticated clients have neither DELETE grant nor DELETE policy.\n-- The database owner can still delete a world and cascade its documents.
 -- Revisions are immutable: replacing a document means inserting a later revision.
 create or replace function public.lw_reference_docs_block_changes()
 returns trigger language plpgsql security invoker set search_path = '' as $$
@@ -48,7 +48,7 @@ begin
 end $$;
 
 drop trigger if exists lw_reference_docs_immutable on public.lw_reference_docs;
-create trigger lw_reference_docs_immutable before update or delete on public.lw_reference_docs
+-- DELETE is denied to authenticated users by grants/RLS, while parent-world\n-- ON DELETE CASCADE must remain possible for the owner/DB admin.\ncreate trigger lw_reference_docs_immutable before update on public.lw_reference_docs
 for each row execute function public.lw_reference_docs_block_changes();
 
 -- A manifest listing only the latest revision of each key. Full text is
