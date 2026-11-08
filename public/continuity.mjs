@@ -71,10 +71,17 @@ export function parseScenePackage(raw) {
     });
     changes.characters.push(ch);
   }
-  return {scene:result.scene.trim(),world_time:result.world_time||null,changes};
+  const decisions=result.decisions??[];
+  if(!Array.isArray(decisions)||decisions.length>4)throw Error('decisions: нужно не более 4 вариантов.');
+  const found=new Set();
+  for(const [i,d] of decisions.entries()){
+    if(!d||typeof d!=='object'||Array.isArray(d)||typeof d.id!=='string'||typeof d.label!=='string'||typeof d.description!=='string'||!d.id.trim()||!d.label.trim()||d.id.length>30||d.label.length>200||d.description.length>800)throw Error('decisions['+i+']: нужны id, label и description.');
+    if(found.has(d.id))throw Error('decisions: повторяющийся id.');found.add(d.id);
+  }
+  return {scene:result.scene.trim(),world_time:result.world_time||null,changes,decisions};
 }
-export function packSceneNote(changes, directorNote='') {
-  const note=NOTE_PREFIX+JSON.stringify({v:1,director_note:asText(directorNote).slice(0,1200),delta:changes});
+export function packSceneNote(changes, directorNote='', decisions=[]) {
+  const note=NOTE_PREFIX+JSON.stringify({v:1,director_note:asText(directorNote).slice(0,1200),delta:changes,decisions:decisions.slice(0,4)});
   if(note.length>10000)throw Error('Слишком много изменений для одной сцены. Сократи пакет до 10000 символов метаданных.');
   return note;
 }
