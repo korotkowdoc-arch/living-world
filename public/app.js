@@ -113,7 +113,13 @@ return `${heading('Архив сцен',w.name,'Полные сцены ведё
 function renderDocuments(){
  if(!state.world)return needsWorld();
  const header=heading('Архив первоисточников','Документы мира','Полные правила, глоссарии, модели и завершённые годы с проверяемыми редакциями.',btn('docs-refresh','Обновить'));
- if(state.documentsReady===false)return header+`<div class="attention"><b>Библиотека документов пока не установлена в Supabase.</b><p>Один раз запусти SQL-миграцию — существующие миры и сцены она не изменяет.</p><a href="https://github.com/korotkowdoc-arch/living-world/blob/main/supabase/reference_docs.sql" target="_blank" rel="noopener">Открыть SQL для установки</a><p class="tiny">${x(state.documentsError)}</p></div>`;
+ if(state.documentsReady===false){
+   const ref=String(state.config?.url||'').match(/^https:\/\/([a-z0-9]+)\.supabase\.co\/?$/i)?.[1];
+   const editor=ref?'https://supabase.com/dashboard/project/'+ref+'/sql/new':'https://supabase.com/dashboard';
+   return header+`<div class="attention"><b>Библиотека документов пока не установлена в Supabase.</b><p>Это одноразовая настройка. Открой SQL-файл, скопируй его содержимое, вставь в SQL Editor и нажми <b>Run</b>. После этого вернись сюда и нажми «Обновить».</p>
+    <div class="row"><a class="btn gold" href="https://github.com/korotkowdoc-arch/living-world/blob/main/supabase/reference_docs.sql" target="_blank" rel="noopener">1. Открыть SQL-миграцию</a><a class="btn" href="${x(editor)}" target="_blank" rel="noopener">2. Открыть Supabase SQL Editor</a></div>
+    <p class="tiny">Скрипт не удаляет старые миры, персонажей и сцены. Он создаёт отдельную приватную таблицу документов и правила доступа.</p><p class="tiny">Состояние сервера: ${x(state.documentsError)}</p></div>`;
+ }
  if(state.documentsReady!==true)return header+'<div class="panel">Загружаем список документов…</div>';
  const docs=state.documents;
  const allowImport=state.world.genesis_choices?.document_upload_enabled===true;
