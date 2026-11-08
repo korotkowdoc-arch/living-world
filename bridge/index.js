@@ -1,5 +1,6 @@
 import {handleAiRequest} from './ai.js';
 import {extractCompanionChanges,activeLineage,projectCompanion} from '../public/world-ledger.mjs';
+import {validStoryClock} from '../public/continuity.mjs';
 /** LIVING WORLD Bridge v8 — Git-connected production deployment 2026-11-08.
  * Continuity engine originally built for LIVING WORLD v0.5.
  *
@@ -33,7 +34,7 @@ function parseScenePackage(raw) {
   catch(e) { throw Error('Ошибка JSON пакета: '+e.message); }
   if(!result || typeof result !== 'object' || Array.isArray(result)) throw Error('Пакет должен быть JSON-объектом.');
   if(typeof result.scene !== 'string' || !result.scene.trim() || result.scene.length>150000) throw Error('Поле scene должно содержать текст сцены до 150000 символов.');
-  if(result.world_time !== undefined && (typeof result.world_time!=='string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?$/.test(result.world_time))) throw Error('Время должно иметь формат YYYY-MM-DDTHH:MM:SS.');
+  if(result.world_time !== undefined && !validStoryClock(result.world_time)) throw Error('Время должно иметь формат YYYY-MM, YYYY-MM-DD или точную дату со временем.');
   const c=result.changes;
   if(!c || typeof c !== 'object' || Array.isArray(c)) throw Error('Добавь объект changes для отслеживания последствий.');
   const changes={
@@ -304,7 +305,7 @@ const tools = [
   },['world_id','branch_id','expected_head','request_id','scene','world_time','changes']),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false} },
   { name:'save_scene_package', description:'Вызывай только по просьбе пользователя. Первый вызов без approval_code возвращает ссылку подтверждения. Покажи проверяемые текст сцены и последствия, затем ссылку пользователю и попроси открыть её, проверить пакет и вернуть полученный код. Второй вызов передаёт тот же пакет и approval_code. Не открывай ссылку и не подтверждай за пользователя. В демо результат не сохраняется.', inputSchema:object({
     world_id:uuid, branch_id:uuid, expected_head:{type:['string','null'],format:'uuid'}, request_id:uuid,
-    scene:{type:'string',maxLength:150000}, world_time:{type:'string',description:'Время мира YYYY-MM-DDTHH:MM:SS'}, changes,
+    scene:{type:'string',maxLength:150000}, world_time:{type:'string',description:'Фактическое время: YYYY-MM или YYYY-MM-DD или точный timestamp'}, changes,
     approval_code:{type:'string'}
   },['world_id','branch_id','expected_head','request_id','scene','world_time','changes']), annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false} }
 ];
@@ -427,9 +428,8 @@ async function call(name,args,env,identity) {
   const head=args.expected_head===null?null:checkId(args.expected_head);
   const packet=parseScenePackage(JSON.stringify({scene:args.scene,world_time:args.world_time,changes:args.changes}));
   if(!packet.world_time) throw new Error('Укажи время мира.');
-  const stamp=packet.world_time.length===16?packet.world_time+':00':packet.world_time;
-  const date=new Date(stamp+'Z');
-  if(!Number.isFinite(date.valueOf())||date.toISOString().slice(0,19)!==stamp) throw new Error('Некорректные дата или время мира.');
+  const stamp=packet.world_time;
+  if(!validStoryClock(stamp)) throw new Error('Некорректная игровая дата. Не придумывай неизвестный день.');
   const note=packSceneNote(packet.changes);
   if(!live&&(branchKey!==branchId||head!==headId)) throw new Error('Ветка или последняя сцена изменилась.');
   if(live&&!writesEnabled(env)) throw new Error('Запись в Supabase выключена.');
