@@ -37,6 +37,7 @@ test('real data calls are forbidden without a validated OAuth token',async()=>{
  const r=await call('tools/call',{name:'list_worlds',arguments:{}});
  assert.equal(r.status,401);
  assert.match(r.headers.get('www-authenticate'),/resource_metadata/);
+ assert.equal(r.headers.get('x-lw-auth-failure'),'missing_bearer');
  const invalid=await call('tools/call',{name:'list_worlds',arguments:{}},{authorization:'Bearer invalid'});
  assert.equal(invalid.status,401);
 });
@@ -51,4 +52,52 @@ test('resource metadata routes remain valid',async()=>{
   assert.equal(r.status,200);
   assert.equal((await r.json()).resource,root+'/mcp');
  }
+});
+
+function testJwt(aud,overrides={},headerOverrides={}) {
+ const now=Math.floor(Date.now()/1000);
+ const jwtHeader={alg:'HS256',typ:'JWT',...headerOverrides};
+ const claims={
+   iss:env.SUPABASE_URL+'/auth/v1',sub:env.BRIDGE_SUPABASE_USER_ID,
+   role:'authenticated',client_id:env.SUPABASE_OAUTH_CLIENT_ID,
+   aud,iat:now-60,exp:now+3600,...overrides
+ };
+ return [jwtHeader,claims,{test:true}].map(x=>Buffer.from(JSON.stringify(x)).toString('base64url')).join('.');
+}
+test('approved Supabase OAuth JWT with standard audience can reach a live read-only RPC',async()=>{
+ const original=globalThis.fetch;
+ globalThis.fetch=async url=>{
+   if(String(url).endsWith('/auth/v1/user'))return Response.json({id:env.BRIDGE_SUPABASE_USER_ID});
+   if(String(url).endsWith('/rest/v1/rpc/lw_bridge_v2_worlds'))return Response.json([]);
+   throw Error('Unexpected fetch in test');
+ };
+ try {
+   for(const aud of ['authenticated',['authenticated',root+'/mcp'],root+'/mcp']){
+     const token=testJwt(aud);
+     const response=await call('tools/call',{name:'list_worlds',arguments:{}},{authorization:'Bearer '+token});
+     assert.equal(response.status,200);
+     assert.deepEqual((await response.json()).result.structuredContent,{mode:'live',worlds:[],next_offset:null});
+   }
+ } finally {globalThis.fetch=original;}
+});
+test('tokens from a different OAuth client or audience are still denied',async()=>{
+ for(const token of [
+  testJwt('authenticated',{client_id:'different-oauth-client'}),
+  testJwt('https://other.example/mcp'),
+  testJwt('authenticated',{sub:'11111111-1111-4111-8111-111111111111'})
+ ]){
+  const r=await call('tools/call',{name:'list_worlds',arguments:{}},{authorization:'Bearer '+token});
+  assert.equal(r.status,401);
+  assert.match(r.headers.get('x-lw-auth-failure'),/mismatch/);
+ }
+});
+test('OAuth JWT typ at+jwt is understood, but still requires Supabase verification',async()=>{
+ const token=testJwt('authenticated',{}, {typ:'at+jwt'});
+ const original=globalThis.fetch;
+ globalThis.fetch=async()=>new Response(null,{status:401});
+ try{
+  const r=await call('tools/call',{name:'list_worlds',arguments:{}},{authorization:'Bearer '+token});
+  assert.equal(r.status,401);
+  assert.equal(r.headers.get('x-lw-auth-failure'),'supabase_auth_401');
+ } finally {globalThis.fetch=original;}
 });
