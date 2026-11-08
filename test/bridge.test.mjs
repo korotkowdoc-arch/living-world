@@ -34,7 +34,7 @@ test('initialize and tools/list work without a Bearer token',async()=>{
  assert.equal(r.status,200);
  const d=(await r.json()).result;
  assert.equal(d.resultType,'complete');
- assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_story_context','get_companion_state','get_branch_history']);
+ assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_story_context','get_reference_catalog','get_reference_document','get_scene_preflight','get_companion_state','get_branch_history']);
  assert.ok(d.tools.every(t=>t._meta.securitySchemes[0].type==='oauth2'));
 });
 test('real data calls are forbidden without a validated OAuth token',async()=>{
@@ -249,4 +249,38 @@ test('one-call autosave is forbidden unless owner opted in for this world',async
   assert.ok(lastBody.p_note.includes('GALLEON'));
   assert.equal(writeCount,1);
  } finally {globalThis.fetch=prev;}
+});
+
+test('source-document MCP retrieves full immutable revision in chunks and checks world rules before scene',async()=>{
+ const prev=globalThis.fetch;
+ const first={id:'10000000-0000-4000-8000-000000000091',world_id:worldId,doc_key:'rules',revision:1,category:'core_rules',title:'Правила мира',source_filename:'core.docx',sha256:'a'.repeat(64),content:'Гарри поступает в Хогвартс в восемнадцать лет. Правило о знаниях NPC.'};
+ const glossary={id:'10000000-0000-4000-8000-000000000092',world_id:worldId,doc_key:'glossary',revision:1,category:'glossary',title:'Росмэн',source_filename:'rosman.docx',sha256:'b'.repeat(64),content:'Severus Snape | Снегг'};
+ const branch={id:branchId,head_scene_id:null};
+ const state={world:{id:worldId,world_rules:'Магия',genesis_choices:{}},branch,characters:[],scenes:[],has_older_scenes:false};
+ globalThis.fetch=async (url)=>{
+  const u=String(url);
+  if(u.endsWith('/auth/v1/user'))return Response.json({id:env.BRIDGE_SUPABASE_USER_ID});
+  if(u.endsWith('/rest/v1/rpc/lw_bridge_v2_state'))return Response.json(state);
+  if(u.includes('/rest/v1/lw_scenes?'))return Response.json([]);
+  if(u.includes('/rest/v1/lw_reference_docs?')){
+   if(u.includes('doc_key=eq.rules'))return Response.json([first]);
+   return Response.json([first,glossary]);
+  }
+  throw Error('Unexpected '+u);
+ };
+ try{
+  const token={authorization:'Bearer '+testJwt('authenticated')};
+  const cat=await call('tools/call',{name:'get_reference_catalog',arguments:{world_id:worldId}},token);
+  const catalog=(await cat.json()).result.structuredContent;
+  assert.equal(catalog.installed,true);assert.equal(catalog.manifest.length,2);
+  const read=await call('tools/call',{name:'get_reference_document',arguments:{world_id:worldId,doc_key:'rules',revision:1,offset:0,limit:12}},token);
+  const doc=(await read.json()).result.structuredContent;
+  assert.equal(doc.content.length,12);assert.equal(doc.next_offset,12);assert.equal(doc.sha256,'a'.repeat(64));
+  const pre=await call('tools/call',{name:'get_scene_preflight',arguments:{world_id:worldId,scene_intent:'Гарри говорит со Снеггом',actor_names:['Гарри']}},token);
+  const result=(await pre.json()).result.structuredContent;
+  assert.equal(result.documents.installed,true);
+  assert.equal(result.documents.ready,true);
+  assert.match(result.documents.selected.map(x=>x.full_text||x.excerpts).join(' '),/восемнадцать/);
+  assert.equal(result.memory_coverage.complete,true);
+ }finally{globalThis.fetch=prev;}
 });
