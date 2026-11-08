@@ -84,3 +84,15 @@ No model can guarantee every psychological reaction is right. Strict factual led
 ## v1.2 first-step world setup and contextual delete
 
 The **New World** wizard offers copying a selected allowlist of source documents **before Genesis or life simulation**. Old played history, money, character sheets and checkpoints are never copied automatically. On the **Миры** page, a normal tap/click opens the world; long-press on mobile or right-click on desktop opens its contextual menu. **Удалить → Да** deletes only the chosen owner's world and cascades through its history and documents; **Нет** cancels. No typing the world name or permanently visible delete button. The actions remain protected by Supabase owner RLS.
+
+## v1.3 reliable scene receipts and complete backups
+
+ChatGPT stories are saved through the owner-authenticated Cloudflare OAuth MCP connector after its tool list is refreshed. The live server exposes an opt-in \`save_scene_auto\` and \`get_scene_receipt\` to verify exact writes. The scene \`request_id\` maps to the immutable DB scene primary key. Retrying the **same** ID + text + time + source changes returns \`already_saved:true\` and never charges resources twice; reusing an ID with a different payload is rejected. Network errors after a commit trigger receipt reconciliation. Never switch a new ID after an uncertain outcome.
+
+The companion Assets screen displays active branch head, last saved scene and whether its structured consequences can be read. Reloading Assets re-reads Supabase before replaying resources.
+
+Full backups use \`living-world-cloud-v1.0\` (legacy v0.3 still imports). They contain every branch, scene, character and all revisions of source documents; a SHA-256 integrity seal verifies the whole archive. A failed restore deletes only its incomplete copy, **not** the original world; a completed restore survives dashboard/UI refresh errors. Imported copies reset automatic-write permissions.
+
+The source-document library is already installed, but the current ChatGPT OAuth connector's cached schema may still expose **read-only** actions. Updating the Worker is not enough to grant this chat write tools. Refresh/reconnect that connector and confirm \`save_scene_auto\` is discoverable before claiming automated writing works. The legacy developer bridge is demo-only and must never be used as a substitute for live saves.
+
+Remaining blockers: one real persisted scene from the refreshed OAuth client, semantic review of literary scenes, durable checkpoints beyond 200 narrative scenes and full reversible revision deltas for «На это:».
