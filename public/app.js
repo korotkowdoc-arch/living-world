@@ -1,10 +1,11 @@
 import {escapeHTML as esc, cleanText, parseGenesis, genesisPrompt, scenePrompt, revisionPrompt, demoGenesis, demoScene, CHARACTER_FIELDS, QUICK_GENESIS_STEPS, quickGenesisPrompt} from './logic.mjs';
 import {parseScenePackage,packSceneNote,readSceneNote,makeContinuity,compactMemory,scenePackagePrompt,validStoryClock,isNondecreasingStoryTime} from './continuity.mjs';
 import {simulationPrompt,SIMULATION_SPANS} from './simulation.mjs';
+import {aiStatus,aiGenerate} from './ai-client.mjs';
 
 const app=document.getElementById('app');
 const cfgKey='lw_cloud_config_v03'; // Preserve the existing Supabase connection when upgrading.
-const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[]};
+const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[],aiReady:false,aiReason:'Подключение ещё не проверено'};
 const x=v=>esc(v??'');
 // Historical start and current narrative period are separate; don't fabricate a date.
 const storyClock=(w=state.world)=>state.scenes.at(-1)?.world_time||w?.genesis_choices?.current_period||(w?.genesis_approved?'':w?.clock_start)||'';
@@ -93,7 +94,24 @@ function renderModal(){const m=state.modal;if(!m)return '';let body='';if(m.type
 if(m.type==='revision'){const s=m.scene;body=`<p class="sub">Поставь курсор в текст после последней фразы, которую нужно сохранить, и нажми «Зафиксировать точку». Всё далее аннулируется в новой ветке.</p><div class="field" style="margin:14px 0"><label>Текст исходной сцены</label><textarea id="revision-source" style="min-height:185px">${x(s.body)}</textarea></div><div class="row">${btn('revision-mark','Зафиксировать точку','gold')}${btn('revision-copy','Скопировать запрос «На это»')}</div><p class="tiny" id="revision-anchor-status">Сохранено символов: ${state.revision?.prefix?.length??0}</p><div class="field"><label>Твоя режиссёрская правка</label><textarea id="revision-note" placeholder="На это: герой не отступает, потому что...">${x(state.revision?.note||'')}</textarea></div><div class="field"><label>Новое продолжение ПОСЛЕ точки вмешательства</label><textarea id="revision-continuation" style="min-height:165px" placeholder="Вставь текст из ChatGPT или напиши продолжение сам."></textarea></div>${btn('revision-commit','Создать новую ветку','gold full')}<p class="footnote">Новая ветка будет содержать старый префикс + новое продолжение. Прежняя версия не удаляется из архива.</p>`;}
 if(m.type==='import'){body=`<p class="sub">Выбери JSON-файл экспорта LIVING WORLD. Он будет восстановлен как новая копия мира.</p><div class="field" style="margin:15px 0"><label>Файл резервной копии</label><input type="file" id="backup-file" accept="application/json,.json"></div>${btn('import-file','Восстановить мир из файла','gold full')}`;}
 return `<div class="modalwrap"><div class="modal"><div class="modal-head"><h2>${x(m.type==='character'?'Редактор персонажа':m.type==='revision'?'Режиссёрская правка':'Импорт мира')}</h2><button class="btn small" data-action="close-modal" aria-label="Закрыть">✕</button></div>${body}</div></div>`;}
-async function connect(){if(!state.config)return;const {url,key}=state.config;if(!/^https:\/\/[a-z0-9.-]+\.supabase\.co\/?$/i.test(url)||!key)throw Error('Некорректный Project URL или ключ Supabase.');const sdk=await import('https://esm.sh/@supabase/supabase-js@2');state.client=sdk.createClient(url,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});const result=await state.client.auth.getSession();if(result.error)throw result.error;state.session=result.data.session;state.user=state.session?.user||null;state.client.auth.onAuthStateChange((_event,session)=>{const old=state.user?.id;state.session=session;state.user=session?.user||null;if(state.user&&!old){loadWorlds().then(render).catch(e=>notify(errtext(e),true));}else if(!state.user){state.world=null;state.worlds=[];render();}});if(state.user)await loadWorlds();}
+async function checkAiConnection(){
+ const status=await aiStatus();
+ state.aiReady=status.enabled;
+ state.aiReason=status.reason||'';
+ return status;
+}
+async function runAI(payload){
+ if(!state.aiReady)throw Error(state.aiReason||'Автоматический ИИ ещё не подключён.');
+ const session=dataOrThrow(await state.client.auth.getSession());
+ if(!session.session)throw Error('Войди заново в LIVING WORLD.');
+ document.body.classList.add('ai-running');
+ try{return await aiGenerate(session.session,payload);}
+ finally{document.body.classList.remove('ai-running');}
+}
+function aiButton(id,title){
+ return `<button type="button" class="btn gold" data-action="${id}" ${state.aiReady?'':'disabled title="'+x(state.aiReason)+'"'}>${title}</button>`;
+}
+async function connect(){if(!state.config)return;const {url,key}=state.config;if(!/^https:\/\/[a-z0-9.-]+\.supabase\.co\/?$/i.test(url)||!key)throw Error('Некорректный Project URL или ключ Supabase.');const sdk=await import('https://esm.sh/@supabase/supabase-js@2');state.client=sdk.createClient(url,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});const result=await state.client.auth.getSession();if(result.error)throw result.error;state.session=result.data.session;state.user=state.session?.user||null;state.client.auth.onAuthStateChange((_event,session)=>{const old=state.user?.id;state.session=session;state.user=session?.user||null;if(state.user&&!old){loadWorlds().then(render).catch(e=>notify(errtext(e),true));}else if(!state.user){state.world=null;state.worlds=[];render();}});if(state.user)await loadWorlds();await checkAiConnection();}
 async function loadWorlds(){state.worlds=dataOrThrow(await state.client.from('lw_worlds').select('*').order('updated_at',{ascending:false}));}
 async function openWorld(id){state.world=dataOrThrow(await state.client.from('lw_worlds').select('*').eq('id',id).single());const savedAnswers=state.world.genesis_choices?.quick_answers;state.quickAnswers=Array.isArray(savedAnswers)?savedAnswers.slice(0,QUICK_GENESIS_STEPS.length):[];state.quickStep=state.quickAnswers.length===QUICK_GENESIS_STEPS.length?QUICK_GENESIS_STEPS.length:0;state.storyMode=localStorage.getItem('lw_story_mode_'+id)==='relationship'?'relationship':'story';state.sceneLength=['normal','large','detailed'].includes(localStorage.getItem('lw_scene_length_'+id))?localStorage.getItem('lw_scene_length_'+id):'large';const [chars,branches]=await Promise.all([state.client.from('lw_characters').select('*').eq('world_id',id).order('created_at'),state.client.from('lw_branches').select('*').eq('world_id',id).order('created_at')]);state.characters=dataOrThrow(chars);state.branches=dataOrThrow(branches);if(!state.world.active_branch_id && state.branches[0]){state.world.active_branch_id=state.branches[0].id;dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:state.world.active_branch_id}).eq('id',id));}await loadScenes();}
 async function loadScenes(){if(!state.world?.active_branch_id){state.scenes=[];state.memoryScenes=[];return;}const id=state.world.active_branch_id;const [visible,memory]=await Promise.all([state.client.rpc('lw_recent_scenes',{p_branch_id:id,p_limit:state.recentLimit}),state.client.rpc('lw_recent_scenes',{p_branch_id:id,p_limit:200})]);state.scenes=dataOrThrow(visible);state.memoryScenes=dataOrThrow(memory);}
