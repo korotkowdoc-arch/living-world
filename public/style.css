@@ -84,6 +84,20 @@ body.ai-running::after{content:"ИИ создаёт сцену и фиксиру
 .world-card-footer .hint{flex:1;min-width:145px;font-size:12px;line-height:1.4}
 .world-delete-btn{font-size:12px;min-height:36px;border-color:#b66868;color:#ffc0c0;white-space:nowrap}
 .world-delete-btn:hover{border-color:#ff8b8b;background:#3d1f27;color:#fff}
+/* World-creation document source choices: real accessible controls, no overlapping targets */
+.world-setup-doc-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:12px 0}
+.world-setup-doc-choice{display:flex;flex-direction:column;align-items:flex-start;gap:9px;min-width:0;min-height:102px;padding:18px;text-align:left;border:1px solid #536179;border-radius:14px;background:#182839;color:var(--text);cursor:pointer;touch-action:manipulation;transition:background .15s,border-color .15s}
+.world-setup-doc-choice strong{font-size:15px;line-height:1.4}
+.world-setup-doc-choice small{font-size:12px;line-height:1.45;color:var(--muted)}
+.world-setup-doc-choice.active,.world-setup-doc-choice[aria-expanded="true"]{border-color:var(--gold);background:#283343}
+.world-setup-doc-choice:hover,.world-setup-doc-choice:focus-visible{border-color:var(--gold);outline:2px solid transparent}
+.world-setup-doc-choice:focus-visible{outline-color:var(--gold);outline-offset:2px}
+.world-setup-doc-panel{border:1px solid var(--line);border-radius:14px;background:var(--panel2);padding:16px;margin:7px 0 12px;display:grid;gap:12px;min-width:0}
+.world-setup-doc-panel[hidden]{display:none!important}
+.world-setup-doc-panel .field{min-width:0}
+.world-setup-doc-panel input[type="file"]{display:block;width:100%;min-width:0;max-width:100%;font-size:14px;overflow-wrap:anywhere}
+#world-setup-upload-summary{overflow-wrap:anywhere;white-space:normal}
+@media(max-width:650px){.world-setup-doc-choices{grid-template-columns:1fr}.world-setup-doc-choice{min-height:80px;padding:14px 16px}.world-setup-doc-panel{padding:12px}}
 .world-source-categories{border:1px solid var(--line);border-radius:14px;background:var(--panel2);padding:15px;display:grid;gap:8px}
 .world-source-categories[hidden]{display:none!important}
 .world-source-check{display:flex;align-items:flex-start;gap:11px;border-radius:8px;padding:8px 10px;cursor:pointer}
