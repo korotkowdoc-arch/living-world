@@ -178,6 +178,8 @@ function decodeClaims(token) {
     return claims;
   } catch {throw Error('Неверный токен доступа.');}
 }
+// Workers only supports 'follow' and 'manual' redirects; using 'error' causes
+// a synchronous TypeError before any network request. Manual + !res.ok rejects 3xx.
 // Supabase Auth verifies the JWT signature and session for both legacy HS256 and
 // asymmetric keys. Decoded claims are NEVER trusted without this Auth response.
 async function verifyBearer(request,env,{mcp=true}={}) {
@@ -202,7 +204,7 @@ async function verifyBearer(request,env,{mcp=true}={}) {
   const authStartedAt=Date.now();
   try {res=await fetch(supabaseBase(env)+'/auth/v1/user',{
     headers:{apikey:env.SUPABASE_PUBLISHABLE_KEY,authorization:'Bearer '+token},
-    redirect:'error',signal:AbortSignal.timeout(10000)});}
+    redirect:'manual',signal:AbortSignal.timeout(10000)});}
   catch(error) {
     // Do not log error.message: platform errors may contain URLs or credentials.
     // Only log a fixed category, allowlisted transport code, and elapsed time.
@@ -227,7 +229,7 @@ async function verifyBearer(request,env,{mcp=true}={}) {
 async function supabase(env,path,{token,body}={}) {
   const res=await fetch(supabaseBase(env)+path,{method:body===undefined?'GET':'POST',
     headers:{apikey:env.SUPABASE_PUBLISHABLE_KEY,authorization:'Bearer '+token,...(body===undefined?{}:{'content-type':'application/json'})},
-    body:body===undefined?undefined:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(10000)});
+    body:body===undefined?undefined:JSON.stringify(body),redirect:'manual',signal:AbortSignal.timeout(10000)});
   const data=await res.json().catch(()=>null);
   if(!res.ok) {
     if(data?.code==='LW409') throw Error('Ветка или последняя сцена изменились.');
@@ -468,7 +470,7 @@ export default {async fetch(request,env={}){
       world_time:time,prompt_note:packSceneNote({facts:['Координаты маяка расшифрованы.']})}));
   }
   if(request.method==='GET' && path==='/health') return json({
-    service:'living-world-bridge',version:'2.2.3',
+    service:'living-world-bridge',version:'2.2.4',
     mode:env.BRIDGE_MODE==='live'?'live':'not-live',
     missing_configuration:['BRIDGE_PUBLIC_URL','SUPABASE_URL','SUPABASE_OAUTH_CLIENT_ID','BRIDGE_SUPABASE_USER_ID','SUPABASE_PUBLISHABLE_KEY','BRIDGE_SEAL_KEY'].filter(name=>!env[name]),
     writes_enabled:env.BRIDGE_WRITES_ENABLED==='true'
