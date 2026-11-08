@@ -34,7 +34,7 @@ test('initialize and tools/list work without a Bearer token',async()=>{
  assert.equal(r.status,200);
  const d=(await r.json()).result;
  assert.equal(d.resultType,'complete');
- assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_story_context','get_character_memory','save_reference_document','get_reference_catalog','get_reference_document','get_scene_preflight','get_companion_state','get_branch_history']);
+ assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_story_context','save_reference_document','get_character_memory','get_reference_catalog','get_reference_document','get_scene_preflight','get_companion_state','get_branch_history']);
  assert.ok(d.tools.every(t=>t._meta.securitySchemes[0].type==='oauth2'));
 });
 test('real data calls are forbidden without a validated OAuth token',async()=>{
