@@ -1,4 +1,7 @@
-/** LIVING WORLD v0.5: structured continuity records attached to active scene ancestry.
+/** LIVING WORLD Bridge v8 — Git-connected production deployment 2026-11-08.
+ * Continuity engine originally built for LIVING WORLD v0.5.
+ *
+ * LIVING WORLD v0.5: structured continuity records attached to active scene ancestry.
  * No server migration: scene.prompt_note carries the optional LWSTATE1 record.
  */
 const NOTE_PREFIX = 'LWSTATE1:';
