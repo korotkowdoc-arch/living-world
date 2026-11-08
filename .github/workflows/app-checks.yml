@@ -1,0 +1,27 @@
+name: LIVING WORLD app checks
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'public/**'
+      - 'test/**'
+      - 'package.json'
+      - '.github/workflows/app-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify JavaScript syntax
+        run: npm run check
+      - name: Run offline application regression tests
+        run: npm test
