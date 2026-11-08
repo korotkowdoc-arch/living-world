@@ -17,7 +17,7 @@ function dbClient(worlds,events=[]){
    eq(field,value){filters[field]=value;return builder;},
    async single(){
     const row=worlds.find(w=>w.id===filters.id&&w.owner_id===filters.owner_id);
-    if(!row)return {data:null,error:{message:'No rows for authenticated owner'}};
+    if(!row)return {data:null,error:new Error('No rows for authenticated owner')};
     if(mode==='update'){
      Object.assign(row,structuredClone(changes));
      events.push({kind:'update',id:row.id,fields:Object.keys(changes)});
