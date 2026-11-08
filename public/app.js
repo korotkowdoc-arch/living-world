@@ -138,9 +138,9 @@ async function loadAssets(){
  for(let offset=0;offset<=3000;offset+=500){
   const res=state.client.from('lw_scenes').select('id,parent_scene_id,world_time,prompt_note').eq('world_id',w.id).order('created_at',{ascending:true}).range(offset,offset+499);
   const page=dataOrThrow(await res);
-  if(offset===3000||all.length+page.length>3000)throw Error('Не удалось пересчитать активы: больше 3000 сцен. Требуется долговременный checkpoint.');
+  if((offset===3000 && page.length>0)||all.length+page.length>3000)throw Error('Не удалось пересчитать активы: больше 3000 сцен. Требуется долговременный checkpoint.');
   all.push(...page);
-  if(page.length<500)break;
+  if(page.length<500||offset===3000)break;
  }
  const lineage=activeLineage(all,branch.head_scene_id);
  state.assets=projectCompanion(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{},strict:false});
