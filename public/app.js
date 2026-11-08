@@ -13,7 +13,7 @@ import {projectCharacterMemory} from './world-character-memory.mjs';
 
 const app=document.getElementById('app');
 const cfgKey='lw_cloud_config_v03'; // Preserve the existing Supabase connection when upgrading.
-const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[],aiReady:false,aiReason:'Подключение ещё не проверено',assets:null,assetIssue:null,documents:[],documentsReady:null,documentsError:'',docSelected:null,docContent:null,characterLedger:null,causalLedger:null,memoryQuery:'',memoryKind:'fact',memoryOffset:0,worldContext:null,suppressWorldClickUntil:0,saveDiagnostic:null,autoSavePendingWorldId:null,autoSaveErrors:{}};
+const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[],aiReady:false,aiReason:'Подключение ещё не проверено',assets:null,assetIssue:null,documents:[],documentsReady:null,documentsError:'',docSelected:null,docContent:null,characterLedger:null,causalLedger:null,memoryQuery:'',memoryKind:'fact',memoryOffset:0,worldContext:null,suppressWorldClickUntil:0,saveDiagnostic:null,autoSavePendingWorldId:null,autoSaveErrors:{},busyLabel:'',pendingView:null,lastSceneRefreshAt:null};
 const x=v=>esc(v??'');
 // Historical start and current narrative period are separate; don't fabricate a date.
 const storyClock=(w=state.world)=>state.scenes.at(-1)?.world_time||w?.genesis_choices?.current_period||(w?.genesis_approved?'':w?.clock_start)||'';
@@ -31,7 +31,29 @@ function errtext(e){
  if(/too many requests|rate limit/i.test(m))return 'Слишком много попыток входа. Не повторяй их подряд.';
  return m;
 }
-async function withBusy(fn){if(state.busy)return;state.busy=true;try{await fn();}catch(e){console.error(e);notify(errtext(e),true);}finally{state.busy=false;}}
+function showActivity(message=''){
+ const el=document.getElementById('activity');
+ if(!el)return;
+ el.hidden=!message;
+ el.textContent=message;
+}
+async function withBusy(fn,label='Загрузка данных',pendingView=null){
+ if(state.busy){
+  if(pendingView){
+   state.pendingView=pendingView;
+   notify('Раздел откроется после завершения «'+(state.busyLabel||'текущей операции')+'».');
+  }else notify('Сейчас выполняется «'+(state.busyLabel||'другая операция')+'». Повтори действие после завершения.',true);
+  return;
+ }
+ state.busy=true;state.busyLabel=label;showActivity('Выполняется: '+label+'…');
+ try{await fn();}
+ catch(e){console.error(e);notify(errtext(e),true);}
+ finally{
+  state.busy=false;state.busyLabel='';showActivity();
+  const next=state.pendingView;state.pendingView=null;
+  if(next)await withBusy(()=>openSection(next),'Открытие раздела '+next);
+ }
+}
 function dataOrThrow(result){if(result.error)throw result.error;return result.data;}
 async function clipboard(s){try{await navigator.clipboard.writeText(s);notify('Скопировано. Можно вставить в ChatGPT.');}catch{const box=document.createElement('textarea');box.value=s;document.body.append(box);box.select();document.execCommand('copy');box.remove();notify('Запрос скопирован.');}}
 function render(){if(!state.config){renderSetup();return;}if(!state.session){renderLogin();return;}renderApp();}
@@ -323,10 +345,33 @@ function aiButton(id,title){
 }
 async function connect(){if(!state.config)return;const {url,key}=state.config;if(!/^https:\/\/[a-z0-9.-]+\.supabase\.co\/?$/i.test(url)||!key)throw Error('Некорректный Project URL или ключ Supabase.');const sdk=await import('https://esm.sh/@supabase/supabase-js@2');state.client=sdk.createClient(url,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});const result=await state.client.auth.getSession();if(result.error)throw result.error;state.session=result.data.session;state.user=state.session?.user||null;state.client.auth.onAuthStateChange((_event,session)=>{const old=state.user?.id;state.session=session;state.user=session?.user||null;if(state.user&&!old){loadWorlds().then(render).catch(e=>notify(errtext(e),true));}else if(!state.user){state.world=null;state.worlds=[];render();}});if(state.user)await loadWorlds();await checkAiConnection();}
 async function loadWorlds(){state.worlds=dataOrThrow(await state.client.from('lw_worlds').select('*').order('updated_at',{ascending:false}));}
-async function openWorld(id){state.assets=null;state.assetIssue=null;state.documents=[];state.documentsReady=null;state.documentsError='';state.docSelected=null;state.docContent=null;state.characterLedger=null;state.causalLedger=null;state.memoryQuery='';state.memoryKind='fact';state.memoryOffset=0;state.world=dataOrThrow(await state.client.from('lw_worlds').select('*').eq('id',id).single());const savedAnswers=state.world.genesis_choices?.quick_answers;state.quickAnswers=Array.isArray(savedAnswers)?savedAnswers.slice(0,QUICK_GENESIS_STEPS.length):[];state.quickStep=state.quickAnswers.length===QUICK_GENESIS_STEPS.length?QUICK_GENESIS_STEPS.length:0;state.storyMode=localStorage.getItem('lw_story_mode_'+id)==='relationship'?'relationship':'story';state.sceneLength=['normal','large','detailed'].includes(localStorage.getItem('lw_scene_length_'+id))?localStorage.getItem('lw_scene_length_'+id):'large';const [chars,branches]=await Promise.all([state.client.from('lw_characters').select('*').eq('world_id',id).order('created_at'),state.client.from('lw_branches').select('*').eq('world_id',id).order('created_at')]);state.characters=dataOrThrow(chars);state.branches=dataOrThrow(branches);if(!state.world.active_branch_id && state.branches[0]){state.world.active_branch_id=state.branches[0].id;dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:state.world.active_branch_id}).eq('id',id));}await loadScenes();await loadDocuments();}
-async function loadScenes(){if(!state.world?.active_branch_id){state.scenes=[];state.memoryScenes=[];return;}const id=state.world.active_branch_id;const [visible,memory]=await Promise.all([state.client.rpc('lw_recent_scenes',{p_branch_id:id,p_limit:state.recentLimit}),state.client.rpc('lw_recent_scenes',{p_branch_id:id,p_limit:200})]);state.scenes=dataOrThrow(visible);state.memoryScenes=dataOrThrow(memory);}
+async function openWorld(id){state.assets=null;state.assetIssue=null;state.lastSceneRefreshAt=null;state.documents=[];state.documentsReady=null;state.documentsError='';state.docSelected=null;state.docContent=null;state.characterLedger=null;state.causalLedger=null;state.memoryQuery='';state.memoryKind='fact';state.memoryOffset=0;state.world=dataOrThrow(await state.client.from('lw_worlds').select('*').eq('id',id).single());const savedAnswers=state.world.genesis_choices?.quick_answers;state.quickAnswers=Array.isArray(savedAnswers)?savedAnswers.slice(0,QUICK_GENESIS_STEPS.length):[];state.quickStep=state.quickAnswers.length===QUICK_GENESIS_STEPS.length?QUICK_GENESIS_STEPS.length:0;state.storyMode=localStorage.getItem('lw_story_mode_'+id)==='relationship'?'relationship':'story';state.sceneLength=['normal','large','detailed'].includes(localStorage.getItem('lw_scene_length_'+id))?localStorage.getItem('lw_scene_length_'+id):'large';const [chars,branches]=await Promise.all([state.client.from('lw_characters').select('*').eq('world_id',id).order('created_at'),state.client.from('lw_branches').select('*').eq('world_id',id).order('created_at')]);state.characters=dataOrThrow(chars);state.branches=dataOrThrow(branches);if(!state.world.active_branch_id && state.branches[0]){state.world.active_branch_id=state.branches[0].id;dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:state.world.active_branch_id}).eq('id',id));}await loadScenes();await loadDocuments();}
+async function refreshWorldAndBranch(){
+ const w=state.world;
+ if(!w)return;
+ const [worldResult,branchResult]=await Promise.all([
+  state.client.from('lw_worlds').select('*').eq('id',w.id).single(),
+  state.client.from('lw_branches').select('*').eq('world_id',w.id).order('created_at')
+ ]);
+ const currentWorld=dataOrThrow(worldResult),currentBranches=dataOrThrow(branchResult);
+ if(state.world?.id!==w.id)throw Error('Мир сменился во время обновления. Повтори действие в выбранном мире.');
+ if(currentWorld.active_branch_id&&!currentBranches.some(b=>b.id===currentWorld.active_branch_id))
+  throw Error('Supabase не вернул действующую ветку. История не изменена.');
+ state.world=currentWorld;state.branches=currentBranches;
+}
+async function loadScenes(){
+ if(!state.world?.active_branch_id){state.scenes=[];state.memoryScenes=[];return;}
+ await refreshWorldAndBranch();
+ const id=state.world.active_branch_id;
+ const [visible,memory]=await Promise.all([
+  state.client.rpc('lw_recent_scenes',{p_branch_id:id,p_limit:state.recentLimit}),
+  state.client.rpc('lw_recent_scenes',{p_branch_id:id,p_limit:200})
+ ]);
+ state.scenes=dataOrThrow(visible);state.memoryScenes=dataOrThrow(memory);
+}
 
-async function loadAssets(){
+async function loadAssets(refreshHead=true){
+ if(refreshHead)await refreshWorldAndBranch();
  const w=state.world;
  if(!w){state.assets=null;return;}
  const branch=state.branches.find(b=>b.id===w.active_branch_id);
@@ -346,6 +391,33 @@ async function loadAssets(){
  state.assetIssue=null;
 }
 
+const SECTION_NAMES=new Set(['library','builder','genesis','story','memory','assets','documents','people','history','settings']);
+async function openSection(view){
+ if(!SECTION_NAMES.has(view))throw Error('Неизвестный раздел приложения.');
+ const previous=state.view;
+ if(view==='library')await loadWorlds();
+ if(view==='story')state.recentLimit=40;
+ if(['story','memory','assets','people','history'].includes(view))await loadScenes();
+ if(['memory','assets','people','history'].includes(view))await loadAssets(false);
+ if(view==='documents')await loadDocuments();
+ state.worldContext=null;state.view=view;render();
+ if(previous!==view&&typeof window.scrollTo==='function')window.scrollTo(0,0);
+}
+async function reloadSceneData(){
+ if(!state.world)throw Error('Сначала выбери мир.');
+ await loadScenes();
+ await loadAssets(false);
+ state.lastSceneRefreshAt=new Date().toISOString();
+ render();
+ const branch=state.branches.find(b=>b.id===state.world.active_branch_id);
+ const last=state.memoryScenes.at(-1);
+ if(branch?.head_scene_id&&branch.head_scene_id!==last?.id){
+  notify('Ветка обновилась, но последняя сцена не совпадает. Проверь историю перед продолжением.',true);
+  return;
+ }
+ notify('Supabase перечитан: '+(state.assets?.scanned_scenes??0)+' сцен, '+(state.assets?.items?.length??0)+
+  ' предметов, '+(state.assets?.new_characters?.length??0)+' новых персонажей.');
+}
 let mammothLoader=null;
 async function loadDocuments(){
  if(!state.world){state.documents=[];state.documentsReady=null;return;}
