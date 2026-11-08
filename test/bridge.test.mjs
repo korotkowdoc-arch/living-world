@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import bridge from '../bridge/index.js';
+import {packSceneNote} from '../public/continuity.mjs';
 
 const root='https://living-world-bridge-mcp.korotkowdoc.workers.dev';
 const env={
@@ -31,7 +32,7 @@ test('initialize and tools/list work without a Bearer token',async()=>{
  assert.equal(r.status,200);
  const d=(await r.json()).result;
  assert.equal(d.resultType,'complete');
- assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_branch_history']);
+ assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_companion_state','get_branch_history']);
  assert.ok(d.tools.every(t=>t._meta.securitySchemes[0].type==='oauth2'));
 });
 test('real data calls are forbidden without a validated OAuth token',async()=>{
@@ -169,4 +170,40 @@ test('owner-authorized bridge write tool is listed only when enabled',async()=>{
  assert.equal((await health.json()).writes_enabled,true);
  const turnedOff=await bridge.fetch(new Request(root+'/health'),env);
  assert.equal((await turnedOff.json()).writes_enabled,false);
+});
+
+test('companion MCP excludes invalidated branch purchases and reads precise ledger',async()=>{
+ const original=globalThis.fetch;
+ const sceneA={id:'10000000-0000-4000-8000-000000000001',parent_scene_id:null,world_time:'1998-09',prompt_note:packSceneNote({
+  facts:[],open_threads:[],resolved_threads:[],offscreen_events:[],characters:[],
+  economy:[{id:'initial',action:'opening',account:'Гарри',currency:'GALLEON',scale:0,amount:500,reason:'Наследство',source:'Банковская запись'}],
+  items:[{id:'cloak',action:'acquire',item_id:'cloak01',label:'Мантия-невидимка',owner:'Гарри',reason:'Получил',source:'Сцена'}],new_characters:[]
+ })};
+ const sceneB={id:'10000000-0000-4000-8000-000000000002',parent_scene_id:sceneA.id,world_time:'1998-10',prompt_note:packSceneNote({
+  facts:[],open_threads:[],resolved_threads:[],offscreen_events:[],characters:[],
+  economy:[{id:'spent',action:'debit',account:'Гарри',currency:'GALLEON',scale:0,amount:90,reason:'Покупка',source:'Сцена'}],
+  items:[{id:'gift',action:'gift',item_id:'cloak01',owner:'Гарри',recipient:'Лия',reason:'Подарил',source:'Сцена'}],new_characters:[]
+ })};
+ const other={id:'10000000-0000-4000-8000-000000000003',parent_scene_id:sceneA.id,world_time:'1998-10',prompt_note:packSceneNote({
+  facts:[],open_threads:[],resolved_threads:[],offscreen_events:[],characters:[],
+  economy:[{id:'different',action:'debit',account:'Гарри',currency:'GALLEON',scale:0,amount:400,reason:'Другая ветка',source:'Сцена'}],items:[],new_characters:[]
+ })};
+ const state={world:{id:worldId},branch:{id:branchId,head_scene_id:sceneB.id},characters:[],scenes:[]};
+ globalThis.fetch=async url=>{
+  const u=String(url);
+  if(u.endsWith('/auth/v1/user'))return Response.json({id:env.BRIDGE_SUPABASE_USER_ID});
+  if(u.endsWith('/rest/v1/rpc/lw_bridge_v2_state'))return Response.json(state);
+  if(u.includes('/rest/v1/lw_scenes?'))return Response.json([sceneA,sceneB,other]);
+  throw Error('Unexpected fetch '+u);
+ };
+ try{
+  const res=await call('tools/call',{name:'get_companion_state',arguments:{world_id:worldId}},{authorization:'Bearer '+testJwt('authenticated')});
+  assert.equal(res.status,200);
+  const d=(await res.json()).result.structuredContent;
+  assert.equal(d.complete,true);
+  assert.equal(d.accounts.find(a=>a.person==='Гарри').balance,410);
+  assert.equal(d.items.find(i=>i.id==='cloak01').owner,'Лия');
+  assert.equal(d.scanned_scenes,2);
+  assert.equal(d.audit.some(a=>a.reason==='Другая ветка'),false);
+ }finally{globalThis.fetch=original;}
 });
