@@ -92,3 +92,12 @@ body.ai-running::after{content:"ИИ создаёт сцену и фиксиру
 .world-source-check span{line-height:1.4}
 .world-source-categories .hint{margin-top:7px}
 @media(max-width:530px){.world-card-footer{align-items:flex-start}.world-card-footer .world-delete-btn{width:100%}.world-source-categories{padding:12px}}
+
+/* v1.2 context actions on world cards */
+.world-library-card .world-card{touch-action:pan-y;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.world-card-hint{font-size:12px;line-height:1.4;color:var(--muted);margin-top:16px;opacity:.8}
+.world-context-backdrop{position:fixed;inset:0;z-index:70;background:transparent}
+.world-context-menu{position:fixed;z-index:71;width:220px;max-width:calc(100vw - 16px);background:#1b2a3a;border:1px solid #526074;border-radius:13px;box-shadow:0 16px 50px #0009;padding:8px;overflow:hidden}
+.world-context-label{color:var(--muted);font-size:12px;padding:8px 11px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.world-context-menu button{display:block;width:100%;min-height:44px;padding:11px 12px;border:0;border-radius:8px;background:transparent;color:#ffc2c2;font-size:15px;font-weight:700;text-align:left}
+.world-context-menu button:hover,.world-context-menu button:focus-visible{background:#49303a;outline:none}
