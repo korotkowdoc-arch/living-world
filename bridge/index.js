@@ -5,6 +5,7 @@ import {projectCharacterMemory,actorMemory} from '../public/world-character-memo
 import {savedSceneStatus} from '../public/save-receipt.mjs';
 import {projectCausalMemory,causalSummary,searchCausalMemory} from '../public/world-causality.mjs';
 import {validStoryClock,isNondecreasingStoryTime} from '../public/continuity.mjs';
+import {isYearArchiveActive} from '../public/year-archive.mjs';
 /** LIVING WORLD Bridge v8 — Git-connected production deployment 2026-11-08.
  * Continuity engine originally built for LIVING WORLD v0.5.
  *
@@ -420,9 +421,12 @@ async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,ass
  const docStore=await sourceDocList(env,identity,id,{full:true});
  if(!docStore.installed)return {installed:false,ready:false,reason:docStore.message,
   required_action:'Установить supabase/reference_docs.sql и загрузить оригинальные проектные документы в разделе «Документы».',manifest:[],selected:[]};
- const ref=buildSourcePreflight(docStore.docs,{intent,actors,maxExcerptChars:34000});
+ const activeDocs=docStore.docs.filter(doc=>isYearArchiveActive(doc,assets?.valid_scene_ids));
+ const excludedYearArchives=docStore.docs.length-activeDocs.length;
+ const ref=buildSourcePreflight(activeDocs,{intent,actors,maxExcerptChars:34000});
  const kinds=new Set(ref.manifest.map(d=>d.category));
  const findings=[];
+ if(excludedYearArchives)findings.push({severity:'info',code:'INVALIDATED_YEAR_ARCHIVES_EXCLUDED',message:'Неактуальные Year Documents из отменённых веток исключены: '+excludedYearArchives});
  if(!kinds.has('core_rules'))findings.push({severity:'warning',code:'NO_CORE_RULES',message:'Нет основного документа правил. Краткое поле world_rules не заменяет полный источник.'});
  if(!kinds.has('glossary'))findings.push({severity:'info',code:'NO_GLOSSARY',message:'Глоссарий не загружен. Термины будут менее стабильны.'});
  if(base?.memory_coverage?.complete===false){
@@ -469,6 +473,7 @@ async function companionState(env,identity,id){
  const people=projectCharacterMemory(data.characters||[],lineage,{getDelta});
  const causal=projectCausalMemory(lineage,{getDelta});
  return {mode:'live',world_id:id,branch_id:branch.id,head_scene_id:branch.head_scene_id,
+  valid_scene_ids:lineage.map(s=>s.id),
   complete:true,accounts:projection.accounts,items:projection.items,new_characters:projection.new_characters,
   audit:projection.audit.slice(-250),total_transactions:projection.audit.length,
   issues:projection.issues,scanned_scenes:projection.scanned_scenes,
