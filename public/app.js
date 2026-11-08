@@ -310,20 +310,20 @@ async function importDocuments(files,existingKey=null){
  }
  return {imported,unchanged,issues};
 }
-async function copyReusableDocuments(sourceWorldId){
+async function copyReusableDocuments(sourceWorldId,categories=REUSABLE_SOURCE_CATEGORIES){
  const destination=state.world;
  if(!destination||state.documentsReady!==true)throw Error('Не выбрана готовая библиотека документов нового мира.');
  const source=(state.worlds||[]).find(w=>w.id===sourceWorldId&&w.id!==destination.id);
  if(!source)throw Error('Выбери другой принадлежащий тебе мир.');
- const categories=REUSABLE_SOURCE_CATEGORIES;
+ const approved=categories.filter(c=>REUSABLE_SOURCE_CATEGORIES.includes(c));
+ if(!approved.length)throw Error('Не выбраны категории для переноса.');
  const response=await state.client.from('lw_reference_docs').select('doc_key,revision,category,title,source_filename,content,sha256')
-  .eq('world_id',source.id).in('category',categories).order('revision',{ascending:false}).limit(150);
+  .eq('world_id',source.id).in('category',approved).order('revision',{ascending:false}).limit(150);
  const records=dataOrThrow(response);
- const latest=new Map();
- for(const doc of records)if(!latest.has(doc.doc_key))latest.set(doc.doc_key,doc);
+ const latest=latestReusableDocs(records,approved);
  let copied=0,unchanged=0;
  const errors=[];
- for(const doc of latest.values()){
+ for(const doc of latest){
   try{
    const checksum=await digestText(doc.content);
    if(checksum!==doc.sha256)throw Error('Контрольная сумма исходника не совпадает.');
@@ -336,7 +336,66 @@ async function copyReusableDocuments(sourceWorldId){
  return {copied,unchanged,errors};
 }
 async function saveWorld(fields){const w=state.world;if(!w)throw Error('Мир не выбран');const data={name:cleanText(fields.name,140),genre:fields.genre,premise:cleanText(fields.premise,15000),world_rules:cleanText(fields.world_rules,20000),history:cleanText(fields.history,50000),timeline:cleanText(fields.timeline,50000),clock_start:cleanText(fields.clock_start,80),genesis_choices:{...(w.genesis_choices||{}),current_period:cleanText(fields.current_period,30)},updated_at:new Date().toISOString()};if(data.genesis_choices.current_period&&!validStoryClock(data.genesis_choices.current_period))throw Error('Текущий период: YYYY-MM, YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS.');if(!data.name)throw Error('Укажи название мира');state.world=dataOrThrow(await state.client.from('lw_worlds').update(data).eq('id',w.id).select().single());await loadWorlds();notify('Мир сохранён в облаке.');}
-async function newWorld(){const row=dataOrThrow(await state.client.from('lw_worlds').insert({owner_id:state.user.id,name:'Новая вселенная',genre:'Фэнтези'}).select().single());const branch=dataOrThrow(await state.client.from('lw_branches').insert({owner_id:state.user.id,world_id:row.id,name:'Основная линия'}).select().single());dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:branch.id}).eq('id',row.id));await openWorld(row.id);await loadWorlds();state.view='genesis';render();notify('Вселенная создана. Выбери четыре решения героя для быстрого старта.');}
+async function newWorld(setup){
+ const config=validateNewWorldSetup(setup,state.worlds);
+ // Verify selected documents before creating any new records, never import played Y1 history.
+ if(config.source_id){
+   const response=await state.client.from('lw_reference_docs')
+     .select('doc_key,revision,category,title,source_filename,content,sha256')
+     .eq('world_id',config.source_id).in('category',config.categories)
+     .order('revision',{ascending:false}).limit(150);
+   const sources=latestReusableDocs(dataOrThrow(response),config.categories);
+   if(!sources.length)throw Error('В выбранном мире нет документов указанных типов. Выбери другие категории или отключи перенос.');
+   for(const doc of sources){
+     if(await digestText(doc.content)!==doc.sha256)throw Error('Контрольная сумма источника не совпадает: '+doc.title);
+   }
+ }
+ const row=dataOrThrow(await state.client.from('lw_worlds').insert({
+   owner_id:state.user.id,name:config.name,genre:config.genre
+ }).select().single());
+ const branch=dataOrThrow(await state.client.from('lw_branches').insert({
+   owner_id:state.user.id,world_id:row.id,name:'Основная линия'
+ }).select().single());
+ dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:branch.id}).eq('id',row.id));
+ await loadWorlds();await openWorld(row.id);
+ if(config.source_id){
+   try{
+     const result=await copyReusableDocuments(config.source_id,config.categories);
+     if(result.errors.length||result.copied+result.unchanged===0){
+       state.view='documents';render();
+       notify('Мир создан, но перенос документов завершён не полностью. Зайди в «Документы» и повтори перенос. '+result.errors.join(' / '),true);
+       return;
+     }
+     state.view='genesis';render();
+     notify('Мир создан. Перенесено документов: '+result.copied+'. Теперь можно начинать Генезис.');
+   }catch(error){
+     state.view='documents';render();
+     notify('Мир создан, но копирование документов не удалось: '+errtext(error)+'. Перенеси их через раздел «Документы» перед Генезисом.',true);
+   }
+ }else{
+   state.view='genesis';render();
+   notify('Новый мир создан без старого прошлого. Теперь можно перейти к Генезису.');
+ }
+}
+async function deleteWorld(worldId){
+ const world=state.worlds.find(w=>w.id===worldId);
+ if(!world)throw Error('Мир не найден в твоей библиотеке.');
+ const typed=window.prompt('Удаление необратимо. Будут удалены сцены, ветки, персонажи, деньги, вещи и документы мира.\n\nЧтобы удалить мир, введи его название в точности:\n'+world.name);
+ if(typed===null)return;
+ if(!validateDeleteWorldName(world.name,typed))throw Error('Название не совпало. Мир не удалён.');
+ const removed=dataOrThrow(await state.client.from('lw_worlds').delete()
+   .eq('id',worldId).eq('owner_id',state.user.id).select('id'));
+ if(!Array.isArray(removed)||removed.length!==1)throw Error('Не удалось подтвердить удаление мира. Проверь права доступа.');
+ if(state.world?.id===worldId){
+   state.world=null;state.characters=[];state.branches=[];state.scenes=[];state.memoryScenes=[];
+   state.documents=[];state.assets=null;state.characterLedger=null;state.modal=null;
+ }
+ localStorage.removeItem('lw_story_mode_'+worldId);
+ localStorage.removeItem('lw_scene_length_'+worldId);
+ await loadWorlds();
+ state.view='library';render();
+ notify('Мир «'+world.name+'» и его связанные данные удалены.');
+}
 async function saveGenesisChoices(draft=false,kind='save'){const w=state.world;if(!w||w.genesis_approved)throw Error('Генезис уже утверждён. Создай новый мир для другого старта.');const c=kind==='import'&&Array.isArray(w.genesis_choices?.quick_answers)?w.genesis_choices:getForm('genesis-form');if(!c.hero_name?.trim())throw Error('Задай имя героя.');const data={genesis_choices:c,updated_at:new Date().toISOString()};if(kind==='demo')data.genesis_draft=demoGenesis(w,c);if(kind==='import')data.genesis_draft=parseGenesis(document.getElementById('genesis-json').value,Number(c.npc_count),c.hero_name);state.world=dataOrThrow(await state.client.from('lw_worlds').update(data).eq('id',w.id).select().single());return c;}
 async function approveGenesis(){const w=state.world;const d=w?.genesis_draft;if(!d||w.genesis_approved)throw Error('Нет неутверждённого Генезиса');if(state.characters.length||state.scenes.length)throw Error('Старт можно утвердить только в пустом мире');const rows=d.characters.map(c=>({owner_id:state.user.id,world_id:w.id,...Object.fromEntries(['role',...CHARACTER_FIELDS].map(k=>[k,c[k]||'']))}));dataOrThrow(await state.client.from('lw_characters').insert(rows));const extra=`\n\nГЕНЕЗИС (утверждённое прошлое):\n${d.summary}\n${d.past_changes.map(s=>'- '+s).join('\n')}`;state.world=dataOrThrow(await state.client.from('lw_worlds').update({genesis_approved:true,history:(w.history||'')+extra}).eq('id',w.id).select().single());await openWorld(w.id);state.view='people';render();notify('Персонажи и стартовое прошлое закреплены в облаке.');}
 async function saveCharacter(fields){const rec=Object.fromEntries(['role',...CHARACTER_FIELDS].map(k=>[k,cleanText(fields[k],20000)]));if(!rec.name)throw Error('Имя обязательно');const id=state.modal?.character?.id;if(id)dataOrThrow(await state.client.from('lw_characters').update(rec).eq('id',id));else dataOrThrow(await state.client.from('lw_characters').insert({...rec,owner_id:state.user.id,world_id:state.world.id}));state.modal=null;await openWorld(state.world.id);render();notify('Персонаж сохранён.');}
@@ -398,7 +457,9 @@ case 'doc-replace':{
 }
 
 case 'goto-story':state.view='story';render();return;
-case 'new-world':await newWorld();return;
+case 'new-world':state.view='world-setup';render();return;
+case 'cancel-world-setup':state.view='library';render();return;
+case 'delete-world':await deleteWorld(el.dataset.id);return;
 case 'open-world':await openWorld(el.dataset.id);state.view=state.world.genesis_approved?'assets':'builder';if(state.view==='assets')await loadAssets();render();return;
 case 'goto-genesis':state.view='genesis';render();return;
 
@@ -546,6 +607,13 @@ case 'import-file':await importBackup(document.getElementById('backup-file').fil
 }}
 
 async function submitHandler(form){
+ if(form.id==='world-setup-form'){
+   const d=getForm('world-setup-form');
+   const categories=d.source_id?[...form.querySelectorAll('input[name="copy_category"]:checked')].map(el=>el.value):[];
+   await newWorld({name:d.name,genre:d.genre,source_id:d.source_id,categories});
+   return;
+ }
+
  if(form.id==='doc-text-form'){
   const values=getForm('doc-text-form');
   const title=values.title?.trim();
@@ -570,7 +638,7 @@ case 'character-form':await saveCharacter(getForm('character-form'));return;
 case 'scene-form':{const d=getForm('scene-form');if(!d.body?.trim())throw Error('Вставь текст сцены.');await appendScene(d.body,'manual');return;}
 case 'scene-package-form':{const d=getForm('scene-package-form');const packet=parseScenePackage(d.payload);const note=packSceneNote(packet.changes,document.getElementById('story-note')?.value||'',packet.decisions);await appendScene(packet.scene,'chatgpt-manual',{world_time:packet.world_time||undefined,note});state.view=state.world?.genesis_choices?.simulation_mode&&state.world.genesis_choices.simulation_mode!=='off'?'story':'memory';render();return;}
 }}
-document.addEventListener('change',e=>{if(e.target?.id==='scene-length'&&state.world){state.sceneLength=e.target.value;localStorage.setItem('lw_scene_length_'+state.world.id,state.sceneLength);}});
+document.addEventListener('change',e=>{if(e.target?.id==='world-setup-source'){const choices=document.getElementById('world-setup-categories');if(choices)choices.hidden=!e.target.value;}if(e.target?.id==='scene-length'&&state.world){state.sceneLength=e.target.value;localStorage.setItem('lw_scene_length_'+state.world.id,state.sceneLength);}});
 document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(!el)return;e.preventDefault();withBusy(()=>actionHandler(el.dataset.action,el));});
 document.addEventListener('submit',e=>{e.preventDefault();withBusy(()=>submitHandler(e.target));});
 window.addEventListener('unhandledrejection',e=>{console.error(e.reason);notify(errtext(e.reason),true);});
