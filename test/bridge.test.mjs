@@ -154,7 +154,7 @@ test('Workers redirect compatibility: auth and RPC fetches never follow redirect
    assert.equal(badRpc.status,200);
    const result=(await badRpc.json()).result;
    assert.equal(result.isError,true);
-   assert.match(result.content[0].text,/Supabase не выполнил запрос/);
+   assert.match(result.content[0].text,/Supabase отклонил запрос/);
    assert.deepEqual(redirects.map(r=>r.redirect),['manual','manual']);
  } finally {
    globalThis.fetch=originalFetch;
