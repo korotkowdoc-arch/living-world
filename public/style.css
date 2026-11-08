@@ -102,19 +102,21 @@ body.ai-running::after{content:"ИИ создаёт сцену и фиксиру
 .world-context-menu button{display:block;width:100%;min-height:44px;padding:11px 12px;border:0;border-radius:8px;background:transparent;color:#ffc2c2;font-size:15px;font-weight:700;text-align:left}
 .world-context-menu button:hover,.world-context-menu button:focus-visible{background:#49303a;outline:none}
 
-/* v1.5.3 per-world autosave switches */
+
+/* v1.5.4: native iOS/Android checkbox controls, separate from card click */
 .world-save-footer{border-top:1px solid var(--line);padding:14px;display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--panel)}
 .world-save-copy{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}
 .world-save-copy b{font-size:14px;line-height:1.35}
 .world-save-copy span{color:var(--muted);font-size:12px;line-height:1.4;max-width:230px}
-.world-save-switch{appearance:none;display:flex;flex-direction:column;align-items:center;gap:5px;justify-content:center;min-width:84px;min-height:60px;flex-shrink:0;cursor:pointer;padding:7px 8px;border:1px solid var(--line);border-radius:13px;background:#182231;color:var(--muted);touch-action:manipulation}
-.world-save-switch-track{position:relative;display:block;width:47px;height:26px;border-radius:18px;background:#566272;transition:background .15s ease;flex-shrink:0}
-.world-save-switch-knob{position:absolute;left:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0007;transition:transform .15s ease}
-.world-save-switch-status{font-size:12px;font-weight:750;line-height:1.15}
+.world-save-switch{display:flex;flex-direction:column;align-items:center;gap:6px;justify-content:center;min-width:88px;min-height:64px;flex-shrink:0;cursor:pointer;padding:7px 8px;border:1px solid var(--line);border-radius:13px;background:#182231;color:var(--muted);touch-action:manipulation}
 .world-save-switch.is-on{color:var(--gold2);border-color:#8d724a;background:#292a28}
-.world-save-switch.is-on .world-save-switch-track{background:#b58f4d}
-.world-save-switch.is-on .world-save-switch-knob{transform:translateX(21px)}
-.world-save-switch:hover:not(:disabled){filter:brightness(1.12)}
-.world-save-switch:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
-.world-save-switch:disabled{cursor:wait;opacity:.7}
-@media(max-width:520px){.world-save-footer{padding:12px 13px;gap:8px}.world-save-copy span{font-size:11px}.world-save-switch{min-width:80px}}
+.world-save-checkbox{-webkit-appearance:none;appearance:none;display:block;position:relative;margin:0;width:49px;height:28px;border:1px solid #667487;border-radius:18px;background:#566272;cursor:pointer;touch-action:manipulation;outline-offset:4px;flex-shrink:0}
+.world-save-checkbox::before{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0007;transition:transform .15s ease}
+.world-save-checkbox:checked{border-color:#b58f4d;background:#b58f4d}
+.world-save-checkbox:checked::before{transform:translateX(21px)}
+.world-save-checkbox:focus-visible{outline:3px solid var(--gold)}
+.world-save-checkbox:disabled{cursor:wait;opacity:.7}
+.world-save-switch-status{font-size:12px;font-weight:750;line-height:1.15}
+.world-save-switch:hover:has(.world-save-checkbox:not(:disabled)){filter:brightness(1.12)}
+.world-save-error{padding:11px 13px;border-top:1px solid #8f5959;background:#3c232b;color:#ffe1e1;font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+@media(max-width:520px){.world-save-footer{padding:12px 13px;gap:8px}.world-save-copy span{font-size:11px}.world-save-switch{min-width:82px}}
