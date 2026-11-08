@@ -46,7 +46,7 @@ test('cannot archive a future year, empty year, wrong branch or stale head',()=>
  assert.throws(()=>buildYearArchive({...args(),to:'1995-12'}),/ещё не завершён/);
  assert.throws(()=>buildYearArchive({...args(),from:'1993-01',to:'1993-12'}),/нет подтверждённых сцен/);
  assert.throws(()=>buildYearArchive({...args(),branch:{...branch,head_scene_id:old.id}}),/устаревшей цепочке/);
- assert.throws(()=>buildYearArchive({...args(),world:{...world,active_branch_id:'changed'}}),/действующей ветки/);
+ assert.throws(()=>buildYearArchive({...args(),world:{...world,active_branch_id:'changed'}}),/действующая ветка/);
  assert.throws(()=>buildYearArchive({...args(),to:'1997-10'}),/не длиннее/);
 });
 
