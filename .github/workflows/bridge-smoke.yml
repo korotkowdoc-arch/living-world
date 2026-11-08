@@ -38,6 +38,8 @@ jobs:
               exit 0
             fi
             echo "Attempt $attempt: production has not passed Bridge v8 metadata checks."
+            echo "Unprivileged discover response: $(printf '%s' "$discover" | head -c 900)"
+            echo "Unprivileged tools/list response: $(printf '%s' "$tools" | head -c 900)"
             sleep 10
           done
           echo 'Production Bridge v8 smoke test failed; inspect Cloudflare Settings > Builds.'
