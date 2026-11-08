@@ -228,6 +228,7 @@ test('one-call autosave is forbidden unless owner opted in for this world',async
    world:{id:worldId,name:'Сцена в мире',genesis_choices:{auto_save_enabled:allow}},
    branch:{id:branchId,head_scene_id:head}
   });
+  if(u.includes('/rest/v1/lw_scenes?'))return Response.json([]);
   if(u.endsWith('/rest/v1/rpc/lw_bridge_v2_append')){
    writeCount++;lastBody=JSON.parse(opts.body);return Response.json('10000000-0000-4000-8000-000000000091');
   }
