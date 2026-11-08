@@ -478,7 +478,7 @@ async function appendSceneWithReceipt(env,identity,body,expected){
  }
  const confirmed=await findSavedScene(env,identity,expected.world_id,expected.request_id);
  if(!confirmed)throw Error('Supabase ответил на запись, но сцена не найдена по request_id. Сохрани ID и проверь ещё раз; не отправляй новый request_id.');
- return {persisted:true,...savedSceneStatus(confirmed,expected)};
+ return {persisted:true,...savedSceneStatus(confirmed,expected),already_saved:false};
 }
 
 async function verifySceneBeforeCommit(env,identity,id,stamp,delta,state){
