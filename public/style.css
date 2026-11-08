@@ -38,3 +38,9 @@
 .sim-decisions .eyebrow{grid-column:1/-1;}
 .sim-decisions .quick-option.active{border-color:var(--gold);background:#302b24;}
 @media(max-width:770px){.sim-modes{grid-template-columns:1fr;}.sim-modes .mode-tile{min-height:76px;}}
+
+/* v0.8 automatic API status and generated scene overlay */
+body.ai-running::after{content:"ИИ создаёт сцену и фиксирует последствия в памяти мира…";position:fixed;inset:auto 14px calc(20px + env(safe-area-inset-bottom));z-index:999;background:#142b39;color:#f3e2c4;border:1px solid var(--gold);border-radius:16px;padding:19px 22px;text-align:center;font-weight:700;box-shadow:0 20px 80px #000b;max-width:540px;margin:auto;pointer-events:none;}
+.btn:disabled{cursor:not-allowed;opacity:.55;}
+.ai-status{border:1px solid #465064;border-radius:11px;padding:12px 14px;background:#142131;color:var(--muted);font-size:13px;line-height:1.5;margin:12px 0;}
+.ai-status b{color:var(--text)}
