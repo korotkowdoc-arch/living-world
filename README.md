@@ -108,3 +108,7 @@ Use **Настройки → Диагностика настоящих сейв�
 This proves the live Cloudflare/Supabase save path, **not the ChatGPT OAuth plugin tool refresh**. The active OAuth connector in this chat may still expose only three read actions; disconnecting/reconnecting it is a separate user account action. Do not claim automatic saves from the chat until `save_scene_auto` is visible to this ChatGPT session and a true scene package has been persisted and reread.
 
 Smoke failures and incomplete cleanup are displayed explicitly; the test is never silently marked successful.
+
+## v1.5.1 first_scene / database RPC troubleshooting
+
+A diagnostic failure at \`first_scene\` means the server got as far as attempting the first write, not that a scene reached Supabase. The worker previously reduced all non-auth database errors to a generic message. The diagnostic now reports safe allowlisted PostgREST error codes in Settings. \`PGRST202\` or \`42883\` means the owner should run \`supabase/bridge_save.sql\` in Supabase SQL Editor; \`42501\` means permission error, and \`LW409\` means branch-head drift. This script defines the exact atomic seven-argument \`lw_bridge_v2_append\` SQL RPC expected by Cloudflare and grants only authenticated owners execution; it does not reset any world or played scene. Once installed, rerun the temporary-world diagnostic and verify full round trip. Do not call the save path proven until that owner-session round trip passes.
