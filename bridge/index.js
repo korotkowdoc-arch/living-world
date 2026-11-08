@@ -1,6 +1,7 @@
 import {handleAiRequest} from './ai.js';
 import {extractCompanionChanges,activeLineage,projectCompanion,validateNextEvents} from '../public/world-ledger.mjs';
 import {latestDocumentVersions,buildSourcePreflight} from '../public/reference-documents.mjs';
+import {projectCharacterMemory,actorMemory} from '../public/world-character-memory.mjs';
 import {validStoryClock,isNondecreasingStoryTime} from '../public/continuity.mjs';
 /** LIVING WORLD Bridge v8 — Git-connected production deployment 2026-11-08.
  * Continuity engine originally built for LIVING WORLD v0.5.
@@ -304,6 +305,7 @@ const tools = [
     title:{type:'string',minLength:1,maxLength:250},category:{type:'string',enum:['core_rules','glossary','director_calibration','year_document','checkpoint','character_start','character_baseline','year_anchors','world_lore','style_example','other']},
     source_filename:{type:'string',maxLength:250},content:{type:'string',minLength:1,maxLength:250000}
   },['world_id','doc_key','title','category','content']),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false} },
+  { name:'get_character_memory',description:'Полное подтверждённое знание указанного персонажа, его убеждения, изменения целей и отношений с источниками сцен. Действует только для активной ветки; если полная история не восстановлена, инструмент отказывает.',inputSchema:object({world_id:uuid,actor_name:{type:'string',minLength:1,maxLength:120}},['world_id','actor_name']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_reference_catalog',description:'Читать список последних неизменяемых редакций документов мира: законы, глоссарий, Year Documents, модели персонажей, стилистические примеры. Полное содержимое — через get_reference_document.',inputSchema:object({world_id:uuid}),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_reference_document',description:'Читать полное содержимое конкретного документа порциями до 25 000 символов, строго указанной редакции. Если next_offset не null, читай дальше. Полный источник важнее краткого пересказа.',inputSchema:object({
     world_id:uuid,doc_key:{type:'string',minLength:3,maxLength:128},revision:{type:'integer',minimum:1},offset:{type:'integer',minimum:0,maximum:750000},limit:{type:'integer',minimum:1,maximum:25000}
@@ -441,10 +443,13 @@ async function companionState(env,identity,id){
  try{lineage=activeLineage(rows,head);}catch(error){return {mode:'live',world_id:id,branch_id:data.branch.id,
     head_scene_id:head,complete:false,reason:error.message};}
  const projection=projectCompanion(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{},strict:false});
+ const characterMemory=projectCharacterMemory(data.characters||[],lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
  return {mode:'live',world_id:id,branch_id:data.branch.id,head_scene_id:head,
   complete:true,accounts:projection.accounts,items:projection.items,new_characters:projection.new_characters,
   audit:projection.audit.slice(-250),total_transactions:projection.audit.length,
-  issues:projection.issues,scanned_scenes:projection.scanned_scenes};
+  issues:projection.issues,scanned_scenes:projection.scanned_scenes,
+  character_memory:characterMemory.characters.map(c=>({name:c.name,origin:c.origin,state:c.state,knowledge_count:c.knowledge.length,belief_count:c.beliefs.length})),
+  character_warnings:characterMemory.warnings};
 }
 
 async function verifySceneBeforeCommit(env,identity,id,stamp,delta,state){
@@ -506,6 +511,25 @@ async function call(name,args,env,identity) {
       body:{world_id:id,doc_key:key,revision,category,title,source_filename:filename,content,sha256:sha}});
     return {mode,persisted:true,unchanged:false,doc_key:key,revision,sha256:sha,length:content.length};
   }
+  if(name==='get_character_memory'){
+    const assets=live?await companionState(env,identity,id):{complete:false,reason:'Только в действующем мире.'};
+    if(!assets.complete)throw Error('Нельзя восстановить полный профиль персонажа: '+(assets.reason||'неполная история'));
+    const state=live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState();
+    const head=state.branch?.head_scene_id;
+    const all=[];
+    for(let offset=0;offset<3000;offset+=500){
+      const rows=await supabase(env,'/rest/v1/lw_scenes?world_id=eq.'+encodeURIComponent(id)+
+        '&select=id,parent_scene_id,world_time,prompt_note&order=created_at.asc&limit=500&offset='+offset,{token:identity.token});
+      if(!Array.isArray(rows))throw Error('Журнал сцен недоступен.');
+      all.push(...rows);
+      if(rows.length<500)break;
+    }
+    const lineage=activeLineage(all,head);
+    const projected=projectCharacterMemory(state.characters||[],lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
+    const profiles=actorMemory(projected,[args.actor_name],{maxEntries:300});
+    return {mode,world_id:id,complete:true,branch_id:state.branch.id,
+      actor:profiles[0]||null,warnings:projected.warnings};
+  }
   if(name==='get_reference_catalog'){
     const state=live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState();
     if(state.world?.id!==id)throw Error('Мир недоступен.');
@@ -526,6 +550,7 @@ async function call(name,args,env,identity) {
     const intent=String(args.scene_intent||'').slice(0,1400);
     return {mode,world_id:id,branch:base.branch,world_time:base.world_time,
       memory_coverage:base.memory_coverage,resource_memory:{complete:assets.complete,issues:assets.issues||[]},
+      character_memory:assets.complete?{complete:true,profiles:(assets.character_memory||[]).filter(p=>actors.some(name=>name.toLocaleLowerCase('ru')===p.name.toLocaleLowerCase('ru'))),warnings:assets.character_warnings||[]}:{complete:false,reason:assets.reason},
       documents:live?await sourcePreflight(env,identity,id,intent,actors,base,assets):{installed:false,ready:false},
       narrative_checks:['Хронология и точное время','Цели, характер и изменения отношений','Что каждый знает и каким каналом','Травмы, состояние, ресурсы и местонахождение','Какие сцены и ветки аннулированы','Правила, глоссарий и актуальные изменения']}
   }
@@ -538,7 +563,9 @@ async function call(name,args,env,identity) {
       new_characters:assets.new_characters,issues:assets.issues,scanned_scenes:assets.scanned_scenes
     }:{complete:false,reason:assets.reason};
     const refs=live?await sourcePreflight(env,identity,id,'',[],base,assets):{installed:false,ready:false};
-    return {...base,companion:resources,reference_documents:refs};
+    return {...base,companion:resources,
+      character_memory:assets.complete?{complete:true,profiles:assets.character_memory,warnings:assets.character_warnings}:{complete:false,reason:assets.reason},
+      reference_documents:refs};
   }
   if(name==='get_companion_state') return live?await companionState(env,identity,id):{mode:'demo',world_id:id,complete:true,...projectCompanion(demoState().scenes,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}})};
   if(name==='get_world_state'){
