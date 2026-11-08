@@ -3,5 +3,12 @@
   "main": "bridge/index.js",
   "compatibility_date": "2026-11-08",
   "workers_dev": true,
-  "keep_vars": true
+  "keep_vars": true,
+  "vars": {
+    "BRIDGE_MODE": "live",
+    "BRIDGE_PUBLIC_URL": "https://living-world-bridge-mcp.korotkowdoc.workers.dev/mcp",
+    "SUPABASE_URL": "https://bcwzlsljcxubqtvzsucz.supabase.co",
+    "SUPABASE_OAUTH_CLIENT_ID": "f08a0ef2-bdfc-4d0d-b9ab-ce900c85e0d6",
+    "BRIDGE_SUPABASE_USER_ID": "0a3fbf41-c3c6-4743-a88c-f9a7870fd244"
+  }
 }

@@ -431,6 +431,12 @@ export default {async fetch(request,env={}){
     return json(dryRun({id:crypto.randomUUID(),parent_scene_id:headId,body:'Ира расшифровала сигнал и нашла координаты маяка.',
       world_time:time,prompt_note:packSceneNote({facts:['Координаты маяка расшифрованы.']})}));
   }
+  if(request.method==='GET' && path==='/health') return json({
+    service:'living-world-bridge',version:'2.2.1',
+    mode:env.BRIDGE_MODE==='live'?'live':'not-live',
+    missing_configuration:['BRIDGE_PUBLIC_URL','SUPABASE_URL','SUPABASE_OAUTH_CLIENT_ID','BRIDGE_SUPABASE_USER_ID','SUPABASE_PUBLISHABLE_KEY','BRIDGE_SEAL_KEY'].filter(name=>!env[name]),
+    writes_enabled:env.BRIDGE_WRITES_ENABLED==='true'
+  });
   if(request.method==='GET' && (path==='/.well-known/oauth-protected-resource'||path==='/.well-known/oauth-protected-resource/mcp')) return json(metadata(env));
   if(['/approve','/approve.js'].includes(path)) return approvalPage(request,env,path);
   if(path!=='/mcp') return json({error:'Маршрут не найден.'},404);
