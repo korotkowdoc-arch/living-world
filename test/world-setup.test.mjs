@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {validateNewWorldSetup,latestReusableDocs,validateDeleteWorldName} from '../public/world-setup.mjs';
+import {validateNewWorldSetup,latestReusableDocs} from '../public/world-setup.mjs';
 
 const source={id:'old-world',name:'Старый мир Гарри'};
 const docs=[
@@ -31,11 +31,17 @@ test('cannot copy from nonexistent world or silently carry over played state',()
  assert.deepEqual(filtered.map(d=>d.doc_key),['glossary','rules','style']);
  assert.equal(filtered.find(d=>d.doc_key==='rules').revision,2);
 });
-test('deletion accepts only exact typed world name',()=>{
- assert.equal(validateDeleteWorldName('Прогон 7 - Гарри Поттер AU','Прогон 7 - Гарри Поттер AU'),true);
- assert.equal(validateDeleteWorldName('Прогон 7 - Гарри Поттер AU','Прогон 7'),false);
- assert.equal(validateDeleteWorldName('Прогон 7 - Гарри Поттер AU',null),false);
- assert.equal(validateDeleteWorldName('Прогон 7 - Гарри Поттер AU','Другой мир'),false);
+test('world deletion requires context menu and a simple Yes button, no typed name',()=>{
+ const ui=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ assert.match(ui,/data-action="world-menu-delete"/);
+ assert.match(ui,/case 'world-menu-delete':/);
+ assert.match(ui,/case 'confirm-delete-world':/);
+ assert.match(ui,/btn\('confirm-delete-world','Да','danger'\)/);
+ assert.match(ui,/btn\('cancel-delete-world','Нет'\)/);
+ assert.match(ui,/document\.addEventListener\('contextmenu'/);
+ assert.match(ui,/document\.addEventListener\('touchstart'/);
+ assert.doesNotMatch(ui,/window\.prompt\('Удаление необратимо/);
+ assert.doesNotMatch(ui,/data-action="delete-world"/);
 });
 test('supabase schema deletes owned world and cascades all existing world-bound content',()=>{
  const schema=readFileSync(new URL('../supabase/schema.sql',import.meta.url),'utf8');
