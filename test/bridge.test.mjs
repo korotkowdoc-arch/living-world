@@ -34,7 +34,7 @@ test('initialize and tools/list work without a Bearer token',async()=>{
  assert.equal(r.status,200);
  const d=(await r.json()).result;
  assert.equal(d.resultType,'complete');
- assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_story_context','get_reference_catalog','get_reference_document','get_scene_preflight','get_companion_state','get_branch_history']);
+ assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_story_context','save_reference_document','get_reference_catalog','get_reference_document','get_scene_preflight','get_companion_state','get_branch_history']);
  assert.ok(d.tools.every(t=>t._meta.securitySchemes[0].type==='oauth2'));
 });
 test('real data calls are forbidden without a validated OAuth token',async()=>{
@@ -283,5 +283,28 @@ test('source-document MCP retrieves full immutable revision in chunks and checks
   assert.equal(result.documents.ready,true);
   assert.match(result.documents.selected.map(x=>x.full_text||x.excerpts).join(' '),/восемнадцать/);
   assert.equal(result.memory_coverage.complete,true);
+ }finally{globalThis.fetch=prev;}
+});
+
+test('MCP reference-document writes require explicit opt-in and create immutable private revision',async()=>{
+ const prev=globalThis.fetch;
+ let allow=false,writes=0;
+ const doc={world_id:worldId,doc_key:'core-rules-y1',category:'core_rules',title:'PROJECT CORE RULES',source_filename:'rules.docx',content:'Правило мира: магия не выдаёт автоматически знания персонажам.'};
+ globalThis.fetch=async (url,opts={})=>{
+  const u=String(url);
+  if(u.endsWith('/auth/v1/user'))return Response.json({id:env.BRIDGE_SUPABASE_USER_ID});
+  if(u.endsWith('/rest/v1/rpc/lw_bridge_v2_state'))return Response.json({world:{id:worldId,genesis_choices:{document_upload_enabled:allow}},branch:{id:branchId,head_scene_id:null},characters:[],scenes:[]});
+  if(u.includes('/rest/v1/lw_reference_docs?'))return Response.json([]);
+  if(u.endsWith('/rest/v1/lw_reference_docs')){writes++;const body=JSON.parse(opts.body);assert.equal(body.doc_key,'core-rules-y1');assert.match(body.sha256,/^[a-f0-9]{64}$/);return new Response(null,{status:201});}
+  throw Error('Unexpected '+u);
+ };
+ const live={...env,BRIDGE_WRITES_ENABLED:'true'},headers={authorization:'Bearer '+testJwt('authenticated')};
+ try{
+  const denied=await call('tools/call',{name:'save_reference_document',arguments:doc},headers,live);
+  assert.equal((await denied.json()).result.isError,true);assert.equal(writes,0);
+  allow=true;
+  const saved=await call('tools/call',{name:'save_reference_document',arguments:doc},headers,live);
+  const result=(await saved.json()).result.structuredContent;
+  assert.equal(result.persisted,true);assert.equal(result.revision,1);assert.equal(result.length,doc.content.length);assert.equal(writes,1);
  }finally{globalThis.fetch=prev;}
 });
