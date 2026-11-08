@@ -105,21 +105,51 @@ function showWorldContextMenu(worldId,clientX,clientY){
  state.worldContext={id:worldId,...worldMenuPosition(clientX,clientY,window.innerWidth,window.innerHeight,{width,height})};
  render();
 }
+function toggleWorldSetupDocPanel(mode){
+ if(state.view!=='world-setup'||!['copy','upload'].includes(mode))return;
+ const panel=document.getElementById('world-setup-'+mode+'-panel');
+ const button=document.querySelector('[data-action="world-setup-toggle-'+mode+'"]');
+ if(!panel||!button)return;
+ const show=panel.hidden;
+ panel.hidden=!show;
+ button.setAttribute('aria-expanded',String(show));
+ button.classList.toggle('active',show);
+ if(show&&mode==='upload')document.getElementById('world-setup-upload-files')?.focus();
+}
+function updateWorldSetupFilesSummary(){
+ const input=document.getElementById('world-setup-upload-files');
+ const summary=document.getElementById('world-setup-upload-summary');
+ if(!input||!summary)return;
+ const files=Array.from(input.files||[]);
+ summary.textContent=files.length?'Выбрано файлов: '+files.length+' — '+files.map(f=>f.name).join(', '):'Файлы ещё не выбраны.';
+}
 function renderWorldSetup(){
  const sources=state.worlds||[];
  const labels={core_rules:'Законы и правила мира',glossary:'Глоссарий и названия',style_example:'Примеры стиля сцен',year_anchors:'Календарные и причинные ориентиры',director_calibration:'Режиссёрские настройки'};
  const checkboxes=REUSABLE_SOURCE_CATEGORIES.map(c=>`<label class="world-source-check"><input type="checkbox" name="copy_category" value="${x(c)}" ${['core_rules','glossary','style_example'].includes(c)?'checked':''}><span>${x(labels[c]||c)}</span></label>`).join('');
- return `${heading('Новый мир · шаг 1 из 3','Основа новой вселенной','Выбери документы ДО Генезиса и любых событий предыстории.') }
+ return `${heading('Новый мир · шаг 1 из 3','Основа новой вселенной','Сначала добавь нужные документы, потом запускай Генезис.')}
  <div class="panel"><form class="form" id="world-setup-form">
- ${f('name','Название новой вселенной','','text','Например, Гарри Поттер — жизнь с 15 лет')}
+ ${f('name','Название новой вселенной','','text','Например, Гарри Поттер — новое начало')}
  <div class="field"><label>Жанр</label><select name="genre">${['Фэнтези','Историческая AU','Современный мир','Научная фантастика','Свой жанр'].map(g=>opt(g,g,'Фэнтези')).join('')}</select></div>
  <div class="divider"></div>
- <h2 class="section-title">Переносить документы правил?</h2>
- <p class="sub">Можно взять проверенные первоисточники из предыдущего мира, не перенося его персонажей, сыгранные события, деньги или предметы. Или начать с чистой библиотеки.</p>
- <div class="field"><label for="world-setup-source">Источник общих документов</label>
- <select id="world-setup-source" name="source_id">${opt('','Нет — новый мир без старых документов','')}${sources.map(w=>opt(w.id,w.name,'')).join('')}</select></div>
- ${sources.length?`<div id="world-setup-categories" class="world-source-categories" hidden><p class="tiny">Какие документы скопировать?</p>${checkboxes}<p class="hint">Внимание: PROJECT CORE RULES может содержать факты биографии прошлого Гарри. При новом старте в 15 лет их нужно проверить и при необходимости изменить в новой редакции. Ничего из старого прохождения автоматически не считается сыгранным.</p></div>`:'<p class="hint">Сохранённых миров для переноса пока нет. Источники можно загрузить позже.</p>'}
+ <h2 class="section-title">Откуда взять документы мира?</h2>
+ <p class="sub">Выбери перенос из другого мира LIVING WORLD, загрузку файлов или оба способа. Документы сохранятся в новом мире до перехода к Генезису.</p>
+ <div class="world-setup-doc-choices" role="group" aria-label="Способ добавления документов">
+  <button type="button" class="world-setup-doc-choice" data-action="world-setup-toggle-copy" aria-expanded="false" aria-controls="world-setup-copy-panel"><strong>Перенести документы из прошлого мира</strong><small>Общие правила, глоссарий и ориентиры из другого мира LIVING WORLD — без сыгранной истории.</small></button>
+  <button type="button" class="world-setup-doc-choice" data-action="world-setup-toggle-upload" aria-expanded="false" aria-controls="world-setup-upload-panel"><strong>Загрузить документы</strong><small>Собственные файлы DOCX, TXT или Markdown с телефона или компьютера.</small></button>
+ </div>
+ <div id="world-setup-copy-panel" class="world-setup-doc-panel" hidden>
+  <div class="field"><label for="world-setup-source">Мир-источник</label>
+   <select id="world-setup-source" name="source_id">${opt('','Выбери предыдущий мир','')}${sources.map(w=>opt(w.id,w.name,'')).join('')}</select></div>
+  ${sources.length?`<div id="world-setup-categories" class="world-source-categories" hidden><p class="tiny">Какие документы скопировать?</p>${checkboxes}<p class="hint">Старые Year Documents, чекпойнты и сыгранные персонажи не переносятся. При старте с рождения проверь, что общие правила не содержат обязательной старой биографии.</p></div>`:'<p class="hint">Предыдущих миров нет. Можно закрыть перенос и загрузить собственные файлы второй кнопкой.</p>'}
+ </div>
+ <div id="world-setup-upload-panel" class="world-setup-doc-panel" hidden>
+  <div class="field"><label for="world-setup-upload-files">Файлы документов</label><input id="world-setup-upload-files" type="file" accept=".docx,.txt,.md,.markdown" multiple></div>
+  <p id="world-setup-upload-summary" class="tiny" role="status" aria-live="polite">Файлы ещё не выбраны.</p>
+  <p class="hint">До 12 файлов по 6 МБ каждый. Загружай правила, глоссарий, стартовые модели и другие первоисточники. Не переноси в чистый мир чекпойнты и сыгранные Year Documents предыдущей истории.</p>
+ </div>
  <div class="row mobile-full" style="margin-top:17px"><button type="submit" class="btn gold">Создать мир и перейти к Генезису</button>${btn('cancel-world-setup','Назад к мирам')}</div>
+ <p class="footnote">Без выбора документов мир создастся с пустой библиотекой. Документы можно добавить позже через раздел «Документы».</p>
  </form></div>`;
 }
 
@@ -544,47 +574,68 @@ async function updateWorldAutoSave(worldId,enabled){
  }
 }
 async function saveWorld(fields){const w=state.world;if(!w)throw Error('Мир не выбран');const data={name:cleanText(fields.name,140),genre:fields.genre,premise:cleanText(fields.premise,15000),world_rules:cleanText(fields.world_rules,20000),history:cleanText(fields.history,50000),timeline:cleanText(fields.timeline,50000),clock_start:cleanText(fields.clock_start,80),genesis_choices:{...(w.genesis_choices||{}),current_period:cleanText(fields.current_period,30)},updated_at:new Date().toISOString()};if(data.genesis_choices.current_period&&!validStoryClock(data.genesis_choices.current_period))throw Error('Текущий период: YYYY-MM, YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS.');if(!data.name)throw Error('Укажи название мира');state.world=dataOrThrow(await state.client.from('lw_worlds').update(data).eq('id',w.id).select().single());await loadWorlds();notify('Мир сохранён в облаке.');}
-async function newWorld(setup){
+/** Parse files and validate contents BEFORE creating any world records. */
+async function prepareWorldSetupFiles(files=[]){
+ const chosen=Array.from(files||[]);
+ if(chosen.length>12)throw Error('Для нового мира можно загрузить не более 12 файлов за раз.');
+ const prepared=[];
+ for(const file of chosen){
+  if(!/\.(docx|txt|md|markdown)$/i.test(file.name||''))throw Error('Неподдерживаемый файл: '+(file.name||'без названия')+'. Выбери DOCX, TXT или Markdown.');
+  const isDocx=/\.docx$/i.test(file.name);
+  const text=await extractDocumentFile(file,{mammoth:isDocx?await browserDocxParser():undefined});
+  prepared.push({title:file.name.replace(/\.[^.]+$/,''),category:guessCategory(file.name),filename:file.name,text});
+ }
+ return prepared;
+}
+async function newWorld(setup,uploadFiles=[]){
  const config=validateNewWorldSetup(setup,state.worlds);
- // Verify selected documents before creating any new records, never import played Y1 history.
+ const prepared=await prepareWorldSetupFiles(uploadFiles);
+ // Verify copied sources before creating anything.
  if(config.source_id){
-   const response=await state.client.from('lw_reference_docs')
-     .select('doc_key,revision,category,title,source_filename,content,sha256')
-     .eq('world_id',config.source_id).in('category',config.categories)
-     .order('revision',{ascending:false}).limit(150);
-   const sources=latestReusableDocs(dataOrThrow(response),config.categories);
-   if(!sources.length)throw Error('В выбранном мире нет документов указанных типов. Выбери другие категории или отключи перенос.');
-   for(const doc of sources){
-     if(await digestText(doc.content)!==doc.sha256)throw Error('Контрольная сумма источника не совпадает: '+doc.title);
-   }
+  const response=await state.client.from('lw_reference_docs')
+   .select('doc_key,revision,category,title,source_filename,content,sha256')
+   .eq('world_id',config.source_id).in('category',config.categories)
+   .order('revision',{ascending:false}).limit(150);
+  const sources=latestReusableDocs(dataOrThrow(response),config.categories);
+  if(!sources.length)throw Error('В выбранном мире нет документов указанных типов. Выбери другие категории или отключи перенос.');
+  for(const doc of sources)if(await digestText(doc.content)!==doc.sha256)throw Error('Контрольная сумма источника не совпадает: '+doc.title);
  }
  const row=dataOrThrow(await state.client.from('lw_worlds').insert({
-   owner_id:state.user.id,name:config.name,genre:config.genre
+  owner_id:state.user.id,name:config.name,genre:config.genre
  }).select().single());
  const branch=dataOrThrow(await state.client.from('lw_branches').insert({
-   owner_id:state.user.id,world_id:row.id,name:'Основная линия'
+  owner_id:state.user.id,world_id:row.id,name:'Основная линия'
  }).select().single());
  dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:branch.id}).eq('id',row.id));
  await loadWorlds();await openWorld(row.id);
+ let copied=0,uploaded=0,unchanged=0;
+ const errors=[];
  if(config.source_id){
-   try{
-     const result=await copyReusableDocuments(config.source_id,config.categories);
-     if(result.errors.length||result.copied+result.unchanged===0){
-       state.view='documents';render();
-       notify('Мир создан, но перенос документов завершён не полностью. Зайди в «Документы» и повтори перенос. '+result.errors.join(' / '),true);
-       return;
-     }
-     state.view='genesis';render();
-     notify('Мир создан. Перенесено документов: '+result.copied+'. Теперь можно начинать Генезис.');
-   }catch(error){
-     state.view='documents';render();
-     notify('Мир создан, но копирование документов не удалось: '+errtext(error)+'. Перенеси их через раздел «Документы» перед Генезисом.',true);
-   }
- }else{
-   state.view='genesis';render();
-   notify('Новый мир создан без старого прошлого. Теперь можно перейти к Генезису.');
+  try{
+   const result=await copyReusableDocuments(config.source_id,config.categories);
+   copied=result.copied;unchanged+=result.unchanged;
+   errors.push(...result.errors);
+   if(result.copied+result.unchanged===0)errors.push('Не удалось перенести выбранные источники.');
+  }catch(error){errors.push('Перенос: '+errtext(error));}
  }
+ for(const doc of prepared){
+  try{
+   const result=await insertDocument(doc);
+   if(result.skipped)unchanged++;else uploaded++;
+   await loadDocuments();
+  }catch(error){errors.push('Загрузка '+doc.filename+': '+errtext(error));}
+ }
+ if(errors.length){
+  state.view='documents';render();
+  notify('Мир создан, но не все документы сохранены. Перейди в «Документы» и повтори неудачную загрузку. '+errors.join(' / '),true);
+  return;
+ }
+ state.view='genesis';render();
+ const total=copied+uploaded+unchanged;
+ notify(total?'Мир создан. Документы сохранены: '+total+' (перенос: '+copied+', загрузка: '+uploaded+', уже были: '+unchanged+'). Можно начинать Генезис.':
+  'Мир создан без документов. При необходимости загрузи правила до Генезиса.');
 }
+
 async function deleteWorld(worldId){
  const world=state.worlds.find(w=>w.id===worldId);
  if(!world)throw Error('Мир не найден в твоей библиотеке.');
@@ -848,6 +899,8 @@ case 'doc-replace':{
 
 case 'goto-story':await openSection('story');return;
 case 'new-world':state.view='world-setup';render();return;
+case 'world-setup-toggle-copy':toggleWorldSetupDocPanel('copy');return;
+case 'world-setup-toggle-upload':toggleWorldSetupDocPanel('upload');return;
 case 'cancel-world-setup':state.view='library';render();return;
 case 'world-menu-delete':{
  const world=state.worlds.find(w=>w.id===el.dataset.id);
@@ -1009,10 +1062,16 @@ case 'import-file':await importBackup(document.getElementById('backup-file').fil
 
 async function submitHandler(form){
  if(form.id==='world-setup-form'){
-   const d=getForm('world-setup-form');
-   const categories=d.source_id?[...form.querySelectorAll('input[name="copy_category"]:checked')].map(el=>el.value):[];
-   await newWorld({name:d.name,genre:d.genre,source_id:d.source_id,categories});
-   return;
+  const d=getForm('world-setup-form');
+  const copyEnabled=!document.getElementById('world-setup-copy-panel')?.hidden;
+  const uploadEnabled=!document.getElementById('world-setup-upload-panel')?.hidden;
+  const sourceId=copyEnabled?d.source_id:'';
+  if(copyEnabled&&!sourceId)throw Error('Выбери прошлый мир для переноса или отключи этот способ.');
+  const categories=sourceId?[...form.querySelectorAll('input[name="copy_category"]:checked')].map(el=>el.value):[];
+  const uploadFiles=uploadEnabled?Array.from(document.getElementById('world-setup-upload-files')?.files||[]):[];
+  if(uploadEnabled&&!uploadFiles.length)throw Error('Выбери документы для загрузки или отключи этот способ.');
+  await newWorld({name:d.name,genre:d.genre,source_id:sourceId,categories},uploadFiles);
+  return;
  }
 
  if(form.id==='doc-text-form'){
@@ -1045,7 +1104,16 @@ document.addEventListener('change',e=>{
   render();
  });
 });
-document.addEventListener('change',e=>{if(e.target?.id==='world-setup-source'){const choices=document.getElementById('world-setup-categories');if(choices)choices.hidden=!e.target.value;}if(e.target?.id==='scene-length'&&state.world){state.sceneLength=e.target.value;localStorage.setItem('lw_scene_length_'+state.world.id,state.sceneLength);}});
+document.addEventListener('change',e=>{
+ if(e.target?.id==='world-setup-source'){
+  const choices=document.getElementById('world-setup-categories');
+  if(choices)choices.hidden=!e.target.value;
+ }
+ if(e.target?.id==='world-setup-upload-files')updateWorldSetupFilesSummary();
+ if(e.target?.id==='scene-length'&&state.world){
+  state.sceneLength=e.target.value;localStorage.setItem('lw_scene_length_'+state.world.id,state.sceneLength);
+ }
+});
 let worldPressTimer=null,worldTouchStart=null;
 function clearWorldPress(){if(worldPressTimer!==null){clearTimeout(worldPressTimer);worldPressTimer=null;}worldTouchStart=null;}
 document.addEventListener('contextmenu',e=>{
