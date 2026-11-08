@@ -1,7 +1,7 @@
 import {handleAiRequest} from './ai.js';
-import {extractCompanionChanges,activeLineage,projectCompanion} from '../public/world-ledger.mjs';
+import {extractCompanionChanges,activeLineage,projectCompanion,validateNextEvents} from '../public/world-ledger.mjs';
 import {latestDocumentVersions,buildSourcePreflight} from '../public/reference-documents.mjs';
-import {validStoryClock} from '../public/continuity.mjs';
+import {validStoryClock,isNondecreasingStoryTime} from '../public/continuity.mjs';
 /** LIVING WORLD Bridge v8 — Git-connected production deployment 2026-11-08.
  * Continuity engine originally built for LIVING WORLD v0.5.
  *
@@ -442,6 +442,15 @@ async function companionState(env,identity,id){
   issues:projection.issues,scanned_scenes:projection.scanned_scenes};
 }
 
+async function verifySceneBeforeCommit(env,identity,id,stamp,delta,state){
+ const previous=state.scenes?.at(-1)?.world_time||state.world?.genesis_choices?.current_period||null;
+ if(previous&&!isNondecreasingStoryTime(previous,stamp))throw Error('Новая сцена откатывает время назад без валидной режиссёрской правки.');
+ if((delta.economy||[]).length||(delta.items||[]).length||(delta.new_characters||[]).length){
+  const current=await companionState(env,identity,id);
+  if(!current.complete)throw Error('Нельзя проверить операции: архив ресурсов неполон. '+(current.reason||''));
+  validateNextEvents(current,delta,state.characters||[]);
+ }
+}
 function dryRun(candidate) {
   const state=demoState();
   return {mode:'demo',persisted:false,scene_id:candidate.id,
@@ -535,6 +544,7 @@ async function call(name,args,env,identity) {
     const confirmed=live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState();
     if(confirmed.branch?.id!==branchKey||confirmed.branch.head_scene_id!==head)throw Error('Действующая ветка изменилась: не сохраняй старую сцену.');
     if(confirmed.world?.genesis_choices?.auto_save_enabled!==true)throw Error('Автосохранение не разрешено владельцем в настройках этого мира.');
+    if(live)await verifySceneBeforeCommit(env,identity,id,stamp,packet.changes,confirmed);
     if(!live)return dryRun({id:requestId,parent_scene_id:head,body:packet.scene,world_time:stamp,prompt_note:note});
     return {mode,persisted:true,scene_id:await rpc('lw_bridge_v2_append',body)};
   }
@@ -542,6 +552,7 @@ async function call(name,args,env,identity) {
   if(args.approval_code===undefined) {
     const state=live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState();
     if(state.branch?.id!==branchKey||state.branch.head_scene_id!==head) throw new Error('Ветка или последняя сцена изменилась.');
+    if(live)await verifySceneBeforeCommit(env,identity,id,stamp,packet.changes,state);
     const scenePreview=packet.scene.slice(0,4000);
     const ticket=await seal(env,'review',{user:identity?.user??'demo',mode,digest,expires:Date.now()+writeLimit,world:state.world.name,
       branch:state.branch.name,scene:scenePreview,sceneLength:packet.scene.length,
@@ -554,6 +565,9 @@ async function call(name,args,env,identity) {
   if(approved.user!==(identity?.user??'demo')||approved.mode!==mode||approved.digest!==digest||approved.expires<Date.now())
     throw new Error('Подтверждение устарело или пакет изменился. Запроси новое подтверждение.');
   if(!live) return dryRun({id:requestId,parent_scene_id:head,body:packet.scene,world_time:stamp,prompt_note:note});
+  const finalState=await rpc('lw_bridge_v2_state',{p_world:id});
+  if(finalState.branch?.id!==branchKey||finalState.branch.head_scene_id!==head)throw Error('Ветка изменилась после подтверждения.');
+  await verifySceneBeforeCommit(env,identity,id,stamp,packet.changes,finalState);
   return {mode,persisted:true,scene_id:await rpc('lw_bridge_v2_append',body)};
 }
 
