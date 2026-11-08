@@ -6,7 +6,7 @@ const str=(v,n=200)=>typeof v==='string'&&v.trim().length>0&&v.trim().length<=n;
 const validPerson=v=>str(v,120);
 const fail=m=>{throw Error(m);};
 const text=v=>typeof v==='string'?v.trim():'';
-export const ECONOMY_ACTIONS=['opening','credit','debit','transfer'];
+export const ECONOMY_ACTIONS=['opening','credit','debit','transfer','reconcile'];
 export const ITEM_ACTIONS=['acquire','gift','loan','return','move','consume','destroy','repair'];
 export function validateCompanionDelta(input={}){
   if(!input||typeof input!=='object'||Array.isArray(input))fail('Изменения ресурсов должны быть объектом.');
@@ -22,7 +22,7 @@ export function validateCompanionDelta(input={}){
     unique(id);
     if(!ECONOMY_ACTIONS.includes(action))fail('Неизвестная денежная операция: '+action);
     if(!validPerson(account)||!str(currency,20)||!/^[A-Za-zА-Яа-яЁё0-9_-]+$/u.test(currency))fail('Для денег укажи счёт и валюту.');
-    if(!Number.isSafeInteger(amount)||amount<0||(action!=='opening'&&amount===0))fail('Денежная сумма должна быть положительным целым числом минимальных единиц.');
+    if(!Number.isSafeInteger(amount)||amount<0||(!['opening','reconcile'].includes(action)&&amount===0))fail('Денежная сумма должна быть положительным целым числом минимальных единиц.');
     if(!Number.isInteger(scale)||scale<0||scale>4)fail('Некорректная точность валюты.');
     if(action==='transfer'&&(!validPerson(to)||to===account))fail('Для перевода укажи другого получателя.');
     if(action!=='transfer'&&to!==undefined)fail('Получатель допустим только для перевода.');
@@ -87,6 +87,9 @@ export function projectCompanion(scenes,{getDelta,strict=false}={}){
     const key=accountKey(e.account,e.currency,e.scale);
     if(e.action==='opening'){
       if(a.known||a.entries.length)fail('Начальный баланс должен быть первым подтверждённым событием для '+e.account+' ('+e.currency+').');
+      a.known=true;a.balance=e.amount;
+    }else if(e.action==='reconcile'){
+      // Explicitly observed current balance, not a duplicate income or retroactive opening.
       a.known=true;a.balance=e.amount;
     }else{
       const debit=e.action==='debit'||e.action==='transfer';
