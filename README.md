@@ -72,3 +72,11 @@ Read [docs/AUTOMATION.md](docs/AUTOMATION.md). The private Worker generates and 
 Long-form scenes are authored in ChatGPT on the user's subscription. **LIVING WORLD is the archive and causal ledger**, not a requirement to manually copy the text. The OAuth MCP bridge now exposes read tools for world state, active-branch history and `get_companion_state`, and a user-approved `save_scene_package` write tool. The live Worker must advertise `writes_enabled:true`; the separate OpenAI API gateway remains strictly optional and is not the primary user journey.
 
 The **Активы** companion screen replays scene-embedded structured events across the complete known lineage: money accounts, ownership and current holders of property, and introduced independent NPCs. All ledger events cite a source in their scene. If any amount is unknown, the display remains explicitly unknown; alternative branches never contaminate one another. Full scene history is required to calculate correct balances; if the scene window exceeds the cap, the screen reports the limitation instead of inventing numbers.
+
+## Document authority and character knowledge
+
+The private document library is defined in `supabase/reference_docs.sql`; apply it in the Supabase SQL editor **once**. Then import full DOCX/TXT/Markdown source files under **Документы**. The app stores text, immutable revisions, SHA-256 and type-specific precedence. Missing schema is reported explicitly; a working UI does not imply documents are installed.
+
+The MCP gateway exposes `get_reference_catalog`, `get_reference_document` (chunked full text), `get_scene_preflight`, and `get_character_memory`. `get_story_context` includes a source manifest, selected rules and a branch-derived character summary. The **Герои** screen distinguishes facts personally learned (with channels and source scenes) from subjective beliefs. The **Активы** home screen shows readiness of source documents and causal memory before play.
+
+No model can guarantee every psychological reaction is right. Strict factual ledger validation checks impossible purchases, ownership and known chronology, while source and character checks supply evidence for model reasoning; automated semantic auditing and durable year-spanning snapshots remain future work.
