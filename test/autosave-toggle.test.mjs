@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
-import {persistWorldAutosave} from '../public/world-autosave.mjs';
+import {persistWorldAutosave,withAutosaveDeadline} from '../public/world-autosave.mjs';
 
 const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const style=readFileSync(new URL('../public/style.css',import.meta.url),'utf8');
@@ -117,4 +117,31 @@ test('mobile control has a large touch target and visible pending/error styles',
  assert.match(style,/\.world-save-checkbox\{[^}]*-webkit-appearance:none/);
  assert.match(style,/\.world-save-checkbox:checked/);
  assert.match(style,/\.world-save-error\{/);
+});
+
+test('network stalls produce an explicit timeout error rather than endless saving',async()=>{
+ await assert.rejects(withAutosaveDeadline(new Promise(()=>{}),5),/Нет ответа Supabase/);
+});
+test('database failure becomes a persistent card error, even while generic actions are busy',async()=>{
+ const sourceStart=app.indexOf('async function updateWorldAutoSave(worldId,enabled){');
+ const sourceEnd=app.indexOf('async function saveWorld(fields)',sourceStart);
+ const handlerStart=app.indexOf("document.addEventListener('change',e=>{\n const checkbox=");
+ const handlerEnd=app.indexOf("document.addEventListener('change',e=>{if(e.target?.id==='world-setup-source'",handlerStart);
+ const source=app.slice(sourceStart,sourceEnd)+app.slice(handlerStart,handlerEnd);
+ const rows=worlds(),client=dbClient(rows);
+ let callback,renders=0;
+ const state={user:{id:'owner'},client,worlds:rows,world:null,autoSavePendingWorldId:null,autoSaveErrors:{},busy:true};
+ const sandbox={state,
+  async persistWorldAutosave(){throw Error('Запись запрещена политикой доступа');},
+  render(){renders++;},notify(){},errtext:e=>e.message,
+  async loadWorlds(){state.worlds=rows.map(x=>structuredClone(x));},
+  document:{addEventListener(event,cb){assert.equal(event,'change');callback=cb;}}
+ };
+ vm.runInNewContext(source,sandbox);
+ callback({target:{closest(){return {dataset:{worldAutosave:'a'},checked:true};}}});
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.match(state.autoSaveErrors.a,/Запись запрещена/);
+ assert.equal(state.worlds[0].genesis_choices.auto_save_enabled,undefined);
+ assert.equal(state.autoSavePendingWorldId,null);
+ assert.ok(renders>=2);
 });
