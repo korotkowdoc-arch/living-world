@@ -101,3 +101,26 @@ test('OAuth JWT typ at+jwt is understood, but still requires Supabase verificati
   assert.equal(r.headers.get('x-lw-auth-failure'),'supabase_auth_401');
  } finally {globalThis.fetch=original;}
 });
+
+test('Supabase transport failures expose only safe diagnostics, never exception details',async()=>{
+ const originalFetch=globalThis.fetch;
+ const originalWarn=console.warn;
+ const logs=[];
+ globalThis.fetch=async()=>{throw new TypeError('secret-value-must-not-appear');};
+ console.warn=(...args)=>logs.push(args);
+ try {
+   const token=testJwt('authenticated');
+   const response=await call('tools/call',{name:'list_worlds',arguments:{}},{authorization:'Bearer '+token});
+   assert.equal(response.status,401);
+   assert.equal(response.headers.get('x-lw-auth-failure'),'supabase_auth_unreachable');
+   const transport=logs.find(([message])=>message==='LIVING WORLD Supabase Auth transport:');
+   assert.ok(transport);
+   assert.equal(transport[1].category,'type_error');
+   assert.equal(transport[1].cause_code,null);
+   assert.ok(transport[1].elapsed_ms>=0);
+   assert.doesNotMatch(JSON.stringify(logs),/secret-value-must-not-appear/);
+ } finally {
+   globalThis.fetch=originalFetch;
+   console.warn=originalWarn;
+ }
+});
