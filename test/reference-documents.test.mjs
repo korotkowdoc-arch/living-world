@@ -53,3 +53,17 @@ test('plain text import is local and does not need API key',async()=>{
  assert.equal(await extractDocumentFile(file),'Знания персонажей');
  await assert.rejects(extractDocumentFile({name:'wrong.pdf',size:20}),/Поддерживаются/);
 });
+
+test('director calibrations are always supplied; style examples only shape relevant scenes',()=>{
+ const docs=[
+  {doc_key:'rules',revision:1,category:'core_rules',title:'Core',content:'Сыгранное выше канона',sha256:'a'.repeat(64)},
+  {doc_key:'calibration',revision:1,category:'director_calibration',title:'Director',content:'Гарри шутит по-разному, не превращать в словесный тик.',sha256:'b'.repeat(64)},
+  {doc_key:'style',revision:1,category:'style_example',title:'Example',content:'Пример цельной сцены со значимыми диалогами и переходами.',sha256:'c'.repeat(64)}
+ ];
+ const ordinary=buildSourcePreflight(docs,{intent:'Гарри изучает книгу'});
+ assert.ok(ordinary.selected.some(x=>x.reference==='calibration@1'));
+ assert.ok(!ordinary.selected.some(x=>x.reference==='style@1'));
+ const relationships=buildSourcePreflight(docs,{intent:'Близость и разговор после ссоры'});
+ const style=relationships.selected.find(x=>x.reference==='style@1');
+ assert.equal(style.role,'Стилевой ориентир, не доказательство событий');
+});
