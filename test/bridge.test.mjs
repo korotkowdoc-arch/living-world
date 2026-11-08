@@ -9,7 +9,8 @@ const env={
   SUPABASE_URL:'https://bcwzlsljcxubqtvzsucz.supabase.co',
   SUPABASE_OAUTH_CLIENT_ID:'f08a0ef2-bdfc-4d0d-b9ab-ce900c85e0d6',
   BRIDGE_SUPABASE_USER_ID:'0a3fbf41-c3c6-4743-a88c-f9a7870fd244',
-  SUPABASE_PUBLISHABLE_KEY:'public-test-value'
+  SUPABASE_PUBLISHABLE_KEY:'public-test-value',
+  BRIDGE_WRITES_ENABLED:'false'
 };
 const call=(method,params={},headers={},config=env)=>bridge.fetch(new Request(root+'/mcp',{
   method:'POST',headers:{'content-type':'application/json',...headers},
@@ -156,4 +157,16 @@ test('Workers redirect compatibility: auth and RPC fetches never follow redirect
    globalThis.fetch=originalFetch;
    console.warn=originalWarn;
  }
+});
+
+test('owner-authorized bridge write tool is listed only when enabled',async()=>{
+ const enabled={...env,BRIDGE_WRITES_ENABLED:'true'};
+ const r=await call('tools/list',{},{},enabled);
+ assert.equal(r.status,200);
+ const list=(await r.json()).result.tools.map(x=>x.name);
+ assert.ok(list.includes('save_scene_package'));
+ const health=await bridge.fetch(new Request(root+'/health'),enabled);
+ assert.equal((await health.json()).writes_enabled,true);
+ const turnedOff=await bridge.fetch(new Request(root+'/health'),env);
+ assert.equal((await turnedOff.json()).writes_enabled,false);
 });
