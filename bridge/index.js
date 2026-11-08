@@ -361,12 +361,12 @@ async function companionState(env,identity,id){
    '&select=id,parent_scene_id,world_time,prompt_note&order=created_at.asc&limit=500&offset='+offset;
   const page=await supabase(env,path,{token:identity.token});
   if(!Array.isArray(page))throw Error('Не удалось прочитать журнал сцен.');
-  if(offset===3000 || rows.length+page.length>3000){
+  if((offset===3000 && page.length>0) || rows.length+page.length>3000){
    return {mode:'live',world_id:id,branch_id:data.branch.id,head_scene_id:head,
     complete:false,reason:'В истории больше 3000 записей. Требуется долговременный checkpoint для полного журнала.'};
   }
   rows.push(...page);
-  if(page.length<500)break;
+  if(page.length<500 || offset===3000)break;
  }
  let lineage;
  try{lineage=activeLineage(rows,head);}catch(error){return {mode:'live',world_id:id,branch_id:data.branch.id,
