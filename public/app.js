@@ -8,11 +8,12 @@ import {validateNewWorldSetup,latestReusableDocs} from './world-setup.mjs';
 import {WORLD_LONG_PRESS_MS,WORLD_CLICK_SUPPRESS_MS,worldMenuPosition,suppressWorldOpen} from './world-context.mjs';
 import {WORLD_BACKUP_FORMAT,sealWorldBackup,validateWorldBackup} from './world-backup.mjs';
 import {projectCausalMemory,searchCausalMemory} from './world-causality.mjs';
+import {persistWorldAutosave} from './world-autosave.mjs';
 import {projectCharacterMemory} from './world-character-memory.mjs';
 
 const app=document.getElementById('app');
 const cfgKey='lw_cloud_config_v03'; // Preserve the existing Supabase connection when upgrading.
-const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[],aiReady:false,aiReason:'Подключение ещё не проверено',assets:null,assetIssue:null,documents:[],documentsReady:null,documentsError:'',docSelected:null,docContent:null,characterLedger:null,causalLedger:null,memoryQuery:'',memoryKind:'fact',memoryOffset:0,worldContext:null,suppressWorldClickUntil:0,saveDiagnostic:null,autoSavePendingWorldId:null};
+const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[],aiReady:false,aiReason:'Подключение ещё не проверено',assets:null,assetIssue:null,documents:[],documentsReady:null,documentsError:'',docSelected:null,docContent:null,characterLedger:null,causalLedger:null,memoryQuery:'',memoryKind:'fact',memoryOffset:0,worldContext:null,suppressWorldClickUntil:0,saveDiagnostic:null,autoSavePendingWorldId:null,autoSaveErrors:{}};
 const x=v=>esc(v??'');
 // Historical start and current narrative period are separate; don't fabricate a date.
 const storyClock=(w=state.world)=>state.scenes.at(-1)?.world_time||w?.genesis_choices?.current_period||(w?.genesis_approved?'':w?.clock_start)||'';
@@ -45,7 +46,7 @@ function renderLibrary(){
  const rows=state.worlds.map(w=>{
   const enabled=w.genesis_choices?.auto_save_enabled===true;
   const pending=state.autoSavePendingWorldId===w.id;
-  const label=enabled?'Включён':'Выключен';
+  const label=enabled?'Включён':'Выключен',error=state.autoSaveErrors[w.id];
   return `<div class="world-library-card">
    <button type="button" class="world-card" data-action="open-world" data-id="${x(w.id)}" title="Открыть мир. Долгое нажатие или правая кнопка — действия." style="text-align:left">
    <span class="tag">${x(w.genre||'Фэнтези')}</span><h3>${x(w.name)}</h3>
@@ -54,17 +55,18 @@ function renderLibrary(){
    <div class="world-card-hint">Удерживай или ПКМ — действия</div></button>
    <div class="world-save-footer">
     <div class="world-save-copy"><b>Автосейв сцен</b>
-    <span>${pending?'Проверка Supabase…':enabled?'Сцены из ChatGPT сохраняются автоматически':'Запись из ChatGPT после подтверждения'}</span></div>
-    <button type="button" class="world-save-switch ${enabled?'is-on':''}" role="switch"
-      aria-checked="${enabled}" aria-label="Автосейв сцен: ${x(w.name)} — ${label}"
-      aria-busy="${pending}" ${pending?'disabled':''}
-      data-action="world-auto-save-toggle" data-id="${x(w.id)}">
-      <span class="world-save-switch-track" aria-hidden="true"><span class="world-save-switch-knob"></span></span>
-      <span class="world-save-switch-status">${pending?'…':label}</span>
-    </button>
-   </div></div>`;
+    <span>${pending?'Сохранение настройки в Supabase…':enabled?'Разрешено автоматическое сохранение сцен':'Для каждой записи нужно подтверждение'}</span></div>
+    <label class="world-save-switch ${enabled?'is-on':''}" for="autosave-${x(w.id)}">
+      <input id="autosave-${x(w.id)}" class="world-save-checkbox" type="checkbox" data-world-autosave="${x(w.id)}"
+      aria-label="Автосейв сцен для мира ${x(w.name)}"
+      aria-busy="${pending}" ${enabled?'checked':''} ${pending?'disabled':''}>
+      <span class="world-save-switch-status" aria-live="polite">${pending?'Сохраняю…':label}</span>
+    </label>
+   </div>
+   ${error?`<div class="world-save-error" role="alert">Не удалось изменить автосейв: ${x(error)}. Настройка не подтверждена.</div>`:''}
+   </div>`;
  }).join('');
- return `${heading('Твоя библиотека','Мои вселенные','Открой мир нажатием на карточку. Автосейв включается отдельно для каждого мира переключателем внизу карточки.',btn('new-world','+ Новая вселенная','gold'))}
+ return `${heading('Твоя библиотека','Мои вселенные','Автосейв переключается отдельно для каждого мира прямо под его карточкой.',btn('new-world','+ Новая вселенная','gold'))}
  ${state.worlds.length?`<div class="grid">${rows}</div>`:`<div class="well" style="text-align:center"><div class="spark">✦</div><h2>Вселенная ещё не создана</h2><p>Задай основу мира, выбери прошлое главного героя и запусти собственную историю.</p>${btn('new-world','Создать первую вселенную','gold')}</div>`}`;
 }
 function renderWorldContextMenu(){
@@ -300,13 +302,8 @@ if(m.type==='revision'){const s=m.scene;body=`<p class="sub">Поставь ку
 if(m.type==='delete-world'){
  body=`<p class="sub">Удалить мир <strong>«${x(m.name)}»</strong> со всей его историей, персонажами и документами?</p><p class="hint">Это действие нельзя отменить.</p><div class="row" style="margin-top:20px">${btn('cancel-delete-world','Нет')}${btn('confirm-delete-world','Да','danger')}</div>`;
 }
-if(m.type==='enable-auto-save'){
- body=`<p class="sub">Разрешить автоматическое сохранение <strong>подтверждённых сцен</strong> в мир <strong>«${x(m.name)}»</strong>?</p>
- <p class="hint">Сцены и их последствия будут записываться из подключённого ChatGPT без отдельной страницы подтверждения. Можно отключить в любой момент. Никаких ранее сыгранных событий это не изменит.</p>
- <div class="row" style="margin-top:20px">${btn('cancel-auto-save','Нет')}${btn('confirm-auto-save','Да, разрешить','gold')}</div>`;
-}
 if(m.type==='import'){body=`<p class="sub">Выбери JSON-файл экспорта LIVING WORLD. Он будет восстановлен как новая копия мира.</p><div class="field" style="margin:15px 0"><label>Файл резервной копии</label><input type="file" id="backup-file" accept="application/json,.json"></div>${btn('import-file','Восстановить мир из файла','gold full')}`;}
-return `<div class="modalwrap"><div class="modal"><div class="modal-head"><h2>${x(m.type==='character'?'Редактор персонажа':m.type==='revision'?'Режиссёрская правка':m.type==='delete-world'?'Удалить мир?':m.type==='enable-auto-save'?'Разрешить автосохранение?':'Импорт мира')}</h2><button class="btn small" data-action="close-modal" aria-label="Закрыть">✕</button></div>${body}</div></div>`;}
+return `<div class="modalwrap"><div class="modal"><div class="modal-head"><h2>${x(m.type==='character'?'Редактор персонажа':m.type==='revision'?'Режиссёрская правка':m.type==='delete-world'?'Удалить мир?':'Импорт мира')}</h2><button class="btn small" data-action="close-modal" aria-label="Закрыть">✕</button></div>${body}</div></div>`;}
 async function checkAiConnection(){
  const status=await aiStatus();
  state.aiReady=status.enabled;
@@ -433,34 +430,29 @@ async function copyReusableDocuments(sourceWorldId,categories=REUSABLE_SOURCE_CA
  return {copied,unchanged,errors};
 }
 async function updateWorldAutoSave(worldId,enabled){
- if(!state.user?.id||!state.client)throw Error('Войди в Supabase, чтобы изменить автосейв.');
  const known=state.worlds.find(w=>w.id===worldId);
- if(!known)throw Error('Мир не найден в твоей библиотеке. Обнови список миров.');
- if(state.autoSavePendingWorldId)throw Error('Предыдущее переключение автосейва ещё не завершено.');
+ if(!known||!state.user?.id||!state.client){
+  notify('Невозможно изменить автосейв: войди в приложение и выбери мир.',true);return;
+ }
+ if(state.autoSavePendingWorldId){
+  state.autoSaveErrors[worldId]='Предыдущая настройка ещё сохраняется';
+  render();return;
+ }
  state.autoSavePendingWorldId=worldId;
+ delete state.autoSaveErrors[worldId];
  render();
  try{
-  const before=dataOrThrow(await state.client.from('lw_worlds')
-   .select('id,owner_id,genesis_choices').eq('id',worldId).eq('owner_id',state.user.id).single());
-  if(!before||before.id!==worldId)throw Error('Мир больше не доступен этому владельцу.');
-  const merged={...(before.genesis_choices||{}),auto_save_enabled:enabled};
-  if(before.genesis_choices?.auto_save_enabled!==enabled){
-   dataOrThrow(await state.client.from('lw_worlds')
-    .update({genesis_choices:merged,updated_at:new Date().toISOString()})
-    .eq('id',worldId).eq('owner_id',state.user.id).select('id').single());
-  }
-  const check=dataOrThrow(await state.client.from('lw_worlds')
-   .select('id,genesis_choices').eq('id',worldId).eq('owner_id',state.user.id).single());
-  if(check?.id!==worldId||check.genesis_choices?.auto_save_enabled!==enabled)
-   throw Error('Supabase не подтвердил переключение автосейва. Проверь подключение и повтори.');
-  state.worlds=state.worlds.map(w=>w.id===worldId?{...w,genesis_choices:check.genesis_choices}:w);
+  const choices=await persistWorldAutosave({
+   client:state.client,userId:state.user.id,worldId,enabled
+  });
+  state.worlds=state.worlds.map(w=>w.id===worldId?{...w,genesis_choices:choices}:w);
   if(state.world?.id===worldId)
-   state.world={...state.world,genesis_choices:check.genesis_choices};
-  state.modal=null;
-  notify('«'+known.name+'»: автосейв '+(enabled?'включён':'выключен')+' — проверено в Supabase.');
+   state.world={...state.world,genesis_choices:choices};
+  notify(`«${known.name}»: автосейв ${enabled?'включён':'выключен'}. Supabase подтвердил запись.`);
  }catch(error){
+  state.autoSaveErrors[worldId]=errtext(error);
   await loadWorlds().catch(()=>{});
-  throw error;
+  notify('Не удалось изменить автосейв: '+state.autoSaveErrors[worldId],true);
  }finally{
   state.autoSavePendingWorldId=null;
   render();
@@ -674,7 +666,7 @@ async function runSaveDiagnosticFromCompanion(){
 
 async function actionHandler(action,el){switch(action){
 case 'run-save-diagnostic':await runSaveDiagnosticFromCompanion();return;
-case 'navigate':state.worldContext=null;state.view=el.dataset.view;if(state.view==='story')state.recentLimit=40;if(state.view==='assets'||state.view==='people'||state.view==='memory')await loadAssets();if(state.view==='documents')await loadDocuments();render();return;
+case 'navigate':state.worldContext=null;state.view=el.dataset.view;if(state.view==='library')await loadWorlds();if(state.view==='story')state.recentLimit=40;if(state.view==='assets'||state.view==='people'||state.view==='memory')await loadAssets();if(state.view==='documents')await loadDocuments();render();return;
 case 'goto-memory':state.view='memory';await loadAssets();render();return;
 case 'memory-reload':await loadScenes();await loadAssets();render();return;
 case 'memory-search':state.memoryQuery=document.getElementById('memory-query')?.value?.trim()||'';state.memoryKind=document.getElementById('memory-kind')?.value||'fact';state.memoryOffset=0;render();return;
@@ -907,36 +899,23 @@ case 'login-form':{const d=getForm('login-form');const email=d.email.trim().toLo
 case 'password-form':{const d=getForm('password-form');if(!state.session)throw Error('Для смены пароля сначала войди.');if(d.new_password.length<12)throw Error('Пароль должен содержать минимум 12 символов.');if(d.new_password!==d.repeat_password)throw Error('Пароли не совпадают.');dataOrThrow(await state.client.auth.updateUser({password:d.new_password}));render();notify('Пароль сохранён. При следующих входах используй его.');return;}
 case 'world-form':await saveWorld(getForm('world-form'));render();return;
 case 'goto-world-auto-save':await loadWorlds();state.view='library';render();return;
-case 'world-auto-save-toggle':{
- const worldId=el.dataset.id;
- const world=state.worlds.find(w=>w.id===worldId);
- if(!world)throw Error('Мир не найден в библиотеке.');
- await updateWorldAutoSave(worldId,world.genesis_choices?.auto_save_enabled!==true);
- return;
-}
-case 'toggle-auto-save':{
- const w=state.world;if(!w)throw Error('Сначала выбери мир.');
- const on=w.genesis_choices?.auto_save_enabled===true;
- if(!on){
-  state.modal={type:'enable-auto-save',worldId:w.id,name:w.name};
-  render();
-  return;
- }
- await updateWorldAutoSave(w.id,false);
- return;
-}
-case 'confirm-auto-save':{
- const modal=state.modal;
- if(modal?.type!=='enable-auto-save')throw Error('Подтверждение автосохранения не открыто.');
- await updateWorldAutoSave(modal.worldId,true);
- return;
-}
-case 'cancel-auto-save':state.modal=null;render();return;
 case 'models-form':{const d=getForm('models-form');state.world=dataOrThrow(await state.client.from('lw_worlds').update({model_story:d.model_story,model_relationships:d.model_relationships}).eq('id',state.world.id).select().single());render();notify('Модели записаны как предпочтения (платный API не включается).');return;}
 case 'character-form':await saveCharacter(getForm('character-form'));return;
 case 'scene-form':{const d=getForm('scene-form');if(!d.body?.trim())throw Error('Вставь текст сцены.');await appendScene(d.body,'manual');return;}
 case 'scene-package-form':{const d=getForm('scene-package-form');const packet=parseScenePackage(d.payload);const note=packSceneNote(packet.changes,document.getElementById('story-note')?.value||'',packet.decisions);await appendScene(packet.scene,'chatgpt-manual',{world_time:packet.world_time||undefined,note});state.view=state.world?.genesis_choices?.simulation_mode&&state.world.genesis_choices.simulation_mode!=='off'?'story':'memory';render();return;}
 }}
+document.addEventListener('change',e=>{
+ const checkbox=e.target?.closest?.('input[data-world-autosave]');
+ if(!checkbox)return;
+ const worldId=checkbox.dataset.worldAutosave;
+ const enabled=checkbox.checked;
+ // Native change is independent of generic click/busy handling (mobile in-app browsers).
+ void updateWorldAutoSave(worldId,enabled).catch(error=>{
+  state.autoSaveErrors[worldId]=errtext(error);
+  notify('Ошибка переключения автосейва: '+errtext(error),true);
+  render();
+ });
+});
 document.addEventListener('change',e=>{if(e.target?.id==='world-setup-source'){const choices=document.getElementById('world-setup-categories');if(choices)choices.hidden=!e.target.value;}if(e.target?.id==='scene-length'&&state.world){state.sceneLength=e.target.value;localStorage.setItem('lw_scene_length_'+state.world.id,state.sceneLength);}});
 let worldPressTimer=null,worldTouchStart=null;
 function clearWorldPress(){if(worldPressTimer!==null){clearTimeout(worldPressTimer);worldPressTimer=null;}worldTouchStart=null;}
