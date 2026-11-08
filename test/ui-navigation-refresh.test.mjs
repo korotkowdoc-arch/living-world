@@ -37,7 +37,7 @@ test('Story, Assets and Memory expose live scene reload, without navigating away
 function mockStore(){
  const world={id:'world-a',active_branch_id:'branch-a',genesis_choices:{auto_save_enabled:true}};
  const branches=[{id:'branch-a',world_id:'world-a',head_scene_id:'scene-001'}];
- const scene={id:'scene-001',parent_scene_id:null,world_time:'1995-10',prompt_note:'structured'};
+ const scene={id:'scene-001',world_id:'world-a',parent_scene_id:null,world_time:'1995-10',prompt_note:'structured'};
  const tables={lw_worlds:[world],lw_branches:branches,lw_scenes:[scene]};
  const reads=[];
  const client={
