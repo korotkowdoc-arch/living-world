@@ -1,0 +1,7 @@
+{
+  "name": "living-world-bridge-mcp",
+  "main": "index.js",
+  "compatibility_date": "2026-11-08",
+  "workers_dev": true,
+  "keep_vars": true
+}
