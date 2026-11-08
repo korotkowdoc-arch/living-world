@@ -275,8 +275,13 @@ if(m.type==='revision'){const s=m.scene;body=`<p class="sub">Поставь ку
 if(m.type==='delete-world'){
  body=`<p class="sub">Удалить мир <strong>«${x(m.name)}»</strong> со всей его историей, персонажами и документами?</p><p class="hint">Это действие нельзя отменить.</p><div class="row" style="margin-top:20px">${btn('cancel-delete-world','Нет')}${btn('confirm-delete-world','Да','danger')}</div>`;
 }
+if(m.type==='enable-auto-save'){
+ body=`<p class="sub">Разрешить автоматическое сохранение <strong>подтверждённых сцен</strong> в мир <strong>«${x(m.name)}»</strong>?</p>
+ <p class="hint">Сцены и их последствия будут записываться из подключённого ChatGPT без отдельной страницы подтверждения. Можно отключить в любой момент. Никаких ранее сыгранных событий это не изменит.</p>
+ <div class="row" style="margin-top:20px">${btn('cancel-auto-save','Нет')}${btn('confirm-auto-save','Да, разрешить','gold')}</div>`;
+}
 if(m.type==='import'){body=`<p class="sub">Выбери JSON-файл экспорта LIVING WORLD. Он будет восстановлен как новая копия мира.</p><div class="field" style="margin:15px 0"><label>Файл резервной копии</label><input type="file" id="backup-file" accept="application/json,.json"></div>${btn('import-file','Восстановить мир из файла','gold full')}`;}
-return `<div class="modalwrap"><div class="modal"><div class="modal-head"><h2>${x(m.type==='character'?'Редактор персонажа':m.type==='revision'?'Режиссёрская правка':m.type==='delete-world'?'Удалить мир?':'Импорт мира')}</h2><button class="btn small" data-action="close-modal" aria-label="Закрыть">✕</button></div>${body}</div></div>`;}
+return `<div class="modalwrap"><div class="modal"><div class="modal-head"><h2>${x(m.type==='character'?'Редактор персонажа':m.type==='revision'?'Режиссёрская правка':m.type==='delete-world'?'Удалить мир?':m.type==='enable-auto-save'?'Разрешить автосохранение?':'Импорт мира')}</h2><button class="btn small" data-action="close-modal" aria-label="Закрыть">✕</button></div>${body}</div></div>`;}
 async function checkAiConnection(){
  const status=await aiStatus();
  state.aiReady=status.enabled;
@@ -401,6 +406,28 @@ async function copyReusableDocuments(sourceWorldId,categories=REUSABLE_SOURCE_CA
   }catch(error){errors.push(doc.title+': '+errtext(error));}
  }
  return {copied,unchanged,errors};
+}
+async function updateWorldAutoSave(worldId,enabled){
+ const w=state.world;
+ if(!w||w.id!==worldId||!state.user?.id)throw Error('Выбранный мир изменился. Открой его снова.');
+ // Read from Supabase before toggling to avoid overwriting fresh Genesis choices.
+ const before=dataOrThrow(await state.client.from('lw_worlds')
+   .select('id,owner_id,genesis_choices').eq('id',worldId).eq('owner_id',state.user.id).single());
+ if(!before)throw Error('Мир не найден в Supabase.');
+ const merged={...(before.genesis_choices||{}),auto_save_enabled:enabled};
+ dataOrThrow(await state.client.from('lw_worlds')
+   .update({genesis_choices:merged,updated_at:new Date().toISOString()})
+   .eq('id',worldId).eq('owner_id',state.user.id).select('id').single());
+ // Verify the actual persisted setting; do not report success if it stayed unchanged.
+ const check=dataOrThrow(await state.client.from('lw_worlds')
+   .select('id,genesis_choices').eq('id',worldId).eq('owner_id',state.user.id).single());
+ if(check?.genesis_choices?.auto_save_enabled!==enabled){
+   throw Error('Supabase не подтвердил новое значение автосохранения. Обнови страницу и повтори.');
+ }
+ state.world={...w,genesis_choices:check.genesis_choices};
+ state.modal=null;
+ render();
+ notify(enabled?'Автосохранение включено и проверено в Supabase.':'Автосохранение выключено и проверено в Supabase.');
 }
 async function saveWorld(fields){const w=state.world;if(!w)throw Error('Мир не выбран');const data={name:cleanText(fields.name,140),genre:fields.genre,premise:cleanText(fields.premise,15000),world_rules:cleanText(fields.world_rules,20000),history:cleanText(fields.history,50000),timeline:cleanText(fields.timeline,50000),clock_start:cleanText(fields.clock_start,80),genesis_choices:{...(w.genesis_choices||{}),current_period:cleanText(fields.current_period,30)},updated_at:new Date().toISOString()};if(data.genesis_choices.current_period&&!validStoryClock(data.genesis_choices.current_period))throw Error('Текущий период: YYYY-MM, YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS.');if(!data.name)throw Error('Укажи название мира');state.world=dataOrThrow(await state.client.from('lw_worlds').update(data).eq('id',w.id).select().single());await loadWorlds();notify('Мир сохранён в облаке.');}
 async function newWorld(setup){
@@ -845,10 +872,21 @@ case 'world-form':await saveWorld(getForm('world-form'));render();return;
 case 'toggle-auto-save':{
  const w=state.world;if(!w)throw Error('Сначала выбери мир.');
  const on=w.genesis_choices?.auto_save_enabled===true;
- if(!on&&!confirm('Разрешить сохранение подтверждённых сцен из ChatGPT без отдельной страницы согласования? Только для этого мира.'))return;
- state.world=dataOrThrow(await state.client.from('lw_worlds').update({genesis_choices:{...(w.genesis_choices||{}),auto_save_enabled:!on}}).eq('id',w.id).select().single());
- render();notify(!on?'Автосохранение сцен разрешено для этого мира.':'Автосохранение отключено; требуется подтверждение.');return;
+ if(!on){
+  state.modal={type:'enable-auto-save',worldId:w.id,name:w.name};
+  render();
+  return;
+ }
+ await updateWorldAutoSave(w.id,false);
+ return;
 }
+case 'confirm-auto-save':{
+ const modal=state.modal;
+ if(modal?.type!=='enable-auto-save')throw Error('Подтверждение автосохранения не открыто.');
+ await updateWorldAutoSave(modal.worldId,true);
+ return;
+}
+case 'cancel-auto-save':state.modal=null;render();return;
 case 'models-form':{const d=getForm('models-form');state.world=dataOrThrow(await state.client.from('lw_worlds').update({model_story:d.model_story,model_relationships:d.model_relationships}).eq('id',state.world.id).select().single());render();notify('Модели записаны как предпочтения (платный API не включается).');return;}
 case 'character-form':await saveCharacter(getForm('character-form'));return;
 case 'scene-form':{const d=getForm('scene-form');if(!d.body?.trim())throw Error('Вставь текст сцены.');await appendScene(d.body,'manual');return;}
