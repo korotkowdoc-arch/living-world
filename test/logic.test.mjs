@@ -65,7 +65,7 @@ test('quick genesis keeps a later school entry and simulates childhood first',()
  simulation_mode:'life',world_idea:'Хогвартс: поступление в 18'};
  const prompt=quickGenesisPrompt(world,c);
  assert.match(prompt,/МИНИМАЛЬНЫЙ ВОЗРАСТ ПОСТУПЛЕНИЯ/);
- assert.match(prompt,/Хогвартс доступен только с 18/);
+ assert.match(prompt,/Хогвартс AU с поступлением в 18/);
  assert.match(prompt,/1980-07-31/);
  assert.match(prompt,/возраст в момент начала симуляции\/игры 9/);
  assert.match(prompt,/симуляция предыстории/);
