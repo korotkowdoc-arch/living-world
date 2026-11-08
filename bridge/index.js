@@ -199,10 +199,25 @@ async function verifyBearer(request,env,{mcp=true}={}) {
     if(!audiences.includes(resource(env))&&!audiences.includes('authenticated')) authReject('oauth_audience_mismatch');
   }
   let res;
+  const authStartedAt=Date.now();
   try {res=await fetch(supabaseBase(env)+'/auth/v1/user',{
     headers:{apikey:env.SUPABASE_PUBLISHABLE_KEY,authorization:'Bearer '+token},
     redirect:'error',signal:AbortSignal.timeout(10000)});}
-  catch {authReject('supabase_auth_unreachable');}
+  catch(error) {
+    // Do not log error.message: platform errors may contain URLs or credentials.
+    // Only log a fixed category, allowlisted transport code, and elapsed time.
+    const name=error&&typeof error==='object'?error.name:null;
+    const category=name==='TimeoutError'?'timeout':name==='AbortError'?'aborted':
+      name==='TypeError'?'type_error':name==='NetworkError'?'network_error':'other';
+    const rawCode=error&&typeof error==='object'&&error.cause&&
+      typeof error.cause==='object'?error.cause.code:null;
+    const causeCode=['ENOTFOUND','EAI_AGAIN','ECONNREFUSED','ETIMEDOUT',
+      'ECONNRESET','CERT_HAS_EXPIRED','UNABLE_TO_VERIFY_LEAF_SIGNATURE'].includes(rawCode)?rawCode:null;
+    console.warn('LIVING WORLD Supabase Auth transport:',{
+      category,cause_code:causeCode,elapsed_ms:Date.now()-authStartedAt
+    });
+    authReject('supabase_auth_unreachable');
+  }
   if(!res.ok) authReject('supabase_auth_'+String(res.status));
   let user;
   try {user=await res.json();} catch {authReject('supabase_user_json');}
@@ -453,7 +468,7 @@ export default {async fetch(request,env={}){
       world_time:time,prompt_note:packSceneNote({facts:['Координаты маяка расшифрованы.']})}));
   }
   if(request.method==='GET' && path==='/health') return json({
-    service:'living-world-bridge',version:'2.2.2',
+    service:'living-world-bridge',version:'2.2.3',
     mode:env.BRIDGE_MODE==='live'?'live':'not-live',
     missing_configuration:['BRIDGE_PUBLIC_URL','SUPABASE_URL','SUPABASE_OAUTH_CLIENT_ID','BRIDGE_SUPABASE_USER_ID','SUPABASE_PUBLISHABLE_KEY','BRIDGE_SEAL_KEY'].filter(name=>!env[name]),
     writes_enabled:env.BRIDGE_WRITES_ENABLED==='true'
