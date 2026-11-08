@@ -2,6 +2,18 @@
  * No server migration: scene.prompt_note carries the optional LWSTATE1 record.
  */
 export const NOTE_PREFIX = 'LWSTATE1:';
+/** Preserve date precision: YYYY-MM means the day is genuinely unknown. */
+export function validStoryClock(value) {
+  if(typeof value!=='string')return false;
+  const m=value.match(/^(\d{4})-(0[1-9]|1[0-2])(?:-(0[1-9]|[12]\d|3[01])(?:T([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?)?)?$/);
+  if(!m)return false;
+  if(m[3]){
+    const dt=new Date(Date.UTC(Number(m[1]),Number(m[2])-1,Number(m[3])));
+    if(dt.getUTCFullYear()!==Number(m[1]) || dt.getUTCMonth()!==Number(m[2])-1 || dt.getUTCDate()!==Number(m[3]))return false;
+  }
+  return true;
+}
+
 const asText = value => typeof value === 'string' ? value.trim() : '';
 const normalize = s => asText(s).toLocaleLowerCase('ru');
 const uniqAppend = (items, newItems, limit = 120) => {
@@ -28,7 +40,7 @@ export function parseScenePackage(raw) {
   catch(e) { throw Error('Ошибка JSON пакета: '+e.message); }
   if(!result || typeof result !== 'object' || Array.isArray(result)) throw Error('Пакет должен быть JSON-объектом.');
   if(typeof result.scene !== 'string' || !result.scene.trim() || result.scene.length>150000) throw Error('Поле scene должно содержать текст сцены до 150000 символов.');
-  if(result.world_time !== undefined && (typeof result.world_time!=='string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?$/.test(result.world_time))) throw Error('Время должно иметь формат YYYY-MM-DDTHH:MM:SS.');
+  if(result.world_time !== undefined && !validStoryClock(result.world_time)) throw Error('Время: YYYY-MM, YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS. Не придумывай неизвестный день или час.');
   const c=result.changes;
   if(!c || typeof c !== 'object' || Array.isArray(c)) throw Error('Добавь объект changes для отслеживания последствий.');
   const changes={
@@ -101,5 +113,5 @@ export function compactMemory(memory) {
 }
 export function scenePackagePrompt(narrativePrompt,memory,clock) {
   const state=compactMemory(memory);
-  return `${narrativePrompt}\n\nПАМЯТЬ ДЕЙСТВУЮЩЕЙ ВЕТКИ (не приписывай её знания всем персонажам):\n${JSON.stringify(state,null,2)}\n\nВерни ТОЛЬКО один валидный JSON-объект без Markdown:\n{\n  "scene": "Цельная художественная сцена; не сокращай её ради отчёта",\n  "world_time": "${clock}",\n  "changes": {\n    "facts": ["Только новые подтверждённые произошедшие факты"],\n    "open_threads": ["Новые ещё не закрытые линии без обещанных исходов"],\n    "resolved_threads": ["Точные формулировки уже закрытых линий из open_threads"],\n    "offscreen_events": ["Только причинно возможные события вне сцены"],\n    "characters": [{"name":"Имя изменившегося персонажа","location":"Новое место, если оно изменилось","health":"Новое состояние здоровья, если изменилось","mood":"Настроение, если изменилось","status":"Социальный статус, если изменился","goals":"Новые цели, если изменились","relationships":"Изменение связи, если оно произошло","inventory":"Изменившиеся ресурсы","learned":[{"fact":"Что точно узнал именно этот персонаж","via":"Реальный канал, через который он узнал"}],"beliefs":["Субъективная версия, которая может быть неверной"]}]\n  }\n}\nЕсли нет изменений, оставь соответствующий массив пустым и не выдумывай события. В поле characters включай только тех, чьё состояние действительно изменилось. Никаких событий из отменённых веток. Сначала художественная причинность, затем достоверные последствия.`;
+  return `${narrativePrompt}\n\nПАМЯТЬ ДЕЙСТВУЮЩЕЙ ВЕТКИ (не приписывай её знания всем персонажам):\n${JSON.stringify(state,null,2)}\n\nВерни ТОЛЬКО один валидный JSON-объект без Markdown:\n{\n  "scene": "Цельная художественная сцена; не сокращай её ради отчёта",\n  "world_time": "${clock}",\n  "changes": {\n    "facts": ["Только новые подтверждённые произошедшие факты"],\n    "open_threads": ["Новые ещё не закрытые линии без обещанных исходов"],\n    "resolved_threads": ["Точные формулировки уже закрытых линий из open_threads"],\n    "offscreen_events": ["Только причинно возможные события вне сцены"],\n    "characters": [{"name":"Имя изменившегося персонажа","location":"Новое место, если оно изменилось","health":"Новое состояние здоровья, если изменилось","mood":"Настроение, если изменилось","status":"Социальный статус, если изменился","goals":"Новые цели, если изменились","relationships":"Изменение связи, если оно произошло","inventory":"Изменившиеся ресурсы","learned":[{"fact":"Что точно узнал именно этот персонаж","via":"Реальный канал, через который он узнал"}],"beliefs":["Субъективная версия, которая может быть неверной"]}]\n  }\n}\nЕсли день или час не установлен, сохраняй исходную точность world_time (например, YYYY-MM); не придумывай дату ради формата. Если нет изменений, оставь соответствующий массив пустым и не выдумывай события. В поле characters включай только тех, чьё состояние действительно изменилось. Никаких событий из отменённых веток. Сначала художественная причинность, затем достоверные последствия.`;
 }
