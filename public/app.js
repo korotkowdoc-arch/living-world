@@ -670,7 +670,6 @@ document.addEventListener('contextmenu',e=>{
  const card=e.target.closest?.('.world-card[data-action="open-world"]');
  if(!card||state.view!=='library')return;
  e.preventDefault();clearWorldPress();
- state.suppressWorldClickUntil=Date.now()+WORLD_CLICK_SUPPRESS_MS;
  showWorldContextMenu(card.dataset.id,e.clientX,e.clientY);
 });
 document.addEventListener('touchstart',e=>{
