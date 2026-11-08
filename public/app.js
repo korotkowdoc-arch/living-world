@@ -477,7 +477,7 @@ async function importBackup(file){
   model_story:old.model_story||'gpt-6',model_relationships:old.model_relationships||'gpt-5.6',
   owner_id:state.user.id
  };
- let created=null;
+ let created=null,committed=false;
  try{
   created=dataOrThrow(await state.client.from('lw_worlds').insert(newW).select().single());
   const bmap=new Map(backup.branches.map(b=>[b.id,crypto.randomUUID()]));
@@ -522,12 +522,16 @@ async function importBackup(file){
   }
   const active=bmap.get(old.active_branch_id)||bRows[0].id;
   dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:active}).eq('id',created.id));
+  committed=true;
   state.modal=null;
   await loadWorlds();await openWorld(created.id);
-  state.view='assets';await loadAssets();render();
+  state.view='assets';
+  try{await loadAssets();}
+  catch(error){state.assets=null;state.assetIssue=errtext(error);}
+  render();
   notify('Мир полностью восстановлен: '+sceneRows.length+' сцен и '+documentRows.length+' редакций документов.');
  }catch(error){
-  if(created?.id){
+  if(created?.id&&!committed){
    try{
     dataOrThrow(await state.client.from('lw_worlds').delete().eq('id',created.id).select('id'));
    }catch(cleanupError){
@@ -535,6 +539,7 @@ async function importBackup(file){
       errtext(cleanupError)+'. Причина: '+errtext(error));
    }
   }
+  if(committed)throw Error('Мир сохранён целиком, но экран не обновился: '+errtext(error)+'. Открой копию из списка миров.');
   throw Error('Восстановление отменено, неполная копия очищена. '+errtext(error));
  }
 }
