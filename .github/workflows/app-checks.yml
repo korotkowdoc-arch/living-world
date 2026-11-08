@@ -25,3 +25,13 @@ jobs:
         run: npm run check
       - name: Run offline application regression tests
         run: npm test
+
+      - name: Inspect deployed AI gateway (observational)
+        shell: bash
+        run: |
+          set -uo pipefail
+          endpoint='https://living-world-bridge-mcp.korotkowdoc.workers.dev/api/ai/status'
+          code=$(curl -sS --max-time 12 -o /tmp/ai-status.json -w '%{http_code}' -H 'Origin: https://livingworld-35q.pages.dev' "$endpoint") || code='connection-failed'
+          echo "AI gateway HTTP status: $code"
+          if [ -s /tmp/ai-status.json ]; then head -c 1200 /tmp/ai-status.json; echo; fi
+          if [ "$code" = 200 ]; then echo "AI route deployed; check enabled field before declaring ready"; else echo "::warning::AI route not confirmed on live Worker; deploy Worker before enabling automatic buttons"; fi
