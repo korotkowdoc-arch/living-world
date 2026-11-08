@@ -89,14 +89,16 @@ export function buildSourcePreflight(rows=[],{intent='',actors=[],maxExcerptChar
    ...normalize(intent).match(/[\p{L}\p{N}-]{4,}/gu)||[]
  ])].filter(x=>typeof x==='string'&&x.length>=4).slice(0,18);
  const selected=[],missingFull=[];
+ const styleRelevant=/интим|близост|романтик|поцелу|психолог|описан|отношен|телесн|stylistic|style|intimacy/i.test(intent);
  let budget=maxExcerptChars;
  for(const doc of entries){
-  const required=['core_rules','glossary'].includes(doc.category);
+  const required=['core_rules','glossary','director_calibration'].includes(doc.category)||(doc.category==='style_example'&&styleRelevant);
   const source=String(doc.content||'');
   const sourceSize=doc.content_length??source.length;
   if(required&&source){
-    const slice=source.slice(0,Math.max(0,Math.min(budget,doc.category==='core_rules'?18000:14000)));
-    if(slice){selected.push({reference:citationId(doc),category:doc.category,title:doc.title,full_text:slice,complete:slice.length===source.length});budget-=slice.length;}
+    const cap=doc.category==='core_rules'?18000:doc.category==='glossary'?14000:doc.category==='director_calibration'?6000:4500;
+    const slice=source.slice(0,Math.max(0,Math.min(budget,cap)));
+    if(slice){selected.push({reference:citationId(doc),category:doc.category,title:doc.title,full_text:slice,complete:slice.length===source.length,role:doc.category==='style_example'?'Стилевой ориентир, не доказательство событий':undefined});budget-=slice.length;}
     if(slice.length<sourceSize)missingFull.push(citationId(doc));
   }else if(source&&budget>1000){
     const extracts=findDocExcerpts(source,needles,{radius:380,max:2});
