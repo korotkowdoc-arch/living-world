@@ -328,3 +328,70 @@ test('MCP reference-document writes require explicit opt-in and create immutable
   assert.equal(result.persisted,true);assert.equal(result.revision,1);assert.equal(result.length,doc.content.length);assert.equal(writes,1);
  }finally{globalThis.fetch=prev;}
 });
+
+
+test('website diagnostic rejects other sites and does not accept unauthenticated callers',async()=>{
+ const cfg={...env,BRIDGE_WRITES_ENABLED:'true'};
+ const endpoint=root+'/api/diagnostics/save-test';
+ const rejected=await bridge.fetch(new Request(endpoint,{method:'POST',headers:{origin:'https://attacker.example'}}),cfg);
+ assert.equal(rejected.status,403);
+ const preflight=await bridge.fetch(new Request(endpoint,{method:'OPTIONS',headers:{origin:'https://livingworld-35q.pages.dev','access-control-request-method':'POST'}}),cfg);
+ assert.equal(preflight.status,204);
+ assert.equal(preflight.headers.get('access-control-allow-origin'),'https://livingworld-35q.pages.dev');
+ const unauth=await bridge.fetch(new Request(endpoint,{method:'POST',headers:{origin:'https://livingworld-35q.pages.dev'}}),cfg);
+ assert.equal(unauth.status,401);
+});
+
+test('website diagnostic writes, retries, reads back, then deletes only its disposable world',async()=>{
+ const tmp='10000000-0000-4000-8000-000000000101';
+ const branch='10000000-0000-4000-8000-000000000102';
+ const original=globalThis.fetch;
+ let scene=null,head=null,writes=0,deleted=false,worldCreates=0;
+ const cfg={...env,BRIDGE_WRITES_ENABLED:'true'};
+ globalThis.fetch=async (raw,options={})=>{
+  const url=String(raw);
+  const method=options.method||'GET';
+  if(url.endsWith('/auth/v1/user'))return Response.json({id:env.BRIDGE_SUPABASE_USER_ID});
+  if(url.includes('/rest/v1/lw_worlds?select=id,name')&&method==='POST'){
+   worldCreates++;return Response.json([{id:tmp,name:'Техническая проверка сейвов (временная)'}]);
+  }
+  if(url.includes('/rest/v1/lw_branches?select=id')&&method==='POST')return Response.json([{id:branch}]);
+  if(url.includes('/rest/v1/lw_worlds?id=eq.')&&method==='PATCH')return Response.json([{id:tmp}]);
+  if(url.includes('/rest/v1/lw_worlds?id=eq.')&&method==='DELETE'){
+   assert.equal(url.includes(tmp),true);
+   deleted=true;return Response.json([{id:tmp}]);
+  }
+  if(url.endsWith('/rest/v1/rpc/lw_bridge_v2_state'))
+   return Response.json({world:{id:tmp,name:'Тест',genesis_choices:{auto_save_enabled:true}},
+    branch:{id:branch,head_scene_id:head},characters:[],scenes:[]});
+  if(url.includes('/rest/v1/lw_scenes?id=eq.'))return Response.json(scene?[scene]:[]);
+  if(url.includes('/rest/v1/lw_scenes?world_id=eq.'))return Response.json(scene?[scene]:[]);
+  if(url.endsWith('/rest/v1/rpc/lw_bridge_v2_append')){
+   const payload=JSON.parse(options.body);
+   writes++;
+   scene={id:payload.p_id,world_id:payload.p_world,branch_id:payload.p_branch,
+    parent_scene_id:payload.p_head,world_time:payload.p_time,
+    prompt_note:payload.p_note,body:payload.p_body};
+   head=scene.id;
+   return Response.json(scene.id);
+  }
+  throw Error('Unexpected diagnostic fetch '+method+' '+url);
+ };
+ try{
+  const token=testJwt('authenticated',{client_id:undefined});
+  const response=await bridge.fetch(new Request(root+'/api/diagnostics/save-test',{
+   method:'POST',headers:{origin:'https://livingworld-35q.pages.dev',
+     authorization:'Bearer '+token}
+  }),cfg);
+  assert.equal(response.status,200);
+  const result=await response.json();
+  assert.equal(result.ok,true);
+  assert.equal(result.temporary_world_removed,true);
+  assert.equal(result.receipt.balance,100);
+  assert.equal(result.receipt.duplicate_prevented,true);
+  assert.equal(result.receipt.scanned_scenes,1);
+  assert.equal(writes,1);
+  assert.equal(worldCreates,1);
+  assert.equal(deleted,true);
+ }finally{globalThis.fetch=original;}
+});
