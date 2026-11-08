@@ -100,3 +100,11 @@ Remaining blockers: one real persisted scene from the refreshed OAuth client, se
 ## v1.4 durable causal replay
 
 The current branch's facts, opened/resolved threads and offscreen events are now replayed from confirmed scene ancestry rather than the prior 200-scene preview. Each event has the original scene ID and recorded world time, and can be searched or paged. The `get_world_state`, `get_story_context` and `get_scene_preflight` responses include a full-lineage causal summary and clearly distinguish incomplete history. The `get_causal_memory` OAuth tool offers older facts and source evidence on demand. The companion's Memory page searches across up to 3,000 archived world scenes instead of claiming that the most recent 200 are the whole world. A durable snapshot system for longer worlds remains to be built; beyond the current cap the app reports incomplete state rather than fabricating facts.
+
+## v1.5 owner-only live save diagnostic
+
+Use **Настройки → Диагностика настоящих сейвов → Проверить сейвы в реальной базе** while signed in. The site sends the owner's current Supabase access token only to the existing Cloudflare Worker over HTTPS. The diagnostic API validates the authenticated owner and exact deployed Pages origin, creates a temporary world, invokes the exact `save_scene_auto` server command, retries with the same UUID, reads the branch head, money and item ledger, then deletes that temporary world. It never edits existing worlds, genres, histories, documents or characters. The UI reports the temporary world ID if cleanup fails so the owner can delete it.
+
+This proves the live Cloudflare/Supabase save path, **not the ChatGPT OAuth plugin tool refresh**. The active OAuth connector in this chat may still expose only three read actions; disconnecting/reconnecting it is a separate user account action. Do not claim automatic saves from the chat until `save_scene_auto` is visible to this ChatGPT session and a true scene package has been persisted and reread.
+
+Smoke failures and incomplete cleanup are displayed explicitly; the test is never silently marked successful.
