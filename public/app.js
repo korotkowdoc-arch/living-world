@@ -6,6 +6,7 @@ import {activeLineage,projectCompanion,formatAmount} from './world-ledger.mjs';
 import {DOC_CATEGORIES,REUSABLE_SOURCE_CATEGORIES,guessCategory,normalizedDocumentText,extractDocumentFile,digestText,docCategory} from './reference-documents.mjs';
 import {validateNewWorldSetup,latestReusableDocs} from './world-setup.mjs';
 import {WORLD_LONG_PRESS_MS,WORLD_CLICK_SUPPRESS_MS,worldMenuPosition,suppressWorldOpen} from './world-context.mjs';
+import {WORLD_BACKUP_FORMAT,sealWorldBackup,validateWorldBackup} from './world-backup.mjs';
 import {projectCharacterMemory} from './world-character-memory.mjs';
 
 const app=document.getElementById('app');
@@ -418,10 +419,125 @@ async function appendScene(body,model='manual',extra={}){const w=state.world;con
 async function switchBranch(id){const w=state.world;dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:id}).eq('id',w.id));await openWorld(w.id);state.view='story';render();notify('Переключено на выбранную временную линию.');}
 function markRevision(){if(!state.revision)return;const ta=document.getElementById('revision-source');state.revision.prefix=ta.value.slice(0,ta.selectionStart);document.getElementById('revision-anchor-status').textContent=`Сохранено символов: ${state.revision.prefix.length}. Остальной хвост будет отменён.`;}
 async function commitRevision(){const r=state.revision;if(!r)return;const continuation=document.getElementById('revision-continuation')?.value||'';const note=document.getElementById('revision-note')?.value||'';if(!continuation.trim())throw Error('Вставь новое продолжение после точки вмешательства');if(!r.prefix&&!confirm('Ты не сохранил префикс сцены. Переписать её с самого начала?'))return;dataOrThrow(await state.client.rpc('lw_fork_scene',{p_world_id:state.world.id,p_source_branch_id:state.world.active_branch_id,p_target_scene_id:r.scene.id,p_prefix:r.prefix,p_continuation:continuation,p_note:note,p_world_time:r.scene.world_time}));state.revision=null;state.modal=null;await openWorld(state.world.id);render();notify('Новая ветка создана. Отменённый хвост не входит в действующую линию.');}
-async function collectBackup(){const w=state.world,worldId=w.id;const chars=dataOrThrow(await state.client.from('lw_characters').select('*').eq('world_id',worldId));const branches=dataOrThrow(await state.client.from('lw_branches').select('*').eq('world_id',worldId));let scenes=[];for(let off=0;;off+=500){const page=dataOrThrow(await state.client.from('lw_scenes').select('*').eq('world_id',worldId).order('created_at').range(off,off+499));scenes.push(...page);if(page.length<500)break;if(off>200000)throw Error('Слишком большая резервная копия для браузера');}return {format:'living-world-cloud-v0.3',exported_at:new Date().toISOString(),world:w,characters:chars,branches,scenes};}
-async function exportWorld(){const data=await collectBackup();const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`living-world-${(state.world.name||'world').replace(/[^\p{L}\p{N}_-]/gu,'_')}-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);notify('Резервная копия скачана. Сохрани её в «Файлы» / iCloud Drive.');}
-async function importBackup(file){if(!file)throw Error('Выбери JSON-файл');if(file.size>45*1024*1024)throw Error('Файл слишком велик для импорта на телефоне');const backup=JSON.parse(await file.text());if(backup.format!=='living-world-cloud-v0.3'||!backup.world||!Array.isArray(backup.scenes)||!Array.isArray(backup.branches)||!Array.isArray(backup.characters))throw Error('Это не резервная копия LIVING WORLD v0.3');const old=backup.world;const newW={name:(old.name||'Восстановленный мир')+' (копия)',genre:old.genre||'Фэнтези',premise:old.premise||'',world_rules:old.world_rules||'',history:old.history||'',timeline:old.timeline||'',clock_start:old.clock_start||'1998-09-01T08:00:00',genesis_choices:old.genesis_choices||{},genesis_draft:old.genesis_draft||null,genesis_approved:!!old.genesis_approved,model_story:old.model_story||'gpt-6',model_relationships:old.model_relationships||'gpt-5.6',owner_id:state.user.id};const w=dataOrThrow(await state.client.from('lw_worlds').insert(newW).select().single());const bmap=new Map(backup.branches.map(b=>[b.id,crypto.randomUUID()]));const smap=new Map(backup.scenes.map(s=>[s.id,crypto.randomUUID()]));const bRows=backup.branches.map(b=>({id:bmap.get(b.id),world_id:w.id,owner_id:state.user.id,name:b.name,parent_branch_id:bmap.get(b.parent_branch_id)||null,fork_scene_id:null,head_scene_id:null}));if(!bRows.length)bRows.push({id:crypto.randomUUID(),world_id:w.id,owner_id:state.user.id,name:'Основная линия'});dataOrThrow(await state.client.from('lw_branches').insert(bRows));const sceneRows=backup.scenes.map(s=>({id:smap.get(s.id),world_id:w.id,owner_id:state.user.id,branch_id:bmap.get(s.branch_id)||bRows[0].id,parent_scene_id:smap.get(s.parent_scene_id)||null,body:s.body||'',world_time:s.world_time||w.clock_start,model:s.model||'manual',delta:s.delta||{},prompt_note:s.prompt_note||'',created_at:s.created_at||new Date().toISOString()}));for(let i=0;i<sceneRows.length;i+=100)dataOrThrow(await state.client.from('lw_scenes').insert(sceneRows.slice(i,i+100)));const cRows=backup.characters.map(c=>({world_id:w.id,owner_id:state.user.id,role:c.role||'npc',...Object.fromEntries(CHARACTER_FIELDS.map(k=>[k,c[k]||''])),created_scene_id:smap.get(c.created_scene_id)||null}));for(let i=0;i<cRows.length;i+=100)dataOrThrow(await state.client.from('lw_characters').insert(cRows.slice(i,i+100)));for(const b of backup.branches){dataOrThrow(await state.client.from('lw_branches').update({head_scene_id:smap.get(b.head_scene_id)||null,fork_scene_id:smap.get(b.fork_scene_id)||null}).eq('id',bmap.get(b.id)));}const active=bmap.get(old.active_branch_id)||bRows[0].id;dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:active}).eq('id',w.id));state.modal=null;await loadWorlds();await openWorld(w.id);state.view='builder';render();notify('Резервная копия восстановлена как отдельная вселенная.');}
-
+async function collectBackup(){
+ const w=state.world;
+ if(!w)throw Error('Выбери мир для создания резервной копии.');
+ const id=w.id;
+ const [chars,branches]=await Promise.all([
+  state.client.from('lw_characters').select('*').eq('world_id',id),
+  state.client.from('lw_branches').select('*').eq('world_id',id)
+ ]);
+ const characters=dataOrThrow(chars),branchesList=dataOrThrow(branches);
+ const readAll=async(table,columns='*')=>{
+  const result=[];
+  for(let off=0;;off+=500){
+   const page=dataOrThrow(await state.client.from(table).select(columns)
+    .eq('world_id',id).order('created_at',{ascending:true}).range(off,off+499));
+   result.push(...page);
+   if(page.length<500)break;
+   if(off>200000)throw Error('Архив слишком велик для экспорта через браузер.');
+  }
+  return result;
+ };
+ const [scenes,documents]=await Promise.all([
+  readAll('lw_scenes'),
+  readAll('lw_reference_docs','doc_key,revision,category,title,source_filename,sha256,content,created_at')
+ ]);
+ for(const d of documents){
+  if(await digestText(d.content)!==d.sha256)throw Error('Документ '+d.title+' повреждён. Экспорт остановлен.');
+ }
+ const result={format:WORLD_BACKUP_FORMAT,exported_at:new Date().toISOString(),world:w,
+  characters,branches:branchesList,scenes,documents};
+ return sealWorldBackup(result);
+}
+async function exportWorld(){
+ const data=await collectBackup();
+ const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+ const a=document.createElement('a');
+ a.href=url;
+ a.download='living-world-'+(state.world.name||'world').replace(/[^\p{L}\p{N}_-]/gu,'_')+
+  '-'+new Date().toISOString().slice(0,10)+'.json';
+ a.click();
+ setTimeout(()=>URL.revokeObjectURL(url),2000);
+ notify('Полная резервная копия скачана: сцены, ветки, персонажи, все редакции правил и проверка целостности.');
+}
+async function importBackup(file){
+ if(!file)throw Error('Выбери файл резервной копии.');
+ if(file.size>45*1024*1024)throw Error('Резервная копия превышает 45 МБ.');
+ const backup=JSON.parse(await file.text());
+ const inspected=await validateWorldBackup(backup);
+ const old=backup.world;
+ const choices={...(old.genesis_choices||{}),auto_save_enabled:false,document_upload_enabled:false};
+ const newW={
+  name:(old.name||'Восстановленный мир')+' (копия)',genre:old.genre||'Фэнтези',
+  premise:old.premise||'',world_rules:old.world_rules||'',history:old.history||'',
+  timeline:old.timeline||'',clock_start:old.clock_start||'1998-09-01T08:00:00',
+  genesis_choices:choices,genesis_draft:old.genesis_draft||null,
+  genesis_approved:!!old.genesis_approved,
+  model_story:old.model_story||'gpt-6',model_relationships:old.model_relationships||'gpt-5.6',
+  owner_id:state.user.id
+ };
+ let created=null;
+ try{
+  created=dataOrThrow(await state.client.from('lw_worlds').insert(newW).select().single());
+  const bmap=new Map(backup.branches.map(b=>[b.id,crypto.randomUUID()]));
+  const smap=new Map(backup.scenes.map(sc=>[sc.id,crypto.randomUUID()]));
+  const bRows=backup.branches.map(b=>({
+   id:bmap.get(b.id),world_id:created.id,owner_id:state.user.id,
+   name:b.name,parent_branch_id:bmap.get(b.parent_branch_id)||null,
+   fork_scene_id:null,head_scene_id:null
+  }));
+  if(!bRows.length)bRows.push({id:crypto.randomUUID(),world_id:created.id,owner_id:state.user.id,name:'Основная линия'});
+  dataOrThrow(await state.client.from('lw_branches').insert(bRows));
+  const sceneRows=backup.scenes.map(sc=>({
+   id:smap.get(sc.id),world_id:created.id,owner_id:state.user.id,
+   branch_id:bmap.get(sc.branch_id)||bRows[0].id,
+   parent_scene_id:smap.get(sc.parent_scene_id)||null,
+   body:sc.body,world_time:sc.world_time,model:sc.model||'manual',
+   delta:sc.delta||{},prompt_note:sc.prompt_note||'',
+   created_at:sc.created_at||new Date().toISOString()
+  }));
+  for(let i=0;i<sceneRows.length;i+=100)
+   dataOrThrow(await state.client.from('lw_scenes').insert(sceneRows.slice(i,i+100)));
+  const characterRows=backup.characters.map(c=>({
+   world_id:created.id,owner_id:state.user.id,role:c.role||'npc',
+   ...Object.fromEntries(CHARACTER_FIELDS.map(k=>[k,c[k]||''])),
+   created_scene_id:smap.get(c.created_scene_id)||null
+  }));
+  for(let i=0;i<characterRows.length;i+=100)
+   dataOrThrow(await state.client.from('lw_characters').insert(characterRows.slice(i,i+100)));
+  const documentRows=inspected.documents.map(d=>({
+   world_id:created.id,owner_id:state.user.id,
+   doc_key:d.doc_key,revision:d.revision,category:d.category,title:d.title,
+   source_filename:d.source_filename||'',sha256:d.sha256,content:d.content,
+   created_at:d.created_at||new Date().toISOString()
+  }));
+  for(let i=0;i<documentRows.length;i+=50)
+   dataOrThrow(await state.client.from('lw_reference_docs').insert(documentRows.slice(i,i+50)));
+  for(const b of backup.branches){
+   dataOrThrow(await state.client.from('lw_branches').update({
+    head_scene_id:smap.get(b.head_scene_id)||null,
+    fork_scene_id:smap.get(b.fork_scene_id)||null
+   }).eq('id',bmap.get(b.id)));
+  }
+  const active=bmap.get(old.active_branch_id)||bRows[0].id;
+  dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:active}).eq('id',created.id));
+  state.modal=null;
+  await loadWorlds();await openWorld(created.id);
+  state.view='assets';await loadAssets();render();
+  notify('Мир полностью восстановлен: '+sceneRows.length+' сцен и '+documentRows.length+' редакций документов.');
+ }catch(error){
+  if(created?.id){
+   try{
+    dataOrThrow(await state.client.from('lw_worlds').delete().eq('id',created.id).select('id'));
+   }catch(cleanupError){
+    throw Error('Восстановление не удалось; не удалось удалить неполную копию "'+created.name+'": '+
+      errtext(cleanupError)+'. Причина: '+errtext(error));
+   }
+  }
+  throw Error('Восстановление отменено, неполная копия очищена. '+errtext(error));
+ }
+}
 async function actionHandler(action,el){switch(action){
 case 'navigate':state.worldContext=null;state.view=el.dataset.view;if(state.view==='story')state.recentLimit=40;if(state.view==='assets'||state.view==='people')await loadAssets();if(state.view==='documents')await loadDocuments();render();return;
 case 'goto-memory':state.view='memory';render();return;
