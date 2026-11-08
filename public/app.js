@@ -4,7 +4,8 @@ import {simulationPrompt,SIMULATION_SPANS} from './simulation.mjs';
 import {aiStatus,aiGenerate} from './ai-client.mjs';
 import {activeLineage,projectCompanion,formatAmount} from './world-ledger.mjs';
 import {DOC_CATEGORIES,REUSABLE_SOURCE_CATEGORIES,guessCategory,normalizedDocumentText,extractDocumentFile,digestText,docCategory} from './reference-documents.mjs';
-import {validateNewWorldSetup,latestReusableDocs,validateDeleteWorldName} from './world-setup.mjs';
+import {validateNewWorldSetup,latestReusableDocs} from './world-setup.mjs';
+import {WORLD_LONG_PRESS_MS,WORLD_CLICK_SUPPRESS_MS,worldMenuPosition,suppressWorldOpen} from './world-context.mjs';
 import {projectCharacterMemory} from './world-character-memory.mjs';
 
 const app=document.getElementById('app');
@@ -49,7 +50,7 @@ function renderWorldContextMenu(){
 function showWorldContextMenu(worldId,clientX,clientY){
  if(state.view!=='library'||!state.worlds.some(w=>w.id===worldId))return;
  const width=220,height=108;
- state.worldContext={id:worldId,x:Math.max(8,Math.min(Number(clientX)||0,window.innerWidth-width-8)),y:Math.max(8,Math.min(Number(clientY)||0,window.innerHeight-height-8))};
+ state.worldContext={id:worldId,...worldMenuPosition(clientX,clientY,window.innerWidth,window.innerHeight,{width,height})};
  render();
 }
 function renderWorldSetup(){
@@ -669,7 +670,7 @@ document.addEventListener('contextmenu',e=>{
  const card=e.target.closest?.('.world-card[data-action="open-world"]');
  if(!card||state.view!=='library')return;
  e.preventDefault();clearWorldPress();
- state.suppressWorldClickUntil=Date.now()+750;
+ state.suppressWorldClickUntil=Date.now()+WORLD_CLICK_SUPPRESS_MS;
  showWorldContextMenu(card.dataset.id,e.clientX,e.clientY);
 });
 document.addEventListener('touchstart',e=>{
@@ -682,10 +683,10 @@ document.addEventListener('touchstart',e=>{
  worldPressTimer=setTimeout(()=>{
   worldPressTimer=null;
   if(worldTouchStart!==start)return;
-  state.suppressWorldClickUntil=Date.now()+900;
+  state.suppressWorldClickUntil=Date.now()+WORLD_CLICK_SUPPRESS_MS;
   showWorldContextMenu(start.worldId,start.x,start.y);
   worldTouchStart=null;
- },550);
+ },WORLD_LONG_PRESS_MS);
 },{passive:true});
 document.addEventListener('touchmove',e=>{
  if(!worldTouchStart)return;
@@ -693,10 +694,18 @@ document.addEventListener('touchmove',e=>{
 },{passive:true});
 document.addEventListener('touchend',clearWorldPress,{passive:true});
 document.addEventListener('touchcancel',clearWorldPress,{passive:true});
+document.addEventListener('keydown',e=>{
+ if(e.key==='Escape'&&state.worldContext){e.preventDefault();state.worldContext=null;render();return;}
+ const card=e.target.closest?.('.world-card[data-action="open-world"]');
+ if(card&&(e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10'))){
+  e.preventDefault();const rect=card.getBoundingClientRect();
+  showWorldContextMenu(card.dataset.id,rect.left+24,rect.top+24);
+ }
+});
 document.addEventListener('click',e=>{
  const el=e.target.closest('[data-action]');
  if(!el)return;
- if(el.dataset.action==='open-world'&&Date.now()<state.suppressWorldClickUntil){e.preventDefault();return;}
+ if(el.dataset.action==='open-world'&&suppressWorldOpen(state.suppressWorldClickUntil,Date.now())){e.preventDefault();return;}
  e.preventDefault();withBusy(()=>actionHandler(el.dataset.action,el));
 });
 document.addEventListener('submit',e=>{e.preventDefault();withBusy(()=>submitHandler(e.target));});
