@@ -3,7 +3,7 @@ import {parseScenePackage,packSceneNote,readSceneNote,makeContinuity,compactMemo
 import {simulationPrompt,SIMULATION_SPANS} from './simulation.mjs';
 import {aiStatus,aiGenerate} from './ai-client.mjs';
 import {activeLineage,projectCompanion,formatAmount} from './world-ledger.mjs';
-import {DOC_CATEGORIES,guessCategory,normalizedDocumentText,extractDocumentFile,digestText,docCategory} from './reference-documents.mjs';
+import {DOC_CATEGORIES,REUSABLE_SOURCE_CATEGORIES,guessCategory,normalizedDocumentText,extractDocumentFile,digestText,docCategory} from './reference-documents.mjs';
 import {projectCharacterMemory} from './world-character-memory.mjs';
 
 const app=document.getElementById('app');
@@ -296,7 +296,7 @@ async function copyReusableDocuments(sourceWorldId){
  if(!destination||state.documentsReady!==true)throw Error('Не выбрана готовая библиотека документов нового мира.');
  const source=(state.worlds||[]).find(w=>w.id===sourceWorldId&&w.id!==destination.id);
  if(!source)throw Error('Выбери другой принадлежащий тебе мир.');
- const categories=['core_rules','glossary','year_anchors','style_example','director_calibration'];
+ const categories=REUSABLE_SOURCE_CATEGORIES;
  const response=await state.client.from('lw_reference_docs').select('doc_key,revision,category,title,source_filename,content,sha256')
   .eq('world_id',source.id).in('category',categories).order('revision',{ascending:false}).limit(150);
  const records=dataOrThrow(response);
