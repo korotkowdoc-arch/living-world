@@ -133,12 +133,21 @@ function challenge(env) {
   // Include the error parameters required for ChatGPT's tool-level OAuth UI.
   return 'Bearer resource_metadata="'+siteOrigin(env)+'/.well-known/oauth-protected-resource", scope="email", error="invalid_token", error_description="Sign in to LIVING WORLD with Supabase"';
 }
-function authRequired(id,env) {
+// These fixed codes contain no account data or token values. Cloudflare logs can
+// diagnose repeated ChatGPT reconnect prompts without collecting credentials.
+function authReject(code) {
+  const error=new Error('OAuth token rejected.');
+  error.authCode=code;
+  throw error;
+}
+function authRequired(id,env,reason='unknown') {
   const hint=challenge(env);
+  console.warn('LIVING WORLD OAuth rejected:',reason);
   return new Response(JSON.stringify({jsonrpc:'2.0',id,result:{
     isError:true,content:[{type:'text',text:'Требуется OAuth-вход через Supabase.'}],
     _meta:{'mcp/www_authenticate':[hint]}}}),{
       status:401,headers:{'content-type':'application/json','www-authenticate':hint,
+        'x-lw-auth-failure':reason,
         'cache-control':'no-store','x-content-type-options':'nosniff'}});
 }
 async function key(env,purpose) {
@@ -164,7 +173,8 @@ function decodeClaims(token) {
     if(parts.length!==3||parts.some(x=>!x)||token.length>16000) throw Error();
     const header=JSON.parse(decoder.decode(unb64(parts[0])));
     const claims=JSON.parse(decoder.decode(unb64(parts[1])));
-    if(!['HS256','ES256','RS256'].includes(header.alg)||header.typ&&header.typ!=='JWT') throw Error();
+    if(!['HS256','ES256','RS256'].includes(header.alg)||
+       (header.typ&&!['JWT','at+jwt','application/at+jwt'].includes(header.typ))) throw Error();
     return claims;
   } catch {throw Error('Неверный токен доступа.');}
 }
@@ -172,20 +182,31 @@ function decodeClaims(token) {
 // asymmetric keys. Decoded claims are NEVER trusted without this Auth response.
 async function verifyBearer(request,env,{mcp=true}={}) {
   const match=/^Bearer ([A-Za-z0-9._~-]+)$/.exec(request.headers.get('authorization')??'');
-  if(!match) throw Error('Требуется Bearer token.');
-  const token=match[1],claims=decodeClaims(token),now=Math.floor(Date.now()/1000);
-  if(claims.iss!==supabaseBase(env)+'/auth/v1'||claims.sub!==env.BRIDGE_SUPABASE_USER_ID||
-     claims.role!=='authenticated'||!Number.isInteger(claims.exp)||claims.exp<=now||
-     !Number.isInteger(claims.iat)||claims.iat>now+30||
-     (mcp&&(claims.client_id!==env.SUPABASE_OAUTH_CLIENT_ID||
-       !(claims.aud===resource(env)||Array.isArray(claims.aud)&&claims.aud.includes(resource(env))))))
-    throw Error('Токен не выпущен для владельца и этого MCP-ресурса.');
-  const res=await fetch(supabaseBase(env)+'/auth/v1/user',{
+  if(!match) authReject('missing_bearer');
+  const token=match[1];
+  let claims;
+  try {claims=decodeClaims(token);} catch {authReject('invalid_jwt_format');}
+  const now=Math.floor(Date.now()/1000);
+  if(claims.iss!==supabaseBase(env)+'/auth/v1') authReject('issuer_mismatch');
+  if(claims.sub!==env.BRIDGE_SUPABASE_USER_ID||claims.role!=='authenticated') authReject('owner_or_role_mismatch');
+  if(!Number.isInteger(claims.exp)||claims.exp<=now||!Number.isInteger(claims.iat)||claims.iat>now+30) authReject('invalid_jwt_time');
+  if(mcp) {
+    if(claims.client_id!==env.SUPABASE_OAUTH_CLIENT_ID) authReject('oauth_client_mismatch');
+    const audiences=Array.isArray(claims.aud)?claims.aud:[claims.aud];
+    // Supabase's standard signed OAuth JWTs use aud="authenticated".
+    // The custom access-token hook may additionally include the MCP resource URL.
+    // Accept either only when the exact approved OAuth client and owner match.
+    if(!audiences.includes(resource(env))&&!audiences.includes('authenticated')) authReject('oauth_audience_mismatch');
+  }
+  let res;
+  try {res=await fetch(supabaseBase(env)+'/auth/v1/user',{
     headers:{apikey:env.SUPABASE_PUBLISHABLE_KEY,authorization:'Bearer '+token},
-    redirect:'error',signal:AbortSignal.timeout(10000)});
-  if(!res.ok) throw Error('Supabase не подтвердил токен.');
-  const user=await res.json();
-  if(user?.id!==claims.sub||user.id!==env.BRIDGE_SUPABASE_USER_ID) throw Error('Владелец Supabase не совпадает.');
+    redirect:'error',signal:AbortSignal.timeout(10000)});}
+  catch {authReject('supabase_auth_unreachable');}
+  if(!res.ok) authReject('supabase_auth_'+String(res.status));
+  let user;
+  try {user=await res.json();} catch {authReject('supabase_user_json');}
+  if(user?.id!==claims.sub||user.id!==env.BRIDGE_SUPABASE_USER_ID) authReject('supabase_user_mismatch');
   return {user:user.id,token,claims};
 }
 async function supabase(env,path,{token,body}={}) {
@@ -432,7 +453,7 @@ export default {async fetch(request,env={}){
       world_time:time,prompt_note:packSceneNote({facts:['Координаты маяка расшифрованы.']})}));
   }
   if(request.method==='GET' && path==='/health') return json({
-    service:'living-world-bridge',version:'2.2.1',
+    service:'living-world-bridge',version:'2.2.2',
     mode:env.BRIDGE_MODE==='live'?'live':'not-live',
     missing_configuration:['BRIDGE_PUBLIC_URL','SUPABASE_URL','SUPABASE_OAUTH_CLIENT_ID','BRIDGE_SUPABASE_USER_ID','SUPABASE_PUBLISHABLE_KEY','BRIDGE_SEAL_KEY'].filter(name=>!env[name]),
     writes_enabled:env.BRIDGE_WRITES_ENABLED==='true'
@@ -453,7 +474,7 @@ export default {async fetch(request,env={}){
   let identity=null;
   if(live&&message.method==='tools/call') {
     try {identity=await verifyBearer(request,env);}
-    catch {return authRequired(message.id,env);}
+    catch(error) {return authRequired(message.id,env,error?.authCode??'unknown');}
   }
   if(message.method==='initialize') return ok({protocolVersion:message.params?.protocolVersion==='2026-07-28'?'2026-07-28':'2025-11-25',capabilities:{tools:{}},serverInfo:{name:'living-world-bridge',version:'2.2.0'}});
   if(message.method==='tools/list') return ok({resultType:'complete',ttlMs:0,cacheScope:'public',tools:live&&env.BRIDGE_WRITES_ENABLED!=='true'
