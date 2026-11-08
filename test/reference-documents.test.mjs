@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {docCategory,guessCategory,latestDocumentVersions,referenceManifest,findDocExcerpts,buildSourcePreflight,normalizedDocumentText,DOCUMENT_CONTENT_LIMIT,extractDocumentFile} from '../public/reference-documents.mjs';
+import {docCategory,guessCategory,latestDocumentVersions,referenceManifest,findDocExcerpts,buildSourcePreflight,normalizedDocumentText,DOCUMENT_CONTENT_LIMIT,REUSABLE_SOURCE_CATEGORIES,extractDocumentFile} from '../public/reference-documents.mjs';
 
 test('document filename classification respects rules and stylistic examples',()=>{
  assert.equal(guessCategory('PROJECT_CORE_RULES_V1_7.docx'),'core_rules');
@@ -66,4 +66,14 @@ test('director calibrations are always supplied; style examples only shape relev
  const relationships=buildSourcePreflight(docs,{intent:'Близость и разговор после ссоры'});
  const style=relationships.selected.find(x=>x.reference==='style@1');
  assert.equal(style.role,'Стилевой ориентир, не доказательство событий');
+});
+
+test('reusable sources never include played year history or former character state',()=>{
+ assert.ok(REUSABLE_SOURCE_CATEGORIES.includes('core_rules'));
+ assert.ok(REUSABLE_SOURCE_CATEGORIES.includes('glossary'));
+ assert.ok(REUSABLE_SOURCE_CATEGORIES.includes('style_example'));
+ assert.ok(!REUSABLE_SOURCE_CATEGORIES.includes('year_document'));
+ assert.ok(!REUSABLE_SOURCE_CATEGORIES.includes('checkpoint'));
+ assert.ok(!REUSABLE_SOURCE_CATEGORIES.includes('character_baseline'));
+ assert.ok(!REUSABLE_SOURCE_CATEGORIES.includes('character_start'));
 });
