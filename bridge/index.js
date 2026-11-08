@@ -73,7 +73,7 @@ function parseScenePackage(raw) {
 }
 function packSceneNote(changes, directorNote='') {
   const note=NOTE_PREFIX+JSON.stringify({v:1,director_note:asText(directorNote).slice(0,1200),delta:changes});
-  if(note.length>10000)throw Error('Слишком много изменений для одной сцены. Сократи пакет до 10000 символов метаданных.');
+  if(note.length>60000)throw Error('Пакет последствий сцены превышает 60000 символов. Раздели структурированные изменения на самостоятельные сцены.');
   return note;
 }
 function readSceneNote(value) {
