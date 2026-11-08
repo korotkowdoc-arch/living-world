@@ -21,7 +21,11 @@ test('active branch excludes invalidated events, resolves exact open threads and
  assert.equal(makeContinuity([base],[accepted,discarded]).facts.includes('НЕВАЛИДНАЯ ВЕТКА'),true);
 });
 test('generation prompt includes exact clock, knowledge channels and world state',()=>{const mem=makeContinuity([base],[]);const prompt=scenePackagePrompt('Продолжи историю',mem,'1998-09-01T08:00:00');assert.match(prompt,/1998-09-01T08:00:00/);assert.match(prompt,/канал/);assert.match(prompt,/Мира/);});
-test('oversized memory note is rejected instead of truncated into invalid JSON',()=>{assert.throws(()=>packSceneNote({facts:['X'.repeat(11000)]}),/10000/);});
+test('large structured memory is preserved, and oversize notes are rejected without truncation',()=>{
+ const note=packSceneNote({facts:['X'.repeat(12000)]});
+ assert.equal(readSceneNote(note).delta.facts[0].length,12000);
+ assert.throws(()=>packSceneNote({facts:['X'.repeat(62000)]}),/60000/);
+});
 
 test('month-level historical precision is preserved without inventing a day',()=>{
  assert.equal(validStoryClock('1999-06'),true);
