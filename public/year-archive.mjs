@@ -59,7 +59,17 @@ export function buildYearArchive({world,branch,scenes=[],characters=[],from,to,a
    for(const learned of arr(person.learned))parts.push('  - '+line(person.name)+' узнал: '+line(learned.fact)+' (канал: '+line(learned.via)+')');
    for(const belief of arr(person.beliefs))parts.push('  - Убеждение '+line(person.name)+': '+line(belief));
   }
-  if(!parts.length){missing++;parts.push('  - Нет структурированного пакета последствий; требуется сверка полного текста сцены в архиве.');}
+  if(!parts.length){
+   missing++;
+   parts.push('  - Нет структурированного пакета последствий; подтверждённые события нужно читать из полного текста этой действующей сцены.');
+   const raw=typeof s.body==='string'?s.body.trim():'';
+   if(raw){
+    const excerpt=raw.length>14000?raw.slice(0,7000)+'\n[СЕРЕДИНА ОПУЩЕНА; ПРОЧИТАЙ ПОЛНЫЙ ТЕКСТ СЦЕНЫ ПО ID]\n'+raw.slice(-7000):raw;
+    parts.push('  - Первичный текст ВАЛИДНОЙ редакции сцены, не структурированный факт ('+raw.length+' символов):\n'+
+     excerpt.split('\n').map(v=>'> '+v).join('\n')+
+     (raw.length>14000?'\n  - Текст показан не полностью; извлеки последствия только после чтения полной сцены.':''));
+   }else parts.push('  - Текст этой сцены не был загружен. Получи его по ID, не возвращай старый отменённый хвост.');
+  }
   chronology.push('### '+sceneRef(s)+'\n'+parts.join('\n'));
  }
  const activeItems=assets.items.filter(i=>i.exists).map(i=>line(i.label)+' [`'+line(i.id)+'`]; собственник '+line(i.owner)+'; держатель '+line(i.holder||'не установлен')+'; место '+line(i.location||'не установлено')+'; состояние '+line(i.condition||'не установлено'));
