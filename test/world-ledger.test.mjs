@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {activeLineage,projectCompanion,validateCompanionDelta,formatAmount} from '../public/world-ledger.mjs';
+import {activeLineage,projectCompanion,validateCompanionDelta,validateNextEvents,formatAmount} from '../public/world-ledger.mjs';
 const changes=(economy=[],items=[],new_characters=[])=>({economy,items,new_characters});
 const e=(id,action,account,amount,extra={})=>({id,action,account,amount,currency:'GALLEON',scale:0,reason:'Произошло в сцене',source:'Прямая фраза в диалоге',...extra});
 const i=(id,action,item_id,extra={})=>({id,action,item_id,reason:'Сыгранный факт',source:'Прямая сцена',...extra});
@@ -79,4 +79,19 @@ test('explicit verified balance may be reconciled after unknown earlier expenses
  assert.equal(a.known,true);
  assert.equal(a.balance,200);
  assert.equal(a.entries.length,4);
+});
+
+test('precommit validation catches overspending and gifts of nonexistent property',()=>{
+ const current=projectCompanion([a,b],{strict:true});
+ const over=changes([e('overspend','debit','Гарри',850)]);
+ assert.throws(()=>validateNextEvents(current,over),/Недостаточно/);
+ const nonexistent=changes([],[i('badgift','gift','missing-cloak',{owner:'Гарри',recipient:'Лия'})]);
+ assert.throws(()=>validateNextEvents(current,nonexistent),/отсутствует/);
+ assert.equal(validateNextEvents(current,changes([e('affordable','debit','Гарри',250)])).balances.find(x=>x.person==='Гарри').balance,550);
+});
+test('precommit blocks duplication of an existing NPC and item, and validates transfer custody',()=>{
+ const current=projectCompanion([a,b],{strict:true});
+ assert.throws(()=>validateNextEvents(current,changes([],[i('same','acquire','cloak01',{label:'Мантия',owner:'Гарри'})])),/уже был введён/);
+ assert.throws(()=>validateNextEvents(current,changes([],[],[{name:'Рон',description:'Друг',causal_link:'Со школы',goals:'Играть',knowledge:'Знает школу'}]),[{name:'Рон'}]),/уже существует/);
+ assert.equal(validateNextEvents(current,changes([],[i('loan','loan','cloak01',{holder:'Гарри',recipient:'Гермиона'})])).items.find(x=>x.id==='cloak01').holder,'Гермиона');
 });
