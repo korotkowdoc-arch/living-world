@@ -15,6 +15,7 @@ export const DOC_CATEGORIES=Object.freeze([
  {id:'other',label:'Другое',priority:20,order:10}
 ]);
 export const DOCUMENT_CONTENT_LIMIT=750000;
+export const REUSABLE_SOURCE_CATEGORIES=Object.freeze(['core_rules','glossary','year_anchors','style_example','director_calibration']);
 export function docCategory(category){
  return DOC_CATEGORIES.find(x=>x.id===category)||DOC_CATEGORIES.at(-1);
 }
