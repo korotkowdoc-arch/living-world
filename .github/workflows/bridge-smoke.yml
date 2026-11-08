@@ -24,6 +24,22 @@ jobs:
         run: |
           node --check bridge/index.js
           node --test test/bridge.test.mjs
+      - name: Verify disposable diagnostic CORS endpoint is deployed (no auth or world writes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint='https://living-world-bridge-mcp.korotkowdoc.workers.dev/api/diagnostics/save-test'
+          for attempt in $(seq 1 12); do
+            status=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -X OPTIONS \
+              -H 'Origin: https://livingworld-35q.pages.dev' \
+              -H 'Access-Control-Request-Method: POST' "$endpoint" || true)
+            if [ "$status" = "204" ]; then
+              echo 'Private save diagnostic preflight: OK'
+              break
+            fi
+            if [ "$attempt" -eq 12 ]; then echo "Private diagnostic endpoint not deployed"; exit 1; fi
+            sleep 5
+          done
       - name: Verify public metadata is served by the live Worker
         shell: bash
         run: |
