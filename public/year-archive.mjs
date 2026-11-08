@@ -19,7 +19,7 @@ const sceneRef=s=>'`'+s.id+'`'+' ('+line(s.world_time||'время неизве�
 const validPeriod=v=>/^\d{4}-(0[1-9]|1[0-2])$/.test(v||'');
 const monthsBetween=(from,to)=>(Number(to.slice(0,4))-Number(from.slice(0,4)))*12+(Number(to.slice(5))-Number(from.slice(5)));
 
-export function buildYearArchive({world,branch,scenes=[],characters=[],from,to}={}){
+export function buildYearArchive({world,branch,scenes=[],characters=[],from,to,allowPartial=false}={}){
  if(!world?.id||!branch?.id||world.active_branch_id!==branch.id)
   throw Error('Для архива требуется действующая ветка выбранного мира.');
  if(!validPeriod(from)||!validPeriod(to)||monthsBetween(from,to)<0||monthsBetween(from,to)>12)
@@ -28,7 +28,9 @@ export function buildYearArchive({world,branch,scenes=[],characters=[],from,to}=
  if(branch.head_scene_id!==scenes.at(-1).id)
   throw Error('Архив нельзя создавать по устаревшей цепочке. Перечитай сцены.');
  const latest=dateMonth(scenes.at(-1).world_time);
- if(!validPeriod(latest)||latest<to)
+ if(!validPeriod(latest))throw Error('Дата последней сцены не установлена. Нельзя корректно пересчитать год.');
+ const completed=latest>=to;
+ if(!completed&&!allowPartial)
   throw Error('Этот период ещё не завершён в сохранённых сценах. Не создавай Year Document заранее.');
  const selected=scenes.filter(s=>dateMonth(s.world_time)>=from&&dateMonth(s.world_time)<=to);
  if(!selected.length)throw Error('В выбранном году нет подтверждённых сцен.');
@@ -74,7 +76,7 @@ export function buildYearArchive({world,branch,scenes=[],characters=[],from,to}=
  const recentFacts=causal.facts.filter(f=>dateMonth(f.world_time)>=from&&dateMonth(f.world_time)<=to).map(f=>line(f.text)+' — `'+f.scene_id+'`');
  const accounts=assets.accounts.map(acc=>acc.person+' / '+acc.currency+': '+formatAmount(acc));
  const text=[
-  '# YEAR DOCUMENT · '+from+' — '+to,
+  (completed?'# YEAR DOCUMENT · ':'# РАБОЧАЯ СВОДКА ГОДА · ')+from+' — '+to,
   'LW_ARCHIVE_WORLD_ID: '+world.id,
   'LW_ARCHIVE_BRANCH_ID: '+branch.id,
   'LW_ARCHIVE_ACTIVE_HEAD: '+beforeOrAt.at(-1).id,
@@ -85,6 +87,7 @@ export function buildYearArchive({world,branch,scenes=[],characters=[],from,to}=
   '## Покрытие',
   '- Мир: '+line(world.name),
   '- Период: '+from+' — '+to,
+  '- Состояние периода: '+(completed?'завершён по игровой дате':'ещё продолжается, это не итог завершённого года'),
   '- Сцен в периоде: '+selected.length,
   '- Последняя сцена периода: '+sceneRef(beforeOrAt.at(-1)),
   '- Сцен без структурированных последствий в периоде: '+missing,
@@ -119,7 +122,7 @@ export function buildYearArchive({world,branch,scenes=[],characters=[],from,to}=
   '',
   '## Контроль преемственности',
   '- Факты, не представленные в структурированных пакетах, могут содержаться только в полных текстах сцен.',
-  '- Годовой архив привязан к HEAD-источнику. При «На это:» нужно проверить, что архивный HEAD всё ещё предок активной ветки.',
+  '- Архивный HEAD фиксирует исходную редакцию. После «На это:» актуальная сводка ПЕРЕСЧИТЫВАЕТСЯ по всем действующим сценам до и после правки; отменённые события не переносятся.',
   '- Year Document НЕ является техническим snapshot и не устраняет лимит полного пересчёта истории.',
   '- При создании новой редакции старые редакции не переписываются.',
   ''
@@ -127,16 +130,81 @@ export function buildYearArchive({world,branch,scenes=[],characters=[],from,to}=
  if(text.length>200000)throw Error('Годовой архив превышает 200 000 символов. Архивируй более короткий период, не обрезая события.');
  return {key:yearArchiveKey(from,to,branch.id),title:'YEAR DOCUMENT · '+from+' — '+to+' · '+line(world.name),
   content:text,from,to,branch_id:branch.id,source_head:branch.head_scene_id,year_end_head:beforeOrAt.at(-1).id,
-  scene_count:selected.length,unstructured_scenes:missing,characters:people.characters.length};
+  scene_count:selected.length,unstructured_scenes:missing,characters:people.characters.length,completed,
+  source_scene_ids:selected.map(s=>s.id)};
 }
 
-/** A year document may only influence current scenes while its last source scene
- *  remains an ancestor. A fork BEFORE that source invalidates the archive.
- *  Legacy manually uploaded documents stay visible but are not automatically vouched for.
+/** Generated Year Documents are historical versions. They are NEVER allowed to
+ * dictate current canon after a revision. We extract their calendar range only,
+ * then reconstruct all facts from the CURRENT ancestry (before + after fork).
+ * There is no all-or-nothing invalidation of a whole year's valid events.
  */
-export function isYearArchiveActive(doc,activeSceneIds){
- if(doc?.category!=='year_document')return true;
- const match=String(doc.content||'').match(/^LW_ARCHIVE_ACTIVE_HEAD:\s*([0-9a-f-]{36})\s*$/im);
- if(!match)return true;
- return Array.isArray(activeSceneIds)&&activeSceneIds.includes(match[1].toLowerCase());
+export function yearArchiveMetadata(doc){
+ if(doc?.category!=='year_document')return null;
+ const content=String(doc.content||'');
+ const head=content.match(/^LW_ARCHIVE_ACTIVE_HEAD:\s*([0-9a-f-]{36})\s*$/im);
+ const sourceWorld=content.match(/^LW_ARCHIVE_WORLD_ID:\s*([0-9a-f-]{36})\s*$/im);
+ const range=content.match(/^# YEAR DOCUMENT · (\d{4}-\d{2}) — (\d{4}-\d{2})\s*$/m);
+ if(!head||!sourceWorld||!range||!validPeriod(range[1])||!validPeriod(range[2]))return null;
+ return {world_id:sourceWorld[1].toLowerCase(),from:range[1],to:range[2],source_head:head[1].toLowerCase()};
+}
+
+export function reconcileYearDocuments({documents=[],world,branch,scenes=[],characters=[]}={}){
+ if(!world?.id||!branch?.id||branch.id!==world.active_branch_id||
+  !Array.isArray(scenes)||!scenes.length||scenes.at(-1).id!==branch.head_scene_id)
+  throw Error('Нельзя пересогласовать документы без полной актуальной цепочки.');
+ const canonical=[],liveSummaries=[],warnings=[];
+ const byPeriod=new Map();
+ for(const doc of documents){
+  const meta=yearArchiveMetadata(doc);
+  if(!meta){canonical.push(doc);continue;}
+  if(meta.world_id!==world.id.toLowerCase()){
+   warnings.push({code:'WRONG_YEAR_ARCHIVE_WORLD',doc_key:doc.doc_key});
+   continue;
+  }
+  const key=meta.from+'|'+meta.to;
+  if(!byPeriod.has(key))byPeriod.set(key,[]);
+  byPeriod.get(key).push({doc,meta});
+ }
+ const ids=new Set(scenes.map(s=>String(s.id).toLowerCase()));
+ for(const [period,records] of byPeriod){
+  // All archived versions of the same year point to ONE live timeline.
+  const {meta}=records.at(-1);
+  const yearScenes=scenes.filter(s=>dateMonth(s.world_time)>=meta.from&&dateMonth(s.world_time)<=meta.to);
+  if(!yearScenes.length){
+   warnings.push({code:'YEAR_NO_CURRENT_EVENTS',period,
+    reason:'В действующей ветке пока нет подтверждённых событий этого периода.'});
+   continue;
+  }
+  const lastYearScene=yearScenes.at(-1);
+  const reusable=records.find(({meta:m})=>ids.has(m.source_head)&&
+    m.source_head===lastYearScene.id.toLowerCase()&&m.source_head===scenes.at(-1).id.toLowerCase()&&
+    m.from===meta.from&&m.to===meta.to);
+  // A saved document may be used as-is only if no relevant scenes followed it.
+  // For all forks and later scenes, reproject instead of deleting the whole year.
+  if(reusable){
+   canonical.push(reusable.doc);
+   continue;
+  }
+  try{
+   const result=buildYearArchive({world,branch,scenes,characters,
+    from:meta.from,to:meta.to,allowPartial:true});
+   liveSummaries.push({
+    period,from:meta.from,to:meta.to,
+    completed:result.completed,source_head:branch.head_scene_id,
+    source_scene_ids:result.source_scene_ids,
+    scenes:result.scene_count,
+    unstructured_scenes:result.unstructured_scenes,
+    content:result.content,
+    origin_keys:records.map(({doc})=>doc.doc_key)
+   });
+   warnings.push({code:'YEAR_RECONCILED_FROM_CURRENT_CHAIN',period,
+    reason:'Год пересобран по валидным сценам до и после правки; отменённые события исключены.'});
+   if(result.unstructured_scenes)warnings.push({code:'YEAR_NEEDS_FULL_SCENE_REVIEW',period,
+    reason:'Есть сцены без структурированных последствий: сверяй полный текст по ID.'});
+  }catch(error){
+   warnings.push({code:'YEAR_RECONCILIATION_BLOCKED',period,reason:error.message});
+  }
+ }
+ return {documents:canonical,liveSummaries,warnings};
 }
