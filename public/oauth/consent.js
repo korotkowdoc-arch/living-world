@@ -1,15 +1,16 @@
-import {BRIDGE_OAUTH_CLIENT_ID,BRIDGE_OAUTH_REDIRECT_URI,BRIDGE_OWNER_USER_ID} from './bridge-config.js';
+import {BRIDGE_OAUTH_CLIENT_ID,BRIDGE_OAUTH_REDIRECT_URI,BRIDGE_SUPABASE_URL,BRIDGE_OWNER_USER_ID} from './bridge-config.js';
 const $=selector=>document.querySelector(selector);
 const id=new URL(location.href).searchParams.get('authorization_id');
 const cfgKey='lw_cloud_config_v03';
 let client,details,user;
 function show(section,message){for(const item of ['setup','login','review'])$('#'+item).hidden=item!==section;$('#status').textContent=message;}
 function redirect(url){const target=new URL(url),expected=new URL(BRIDGE_OAUTH_REDIRECT_URI);if(target.origin!==expected.origin||target.pathname!==expected.pathname||target.username||target.password||target.hash)throw Error('Недопустимый адрес возврата.');location.assign(target.href);}
+function publicKey(key){if(key.startsWith('sb_publishable_'))return true;try{const parts=key.split('.');return parts.length===3&&JSON.parse(atob(parts[1].replace(/-/g,'+').replace(/_/g,'/'))).role==='anon';}catch{return false;}}
 async function initialize(){
  if(!id||!/^[A-Za-z0-9_-]{1,128}$/.test(id)||!BRIDGE_OAUTH_CLIENT_ID||!BRIDGE_OWNER_USER_ID)throw Error('OAuth-запрос или публичная конфигурация не готовы.');
  let config;try{config=JSON.parse(localStorage.getItem(cfgKey)||'null');}catch{}
- if(!config){show('setup','Подключи свой Supabase.');return;}
- if(!/^https:\/\/[a-z0-9]+\.supabase\.co\/?$/.test(config.url)||!config.key||/service_role|secret/i.test(config.key))throw Error('Публичное подключение Supabase некорректно.');
+ if(!config){$('#setup-form').elements.url.value=BRIDGE_SUPABASE_URL;show('setup','Подключи существующий проект Supabase.');return;}
+ if(config.url!==BRIDGE_SUPABASE_URL||!publicKey(config.key))throw Error('Публичное подключение Supabase некорректно.');
  const {createClient}=await import('https://esm.sh/@supabase/supabase-js@2');
  client=createClient(config.url,config.key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});
  const response=await client.auth.getUser();

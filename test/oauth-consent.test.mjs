@@ -9,10 +9,11 @@ const source=readFileSync(new URL('../public/oauth/consent.js',import.meta.url),
 const owner='fcd2996e-9daa-4fa5-842e-4263b8b48dfe';
 const clientId='f08a0ef2-bdfc-4d0d-b9ab-ce900c85e0d6';
 const redirectUri='https://chatgpt.com/connector/oauth/3f5za3GcoasC';
+const supabaseUrl='https://bcwzlsljcxubqtvzsucz.supabase.co';
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 
 async function run({url='https://example.test/oauth/consent?authorization_id=trial',userId=owner,requestedClient=clientId,requestedRedirect=redirectUri,automaticRedirect,config=true}={}){
-  const elements=Object.fromEntries(['setup','login','review','status','client','redirect','scopes','account','approve','deny','setup-form','login-form'].map(id=>[id,{hidden:true,disabled:false,textContent:'',listeners:{},addEventListener(type,handler){this.listeners[type]=handler;}}]));
+  const elements=Object.fromEntries(['setup','login','review','status','client','redirect','scopes','account','approve','deny','setup-form','login-form'].map(id=>[id,{hidden:true,disabled:false,textContent:'',elements:{url:{}},listeners:{},addEventListener(type,handler){this.listeners[type]=handler;}}]));
   const redirects=[];
   const auth={
     getUser:async()=>({data:{user:{id:userId,email:'owner@example.test'}}}),
@@ -24,10 +25,10 @@ async function run({url='https://example.test/oauth/consent?authorization_id=tri
   };
   const context={
     URL, FormData, console,
-    BRIDGE_OAUTH_CLIENT_ID:clientId,BRIDGE_OAUTH_REDIRECT_URI:redirectUri,BRIDGE_OWNER_USER_ID:owner,
+    BRIDGE_OAUTH_CLIENT_ID:clientId,BRIDGE_OAUTH_REDIRECT_URI:redirectUri,BRIDGE_SUPABASE_URL:supabaseUrl,BRIDGE_OWNER_USER_ID:owner,
     document:{querySelector:s=>elements[s.slice(1)]},
     location:{href:url,assign:u=>redirects.push(u)},
-    localStorage:{getItem:()=>config?JSON.stringify({url:'https://project.supabase.co',key:'sb_publishable_test'}):null},
+    localStorage:{getItem:()=>config?JSON.stringify(config===true?{url:supabaseUrl,key:'sb_publishable_test'}:config):null},
     mockCreateClient:()=>({auth})
   };
   vm.runInNewContext(source,context);
@@ -45,6 +46,13 @@ test('owner, client and exact callback must all match before approval',async()=>
     const {elements,redirects}=await run(alteration);
     assert.equal(elements.review.hidden,true);
     assert.equal(redirects.length,0);
+  }
+});
+test('consent rejects another project and non-public API keys',async()=>{
+  for(const saved of [{url:'https://other.supabase.co',key:'sb_publishable_test'},{url:supabaseUrl,key:'sb_secret_test'}]){
+    const {elements}=await run({config:saved});
+    assert.equal(elements.review.hidden,true);
+    assert.match(elements.status.textContent,/Публичное подключение/);
   }
 });
 test('valid request shows consent and redirects on approval',async()=>{
