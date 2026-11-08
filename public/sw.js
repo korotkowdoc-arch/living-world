@@ -1,4 +1,4 @@
-const CACHE='living-world-v1.1.1-shell';
+const CACHE='living-world-v1.1.2-shell';
 const FILES=['/','/index.html','/style.css','/app.js','/logic.mjs','/continuity.mjs','/simulation.mjs','/ai-client.mjs','/world-ledger.mjs','/reference-documents.mjs','/world-character-memory.mjs','/icon.svg','/manifest.webmanifest'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
