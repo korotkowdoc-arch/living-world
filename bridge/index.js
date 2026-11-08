@@ -502,7 +502,11 @@ async function call(name,args,env,identity) {
     return {...base,companion:resources,reference_documents:refs};
   }
   if(name==='get_companion_state') return live?await companionState(env,identity,id):{mode:'demo',world_id:id,complete:true,...projectCompanion(demoState().scenes,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}})};
-  if(name==='get_world_state') return branchState(live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState(),mode);
+  if(name==='get_world_state'){
+    const base=branchState(live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState(),mode);
+    const sources=live?await sourcePreflight(env,identity,id,'',[],base,null):{installed:false,ready:false};
+    return {...base,reference_documents:sources};
+  }
   if(name==='get_branch_history') {
     const offset=boundedInteger(args.offset??0,0,2000), limit=boundedInteger(args.limit??10,1,20);
     const fullText=args.full_text??false;
