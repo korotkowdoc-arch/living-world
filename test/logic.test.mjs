@@ -51,3 +51,22 @@ test('high effort scene labels differ while continuity remains the same',()=>{
  assert.match(p2,/Не знает тайну/);
  assert.match(p2,/вручную/);
 });
+
+test('scene length presets request large, normal and detailed treatments',()=>{
+ const args=[world,[{name:'Героиня',role:'hero'}],[],'story',''];
+ assert.match(scenePrompt(...args,'normal'),/1[\s\u00a0]?500–3[\s\u00a0]?000 слов/);
+ assert.match(scenePrompt(...args,'large'),/3[\s\u00a0]?000–5[\s\u00a0]?000 слов/);
+ assert.match(scenePrompt(...args,'detailed'),/5[\s\u00a0]?000–8[\s\u00a0]?000 слов/);
+ assert.match(scenePrompt(...args,'detailed'),/ВНУТРИ сцены/);
+});
+test('quick genesis keeps a later school entry and simulates childhood first',()=>{
+ const c={hero_name:'Гарри Поттер',hero_age:'9',school_entry_age:'18',birth_date:'1980-07-31',npc_count:'4',
+ quick_answers:QUICK_GENESIS_STEPS.map(step=>step.options[0].id),
+ simulation_mode:'life',world_idea:'Хогвартс: поступление в 18'};
+ const prompt=quickGenesisPrompt(world,c);
+ assert.match(prompt,/МИНИМАЛЬНЫЙ ВОЗРАСТ ПОСТУПЛЕНИЯ/);
+ assert.match(prompt,/Хогвартс доступен только с 18/);
+ assert.match(prompt,/1980-07-31/);
+ assert.match(prompt,/возраст в момент начала симуляции\/игры 9/);
+ assert.match(prompt,/симуляция предыстории/);
+});
