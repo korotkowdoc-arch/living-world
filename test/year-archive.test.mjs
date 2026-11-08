@@ -123,12 +123,14 @@ test('incomplete structured revisions are explicitly flagged, never reused from 
  const erased=fact(51,'1995-10','ОТМЕНЕНО',first.id);
  const archived=buildYearArchive({world,branch:{...branch,head_scene_id:erased.id},scenes:[first,erased],
   characters:[harry],from:'1995-01',to:'1995-10'});
- const revised={id:uuid(52),world_time:'1995-10',parent_scene_id:first.id,prompt_note:'plain-text revision'};
+ const revised={id:uuid(52),world_time:'1995-10',parent_scene_id:first.id,prompt_note:'plain-text revision',body:'ВАЛИДНАЯ РЕДАКЦИЯ: Гарри сохранил дружбу с Мэй и забрал свою книгу.'};
  const summary=reconcileYearDocuments({documents:[{category:'year_document',content:archived.content,doc_key:archived.key}],
   world,branch:{...branch,head_scene_id:revised.id},scenes:[first,revised],characters:[harry]});
  assert.equal(summary.liveSummaries.length,1);
  assert.equal(summary.liveSummaries[0].unstructured_scenes,1);
  assert.match(summary.liveSummaries[0].content,/Валидный факт/);
+ assert.match(summary.liveSummaries[0].content,/ВАЛИДНАЯ РЕДАКЦИЯ/);
+ assert.match(summary.liveSummaries[0].content,/забрал свою книгу/);
  assert.doesNotMatch(summary.liveSummaries[0].content,/ОТМЕНЕНО/);
  assert.ok(summary.warnings.some(w=>w.code==='YEAR_NEEDS_FULL_SCENE_REVIEW'));
 });
@@ -149,6 +151,8 @@ test('year UI and OAuth preflight use current valid lineage and provide full liv
  assert.match(app,/existingKey:draft\.key/);
  assert.match(app,/state\.activeLineage=lineage/);
  assert.match(bridge,/reconcileYearDocuments\(/);
+ assert.match(bridge,/hydrateActiveYearTexts\(/);
+ assert.match(app,/select\('id,body'\)/);
  assert.match(bridge,/current_year_reconstructions:/);
  assert.match(bridge,/name:'get_current_year_archive'/);
  assert.match(bridge,/if\(name==='get_current_year_archive'\)/);
