@@ -22,7 +22,9 @@ test('abandoned branches cannot leak promised events or obligations',()=>{
  assert.equal(searchCausalMemory(good,{query:'потерял'}).total,0);
  assert.equal(searchCausalMemory(cancelled,{query:'потерял'}).total,1);
  assert.equal(good.open_threads.length,0);
- assert.equal(cancelled.open_threads[0].text,'Книга украдена');
+ assert.ok(cancelled.open_threads.some(t=>t.text==='Книга украдена'));
+ assert.ok(cancelled.open_threads.some(t=>t.text==='Вернуть книгу'));
+ assert.equal(good.open_threads.length,0);
 });
 test('reopened threads preserve their lifecycle and source scenes',()=>{
  const log=projectCausalMemory([a,b,{id:'c',world_time:'1996-01',changes:{open_threads:['Вернуть книгу']}}]);
