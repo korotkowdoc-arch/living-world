@@ -9,7 +9,7 @@ import {projectCharacterMemory} from './world-character-memory.mjs';
 
 const app=document.getElementById('app');
 const cfgKey='lw_cloud_config_v03'; // Preserve the existing Supabase connection when upgrading.
-const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[],aiReady:false,aiReason:'Подключение ещё не проверено',assets:null,assetIssue:null,documents:[],documentsReady:null,documentsError:'',docSelected:null,docContent:null,characterLedger:null};
+const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[],aiReady:false,aiReason:'Подключение ещё не проверено',assets:null,assetIssue:null,documents:[],documentsReady:null,documentsError:'',docSelected:null,docContent:null,characterLedger:null,worldContext:null,suppressWorldClickUntil:0};
 const x=v=>esc(v??'');
 // Historical start and current narrative period are separate; don't fabricate a date.
 const storyClock=(w=state.world)=>state.scenes.at(-1)?.world_time||w?.genesis_choices?.current_period||(w?.genesis_approved?'':w?.clock_start)||'';
@@ -35,10 +35,23 @@ function renderSetup(){app.innerHTML=`<div class="auth"><div class="eyebrow">LIV
 function renderLogin(){app.innerHTML=`<div class="auth"><div class="eyebrow">✦ LIVING WORLD · v1.0</div><h1>Войти в свои вселенные</h1><p class="sub">Один пароль вместо писем и кодов. На iPhone вход сохраняется между запусками.</p><div class="panel" style="margin-top:22px"><form id="login-form" class="form">${f('email','Электронная почта',localStorage.getItem('lw_login_email')||'','email')}${f('password','Пароль','','password')}<button class="btn gold full" type="submit">Войти в LIVING WORLD</button></form><details class="login-help"><summary>Первый вход — откуда взять пароль?</summary><p>Если ты раньше пользовалась только ссылками из писем, у того аккаунта может ещё не быть пароля. Не угадывай его и не запрашивай новые письма.</p><p>Для новой личной учётной записи открой Supabase → Authentication → Users → Add user → Create new user. Введи свободный email и свой надёжный пароль; выбери Auto Confirm User. Если твой старый email уже занят, используй другой адрес или алиас, например <code>мойадрес+livingworld@gmail.com</code> (у Gmail он приходит в тот же ящик).</p><p><strong>Важно:</strong> другая учётная запись не увидит миры старой. Если уже есть сохранённые миры, не создавай новый аккаунт — сначала восстанови доступ к прежнему.</p><p>После настройки можно выключить публичную регистрацию в Authentication → Sign In / Providers.</p><a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer">Открыть Supabase (Authentication → Users)</a></details><div class="divider"></div>${btn('disconnect-db','Сменить подключение к базе','ghost full')}<div class="footnote">Пароль не сохраняется в настройках приложения. Supabase хранит защищённую сессию, поэтому повторный вход обычно не требуется.</div></div></div>`;}
 function shellNav(){const links=[['library','▦','Миры'],['builder','⚙','Мир'],['genesis','✦','Генезис'],['story','▤','История'],['memory','◈','Память'],['assets','▣','Активы'],['documents','▤','Документы'],['people','♙','Герои'],['history','⑂','Ветки'],['settings','⚑','Настройки']];return `<aside class="sidebar"><div class="brand"><span class="mark">✦</span><div>LIVING WORLD<small>PRIVATE UNIVERSES</small></div></div><div class="eyebrow">Библиотека</div><nav class="nav">${links.map(([v,i,l])=>`<button data-action="navigate" data-view="${v}" class="${state.view===v?'active':''}">${i} &nbsp;${l}</button>`).join('')}</nav><div class="sidebar-bottom">v1.0 · источник истины<br>Mac не требуется<br>${x(state.user?.email||'')}</div></aside>`;}
 function mobileNav(){const l=[['library','▦','Миры'],['builder','⚙','Мир'],['genesis','✦','Генезис'],['story','▤','История'],['memory','◈','Память'],['people','♙','Люди']];return `<nav class="mobilebar" aria-label="Основные разделы">${l.map(([v,i,label])=>`<button data-action="navigate" data-view="${v}" class="${state.view===v?'active':''}"><span>${i}</span>${label}</button>`).join('')}</nav>`;}
-function renderApp(){let content='';switch(state.view){case 'world-setup':content=renderWorldSetup();break;case 'builder':content=renderBuilder();break;case 'genesis':content=renderGenesis();break;case 'people':content=renderPeople();break;case 'story':content=renderStory();break;case 'memory':content=renderMemory();break;case 'assets':content=renderAssets();break;case 'documents':content=renderDocuments();break;case 'history':content=renderHistory();break;case 'settings':content=renderSettings();break;default:content=renderLibrary();}app.innerHTML=`<div class="app">${shellNav()}<div class="mobiletop"><button data-action="navigate" data-view="library">✦ LIVING WORLD</button><div><button data-action="navigate" data-view="history" aria-label="Ветки">⑂</button><button data-action="navigate" data-view="settings" aria-label="Настройки">⚙</button></div></div><main class="main">${content}</main>${mobileNav()}</div>${state.modal?renderModal():''}`;}
+function renderApp(){let content='';switch(state.view){case 'world-setup':content=renderWorldSetup();break;case 'builder':content=renderBuilder();break;case 'genesis':content=renderGenesis();break;case 'people':content=renderPeople();break;case 'story':content=renderStory();break;case 'memory':content=renderMemory();break;case 'assets':content=renderAssets();break;case 'documents':content=renderDocuments();break;case 'history':content=renderHistory();break;case 'settings':content=renderSettings();break;default:content=renderLibrary();}app.innerHTML=`<div class="app">${shellNav()}<div class="mobiletop"><button data-action="navigate" data-view="library">✦ LIVING WORLD</button><div><button data-action="navigate" data-view="history" aria-label="Ветки">⑂</button><button data-action="navigate" data-view="settings" aria-label="Настройки">⚙</button></div></div><main class="main">${content}</main>${mobileNav()}</div>${renderWorldContextMenu()}${state.modal?renderModal():''}`;}
 function heading(k,title,subtitle,actions=''){return `<div class="head"><div><div class="eyebrow">${x(k)}</div><h1 class="page-title">${x(title)}</h1><p class="sub">${x(subtitle)}</p></div>${actions?`<div class="row">${actions}</div>`:''}</div>`;}
 function needsWorld(){return `<div class="well"><h3>Сначала создай вселенную</h3><p>Всё — от предыстории героя до законов мира — можно сделать на iPhone.</p>${btn('new-world','+ Создать вселенную','gold')}</div>`;}
-function renderLibrary(){return `${heading('Твоя библиотека','Мои вселенные','Играем в ChatGPT. Здесь — постоянная память, персонажи, ресурсы, последствия и ветки.',btn('new-world','+ Новая вселенная','gold'))}${state.worlds.length?`<div class="grid">${state.worlds.map(w=>`<div class="world-library-card"><button type="button" class="world-card" data-action="open-world" data-id="${x(w.id)}" style="text-align:left"><span class="tag">${x(w.genre||'Фэнтези')}</span><h3>${x(w.name)}</h3><p>${x((w.premise||'Предыстория ещё не задана.').slice(0,180))}</p><div class="tiny">${w.genesis_approved?'Генезис утверждён':'Мир готов к настройке'} · ${x(w.clock_start)}</div></button><div class="world-card-footer"><span class="hint">Ветки и документы принадлежат этому миру</span><button type="button" class="btn world-delete-btn" data-action="delete-world" data-id="${x(w.id)}" aria-label="Удалить мир ${x(w.name)}">Удалить мир</button></div></div>`).join('')}</div>`:`<div class="well" style="text-align:center"><div class="spark">✦</div><h2>Вселенная ещё не создана</h2><p>Задай основу мира, выбери прошлое главного героя и запусти собственную историю.</p>${btn('new-world','Создать первую вселенную','gold')}</div>`}`;}
+function renderLibrary(){return `${heading('Твоя библиотека','Мои вселенные','Играем в ChatGPT. Здесь — постоянная память, персонажи, ресурсы, последствия и ветки.',btn('new-world','+ Новая вселенная','gold'))}${state.worlds.length?`<div class="grid">${state.worlds.map(w=>`<div class="world-library-card"><button type="button" class="world-card" data-action="open-world" data-id="${x(w.id)}" title="Открыть мир. Долгое нажатие или правая кнопка — действия." style="text-align:left"><span class="tag">${x(w.genre||'Фэнтези')}</span><h3>${x(w.name)}</h3><p>${x((w.premise||'Предыстория ещё не задана.').slice(0,180))}</p><div class="tiny">${w.genesis_approved?'Генезис утверждён':'Мир готов к настройке'} · ${x(w.clock_start)}</div><div class="world-card-hint">Удерживай или ПКМ — действия</div></button></div>`).join('')}</div>`:`<div class="well" style="text-align:center"><div class="spark">✦</div><h2>Вселенная ещё не создана</h2><p>Задай основу мира, выбери прошлое главного героя и запусти собственную историю.</p>${btn('new-world','Создать первую вселенную','gold')}</div>`}`;}
+function renderWorldContextMenu(){
+ const m=state.worldContext;
+ if(!m||state.view!=='library')return '';
+ const world=state.worlds.find(w=>w.id===m.id);
+ if(!world)return '';
+ return `<div class="world-context-backdrop" data-action="close-world-menu"></div><div class="world-context-menu" role="menu" aria-label="Действия с миром" style="left:${m.x}px;top:${m.y}px"><div class="world-context-label">${x(world.name)}</div><button type="button" role="menuitem" data-action="world-menu-delete" data-id="${x(world.id)}">Удалить</button></div>`;
+}
+function showWorldContextMenu(worldId,clientX,clientY){
+ if(state.view!=='library'||!state.worlds.some(w=>w.id===worldId))return;
+ const width=220,height=108;
+ state.worldContext={id:worldId,x:Math.max(8,Math.min(Number(clientX)||0,window.innerWidth-width-8)),y:Math.max(8,Math.min(Number(clientY)||0,window.innerHeight-height-8))};
+ render();
+}
 function renderWorldSetup(){
  const sources=state.worlds||[];
  const labels={core_rules:'Законы и правила мира',glossary:'Глоссарий и названия',style_example:'Примеры стиля сцен',year_anchors:'Календарные и причинные ориентиры',director_calibration:'Режиссёрские настройки'};
@@ -209,8 +222,11 @@ function renderSettings(){const w=state.world,auto=w?.genesis_choices?.auto_save
 return `${heading('Настройки','Моё приложение','Приватность, модели, резервное копирование и вход.')}<div class="panel stack">${w?`<div class="ai-status"><b>Запись сцен из ChatGPT: ${auto?'автоматическое сохранение разрешено':'ручное подтверждение каждой сцены'}</b><p>Если включить, подключённый MCP-мост сможет записывать действительно сыгранные сцены в этот мир одним вызовом при правильной ветке и владельце. Это не включает платный API и не меняет модель ChatGPT.</p>${btn('toggle-auto-save',auto?'Отключить автосохранение':'Разрешить автосохранение сцен',auto?'':'gold')}</div>`:''}<details class="login-help"><summary>Дополнительно: самостоятельная генерация на сайте через отдельный API</summary><div class="ai-status"><b>Автоматический ИИ: ${state.aiReady?'Подключён':'Не подключён'}</b><p>${state.aiReady?'Кнопки Генезиса, сцен и ускорения вызывают OpenAI API через защищённый Worker.':'Для автоматической генерации добавь секрет OPENAI_API_KEY в Cloudflare Worker living-world-bridge-mcp и проверь подключение. '+x(state.aiReason)}</p>${btn('ai-refresh','Проверить AI-подключение')}</div></details><div class="listrow"><div><b>Подключённый аккаунт</b><p>${x(state.user?.email)}</p></div>${btn('logout','Выйти','small')}</div><div class="listrow"><div><b>Хранилище</b><p>Supabase · данные в облаке, Mac не нужен</p></div><span class="tag">RLS</span></div><details class="login-help"><summary>Установить или сменить пароль</summary><form id="password-form" class="form">${f('new_password','Новый пароль (не меньше 12 символов)','','password')}${f('repeat_password','Повтори пароль','','password')}<button class="btn" type="submit">Сохранить новый пароль</button></form><p class="footnote">Для изменения пароля аккаунт должен быть авторизован. Если Supabase требует повторное подтверждение личности, он сообщит об этом.</p></details><div class="divider"></div>${state.world?`<form id="models-form" class="form two">${f('model_story','Модель для сюжета',state.world.model_story)}${f('model_relationships','Модель для отношений',state.world.model_relationships)}<div class="span2"><button type="submit" class="btn">Сохранить предпочтения</button></div></form><div class="divider"></div><h3>Резервная копия</h3><p class="sub">Экспорт содержит все сцены всех веток и биографии. Сохраняй файл в iCloud Drive или другое надёжное место.</p><div class="row mobile-full">${btn('export-world','Экспортировать текущий мир','gold')}${btn('import-open','Импортировать резервную копию')}</div>`:`<div class="well">Выбери мир для экспорта или импорта.</div>`}<div class="divider"></div><div class="attention">Встроенных платных AI-запросов нет. Прямое использование подписки ChatGPT из частного облачного PWA пока не реализовано и не гарантировано.</div><div class="footnote">Этот сайт может быть публично доступен по URL, но содержимое миров требует входа в Supabase и защищено политиками доступа. На бесплатном тарифе сохраняй резервные копии.</div></div>`;}
 function renderModal(){const m=state.modal;if(!m)return '';let body='';if(m.type==='character'){const c=m.character||{};body=`<form class="form two" id="character-form"><div class="field"><label>Роль</label><select name="role">${opt('npc','NPC',c.role||'npc')}${opt('hero','Главный герой',c.role||'npc')}</select></div>${f('name','Имя',c.name||'')} ${CHARACTER_FIELDS.filter(k=>k!=='name').map(k=>`<div class="span2">${f(k,({causal_link:'Причинная связь',description:'Биография',personality:'Характер',goals:'Цели',relationships:'Отношения',knowledge:'Знания',location:'Место',health:'Здоровье',mood:'Настроение',status:'Статус',inventory:'Имущество'})[k],c[k]||'','textarea')}</div>`).join('')}<div class="span2"><button class="btn gold full" type="submit">${c.id?'Сохранить персонажа':'Создать персонажа'}</button></div></form>`;}
 if(m.type==='revision'){const s=m.scene;body=`<p class="sub">Поставь курсор в текст после последней фразы, которую нужно сохранить, и нажми «Зафиксировать точку». Всё далее аннулируется в новой ветке.</p><div class="field" style="margin:14px 0"><label>Текст исходной сцены</label><textarea id="revision-source" style="min-height:185px">${x(s.body)}</textarea></div><div class="row">${btn('revision-mark','Зафиксировать точку','gold')}${btn('revision-copy','Скопировать запрос «На это»')}</div><p class="tiny" id="revision-anchor-status">Сохранено символов: ${state.revision?.prefix?.length??0}</p><div class="field"><label>Твоя режиссёрская правка</label><textarea id="revision-note" placeholder="На это: герой не отступает, потому что...">${x(state.revision?.note||'')}</textarea></div><div class="field"><label>Новое продолжение ПОСЛЕ точки вмешательства</label><textarea id="revision-continuation" style="min-height:165px" placeholder="Вставь текст из ChatGPT или напиши продолжение сам."></textarea></div>${btn('revision-commit','Создать новую ветку','gold full')}<p class="footnote">Новая ветка будет содержать старый префикс + новое продолжение. Прежняя версия не удаляется из архива.</p>`;}
+if(m.type==='delete-world'){
+ body=`<p class="sub">Удалить мир <strong>«${x(m.name)}»</strong> со всей его историей, персонажами и документами?</p><p class="hint">Это действие нельзя отменить.</p><div class="row" style="margin-top:20px">${btn('cancel-delete-world','Нет')}${btn('confirm-delete-world','Да','danger')}</div>`;
+}
 if(m.type==='import'){body=`<p class="sub">Выбери JSON-файл экспорта LIVING WORLD. Он будет восстановлен как новая копия мира.</p><div class="field" style="margin:15px 0"><label>Файл резервной копии</label><input type="file" id="backup-file" accept="application/json,.json"></div>${btn('import-file','Восстановить мир из файла','gold full')}`;}
-return `<div class="modalwrap"><div class="modal"><div class="modal-head"><h2>${x(m.type==='character'?'Редактор персонажа':m.type==='revision'?'Режиссёрская правка':'Импорт мира')}</h2><button class="btn small" data-action="close-modal" aria-label="Закрыть">✕</button></div>${body}</div></div>`;}
+return `<div class="modalwrap"><div class="modal"><div class="modal-head"><h2>${x(m.type==='character'?'Редактор персонажа':m.type==='revision'?'Режиссёрская правка':m.type==='delete-world'?'Удалить мир?':'Импорт мира')}</h2><button class="btn small" data-action="close-modal" aria-label="Закрыть">✕</button></div>${body}</div></div>`;}
 async function checkAiConnection(){
  const status=await aiStatus();
  state.aiReady=status.enabled;
@@ -380,9 +396,6 @@ async function newWorld(setup){
 async function deleteWorld(worldId){
  const world=state.worlds.find(w=>w.id===worldId);
  if(!world)throw Error('Мир не найден в твоей библиотеке.');
- const typed=window.prompt('Удаление необратимо. Будут удалены сцены, ветки, персонажи, деньги, вещи и документы мира.\n\nЧтобы удалить мир, введи его название в точности:\n'+world.name);
- if(typed===null)return;
- if(!validateDeleteWorldName(world.name,typed))throw Error('Название не совпало. Мир не удалён.');
  const removed=dataOrThrow(await state.client.from('lw_worlds').delete()
    .eq('id',worldId).eq('owner_id',state.user.id).select('id'));
  if(!Array.isArray(removed)||removed.length!==1)throw Error('Не удалось подтвердить удаление мира. Проверь права доступа.');
@@ -409,7 +422,7 @@ async function exportWorld(){const data=await collectBackup();const url=URL.crea
 async function importBackup(file){if(!file)throw Error('Выбери JSON-файл');if(file.size>45*1024*1024)throw Error('Файл слишком велик для импорта на телефоне');const backup=JSON.parse(await file.text());if(backup.format!=='living-world-cloud-v0.3'||!backup.world||!Array.isArray(backup.scenes)||!Array.isArray(backup.branches)||!Array.isArray(backup.characters))throw Error('Это не резервная копия LIVING WORLD v0.3');const old=backup.world;const newW={name:(old.name||'Восстановленный мир')+' (копия)',genre:old.genre||'Фэнтези',premise:old.premise||'',world_rules:old.world_rules||'',history:old.history||'',timeline:old.timeline||'',clock_start:old.clock_start||'1998-09-01T08:00:00',genesis_choices:old.genesis_choices||{},genesis_draft:old.genesis_draft||null,genesis_approved:!!old.genesis_approved,model_story:old.model_story||'gpt-6',model_relationships:old.model_relationships||'gpt-5.6',owner_id:state.user.id};const w=dataOrThrow(await state.client.from('lw_worlds').insert(newW).select().single());const bmap=new Map(backup.branches.map(b=>[b.id,crypto.randomUUID()]));const smap=new Map(backup.scenes.map(s=>[s.id,crypto.randomUUID()]));const bRows=backup.branches.map(b=>({id:bmap.get(b.id),world_id:w.id,owner_id:state.user.id,name:b.name,parent_branch_id:bmap.get(b.parent_branch_id)||null,fork_scene_id:null,head_scene_id:null}));if(!bRows.length)bRows.push({id:crypto.randomUUID(),world_id:w.id,owner_id:state.user.id,name:'Основная линия'});dataOrThrow(await state.client.from('lw_branches').insert(bRows));const sceneRows=backup.scenes.map(s=>({id:smap.get(s.id),world_id:w.id,owner_id:state.user.id,branch_id:bmap.get(s.branch_id)||bRows[0].id,parent_scene_id:smap.get(s.parent_scene_id)||null,body:s.body||'',world_time:s.world_time||w.clock_start,model:s.model||'manual',delta:s.delta||{},prompt_note:s.prompt_note||'',created_at:s.created_at||new Date().toISOString()}));for(let i=0;i<sceneRows.length;i+=100)dataOrThrow(await state.client.from('lw_scenes').insert(sceneRows.slice(i,i+100)));const cRows=backup.characters.map(c=>({world_id:w.id,owner_id:state.user.id,role:c.role||'npc',...Object.fromEntries(CHARACTER_FIELDS.map(k=>[k,c[k]||''])),created_scene_id:smap.get(c.created_scene_id)||null}));for(let i=0;i<cRows.length;i+=100)dataOrThrow(await state.client.from('lw_characters').insert(cRows.slice(i,i+100)));for(const b of backup.branches){dataOrThrow(await state.client.from('lw_branches').update({head_scene_id:smap.get(b.head_scene_id)||null,fork_scene_id:smap.get(b.fork_scene_id)||null}).eq('id',bmap.get(b.id)));}const active=bmap.get(old.active_branch_id)||bRows[0].id;dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:active}).eq('id',w.id));state.modal=null;await loadWorlds();await openWorld(w.id);state.view='builder';render();notify('Резервная копия восстановлена как отдельная вселенная.');}
 
 async function actionHandler(action,el){switch(action){
-case 'navigate':state.view=el.dataset.view;if(state.view==='story')state.recentLimit=40;if(state.view==='assets'||state.view==='people')await loadAssets();if(state.view==='documents')await loadDocuments();render();return;
+case 'navigate':state.worldContext=null;state.view=el.dataset.view;if(state.view==='story')state.recentLimit=40;if(state.view==='assets'||state.view==='people')await loadAssets();if(state.view==='documents')await loadDocuments();render();return;
 case 'goto-memory':state.view='memory';render();return;
 case 'goto-assets':state.view='assets';await loadAssets();render();return;
 case 'assets-reload':state.assets=null;await loadAssets();render();return;
@@ -459,8 +472,19 @@ case 'doc-replace':{
 case 'goto-story':state.view='story';render();return;
 case 'new-world':state.view='world-setup';render();return;
 case 'cancel-world-setup':state.view='library';render();return;
-case 'delete-world':await deleteWorld(el.dataset.id);return;
-case 'open-world':await openWorld(el.dataset.id);state.view=state.world.genesis_approved?'assets':'builder';if(state.view==='assets')await loadAssets();render();return;
+case 'world-menu-delete':{
+ const world=state.worlds.find(w=>w.id===el.dataset.id);
+ if(!world)throw Error('Мир не найден.');
+ state.worldContext=null;state.modal={type:'delete-world',worldId:world.id,name:world.name};render();return;
+}
+case 'confirm-delete-world':{
+ const modal=state.modal;
+ if(modal?.type!=='delete-world')throw Error('Подтверждение удаления не открыто.');
+ await deleteWorld(modal.worldId);return;
+}
+case 'cancel-delete-world':state.modal=null;render();return;
+case 'close-world-menu':state.worldContext=null;render();return;
+case 'open-world':state.worldContext=null;await openWorld(el.dataset.id);state.view=state.world.genesis_approved?'assets':'builder';if(state.view==='assets')await loadAssets();render();return;
 case 'goto-genesis':state.view='genesis';render();return;
 
 case 'quick-answer':{
@@ -639,7 +663,42 @@ case 'scene-form':{const d=getForm('scene-form');if(!d.body?.trim())throw Error(
 case 'scene-package-form':{const d=getForm('scene-package-form');const packet=parseScenePackage(d.payload);const note=packSceneNote(packet.changes,document.getElementById('story-note')?.value||'',packet.decisions);await appendScene(packet.scene,'chatgpt-manual',{world_time:packet.world_time||undefined,note});state.view=state.world?.genesis_choices?.simulation_mode&&state.world.genesis_choices.simulation_mode!=='off'?'story':'memory';render();return;}
 }}
 document.addEventListener('change',e=>{if(e.target?.id==='world-setup-source'){const choices=document.getElementById('world-setup-categories');if(choices)choices.hidden=!e.target.value;}if(e.target?.id==='scene-length'&&state.world){state.sceneLength=e.target.value;localStorage.setItem('lw_scene_length_'+state.world.id,state.sceneLength);}});
-document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(!el)return;e.preventDefault();withBusy(()=>actionHandler(el.dataset.action,el));});
+let worldPressTimer=null,worldTouchStart=null;
+function clearWorldPress(){if(worldPressTimer!==null){clearTimeout(worldPressTimer);worldPressTimer=null;}worldTouchStart=null;}
+document.addEventListener('contextmenu',e=>{
+ const card=e.target.closest?.('.world-card[data-action="open-world"]');
+ if(!card||state.view!=='library')return;
+ e.preventDefault();clearWorldPress();
+ state.suppressWorldClickUntil=Date.now()+750;
+ showWorldContextMenu(card.dataset.id,e.clientX,e.clientY);
+});
+document.addEventListener('touchstart',e=>{
+ clearWorldPress();
+ const card=e.target.closest?.('.world-card[data-action="open-world"]');
+ if(!card||state.view!=='library'||e.touches.length!==1)return;
+ const touch=e.touches[0];
+ worldTouchStart={worldId:card.dataset.id,x:touch.clientX,y:touch.clientY};
+ const start=worldTouchStart;
+ worldPressTimer=setTimeout(()=>{
+  worldPressTimer=null;
+  if(worldTouchStart!==start)return;
+  state.suppressWorldClickUntil=Date.now()+900;
+  showWorldContextMenu(start.worldId,start.x,start.y);
+  worldTouchStart=null;
+ },550);
+},{passive:true});
+document.addEventListener('touchmove',e=>{
+ if(!worldTouchStart)return;
+ if(e.touches.length!==1||Math.abs(e.touches[0].clientX-worldTouchStart.x)>12||Math.abs(e.touches[0].clientY-worldTouchStart.y)>12)clearWorldPress();
+},{passive:true});
+document.addEventListener('touchend',clearWorldPress,{passive:true});
+document.addEventListener('touchcancel',clearWorldPress,{passive:true});
+document.addEventListener('click',e=>{
+ const el=e.target.closest('[data-action]');
+ if(!el)return;
+ if(el.dataset.action==='open-world'&&Date.now()<state.suppressWorldClickUntil){e.preventDefault();return;}
+ e.preventDefault();withBusy(()=>actionHandler(el.dataset.action,el));
+});
 document.addEventListener('submit',e=>{e.preventDefault();withBusy(()=>submitHandler(e.target));});
 window.addEventListener('unhandledrejection',e=>{console.error(e.reason);notify(errtext(e.reason),true);});
 (async()=>{if(state.config){try{await connect();}catch(e){console.error(e);notify('Не удалось подключиться к Supabase: '+errtext(e),true);state.config=null;}}render();if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('/sw.js').catch(()=>{});})().catch(e=>{notify(errtext(e),true);render();});
