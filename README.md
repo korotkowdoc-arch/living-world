@@ -1,4 +1,4 @@
-# LIVING WORLD — open-source PWA (v0.8)
+# LIVING WORLD — open-source PWA (v0.9)
 
 Mobile-first interactive fiction world simulator. Create worlds on iPhone, define their rules and an alternate protagonist backstory, maintain autonomous NPC profiles, branch scenes with **«На это:»**, and preserve story state in an owner-scoped Supabase database.
 
@@ -66,3 +66,9 @@ MIT (see `LICENSE`).
 ## Automatic AI mode
 
 Read [docs/AUTOMATION.md](docs/AUTOMATION.md). The private Worker generates and atomically saves a single scene or simulated time interval directly in Supabase; rapid character genesis is generated and offered for approval. This feature requires a configured OpenAI API account and server-side key. No credentials are embedded in public Pages code.
+
+## Primary mode — ChatGPT + companion state
+
+Long-form scenes are authored in ChatGPT on the user's subscription. **LIVING WORLD is the archive and causal ledger**, not a requirement to manually copy the text. The OAuth MCP bridge now exposes read tools for world state, active-branch history and `get_companion_state`, and a user-approved `save_scene_package` write tool. The live Worker must advertise `writes_enabled:true`; the separate OpenAI API gateway remains strictly optional and is not the primary user journey.
+
+The **Активы** companion screen replays scene-embedded structured events across the complete known lineage: money accounts, ownership and current holders of property, and introduced independent NPCs. All ledger events cite a source in their scene. If any amount is unknown, the display remains explicitly unknown; alternative branches never contaminate one another. Full scene history is required to calculate correct balances; if the scene window exceeds the cap, the screen reports the limitation instead of inventing numbers.
