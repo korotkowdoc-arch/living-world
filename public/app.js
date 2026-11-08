@@ -264,6 +264,8 @@ return `${heading('Настройки','Моё приложение','Прива
  ${btn('run-save-diagnostic','Проверить сейвы в реальной базе','gold')}
  ${state.saveDiagnostic?`<div class="save-diagnostic-result"><strong>${state.saveDiagnostic.ok?'Тест прошёл':'Тест не прошёл'}</strong>
  <p class="tiny">${state.saveDiagnostic.ok?'Сцена записана и перечитана. Повтор не создал дубль.':''}${x(state.saveDiagnostic.reason||'')}</p>
+ ${!state.saveDiagnostic.ok?`<p class="tiny"><b>Этап:</b> ${x(state.saveDiagnostic.stage||'неизвестен')} · <b>Код:</b> ${x(state.saveDiagnostic.error_code||'неизвестен')}</p>`:''}
+ ${['PGRST202','42883','PGRST204'].includes(state.saveDiagnostic.error_code)?`<p class="hint">Нужна SQL-функция сохранения сцен. Установи её в Supabase, затем повтори тест.</p><div class="row"><a class="btn" href="https://github.com/korotkowdoc-arch/living-world/blob/main/supabase/bridge_save.sql" target="_blank" rel="noopener">Открыть SQL исправления</a><a class="btn" href="https://supabase.com/dashboard/project/bcwzlsljcxubqtvzsucz/sql/new" target="_blank" rel="noopener">Supabase SQL Editor</a></div>`:''}
  ${state.saveDiagnostic.ok?`<p class="tiny">Сцен: ${x(state.saveDiagnostic.receipt?.scanned_scenes)} · баланс: ${x(state.saveDiagnostic.receipt?.balance)} галеонов · повтор защищён: да</p>`:''}
  <p class="tiny"><b>Временный мир:</b> ${state.saveDiagnostic.temporary_world_removed?'удалён':state.saveDiagnostic.temporary_world_id?'проверь удаление вручную: '+x(state.saveDiagnostic.temporary_world_id):'не создавался'}</p></div>`:''}
  <p class="footnote">Этот тест проверяет работающий серверный путь записи, но не обновляет набор команд OAuth в ChatGPT. Для автоматических сейвов из чата подключение должно видеть save_scene_auto.</p>
