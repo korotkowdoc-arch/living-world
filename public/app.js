@@ -181,6 +181,27 @@ function renderDocuments(){
  `<h2 class="section-title" style="margin-top:24px">Библиотека (${docs.length})</h2><div class="asset-grid">${rows||'<div class="panel">Здесь пока нет документов. Генерация сцен не имеет доступа к полным первоисточникам.</div>'}</div>`+preview;
 }
 
+
+function renderSaveStatus(){
+ if(!state.world)return '';
+ const branch=state.branches.find(b=>b.id===state.world.active_branch_id);
+ if(!branch)return '<div class="attention">Сохранение: действующая ветка отсутствует.</div>';
+ const head=branch.head_scene_id||null;
+ const last=state.memoryScenes.at(-1)||null;
+ const aligned=!head||last?.id===head;
+ const structured=last?!!readSceneNote(last.prompt_note):false;
+ const status=!head?'Новый мир: сцен пока нет':!aligned?'Нужно перечитать последнюю сцену':structured?'Сцена и последствия найдены':'Сцена найдена, но структурированные последствия отсутствуют';
+ const alert=!aligned||(head&&!structured);
+ return `<div class="panel save-status ${alert?'save-status-warn':''}">
+ <div class="row between"><h2 class="section-title">Последнее сохранение</h2><span class="tag">${x(status)}</span></div>
+ <p class="tiny"><b>Действующая ветка:</b> ${x(branch.name)}</p>
+ <p class="tiny"><b>Последняя сцена:</b> ${x(head||'ещё не создана')}</p>
+ <p class="tiny"><b>Игровая дата:</b> ${x(last?.world_time||state.world.genesis_choices?.current_period||'не установлена')}</p>
+ ${head&&!structured?'<p class="hint">Полный текст хранится, но карта ресурсов и знаний может быть неполной: проверь пакет последствий сцены.</p>':''}
+ ${!aligned?'<p class="hint">Последняя запись и голова ветки не совпали в загруженных данных. Обнови состояние и не продолжай историю до проверки.</p>':''}
+ <div class="row">${btn('assets-reload','Проверить сохранение в Supabase')}${btn('goto-story','Архив сцен')}</div>
+ </div>`;
+}
 function renderWorldReadiness(){
  const documents=state.documentsReady===true;
  const types=new Set((state.documents||[]).map(d=>d.category));
@@ -202,13 +223,13 @@ function renderWorldReadiness(){
 
 function renderAssets(){
  const w=state.world;if(!w)return needsWorld();
- if(!state.assets)return `${heading('Действующая ветка','Активы и ресурсы','Журнал собственности, денег и новых персонажей из подтверждённых сцен.',btn('assets-reload','Загрузить журнал','gold'))}<div class="attention">${x(state.assetIssue||'Полный журнал ещё не загружен. Старые сцены не считаются нулевыми деньгами или отсутствующими вещами.')}</div>`;
+ if(!state.assets)return `${heading('Действующая ветка','Активы и ресурсы','Журнал собственности, денег и новых персонажей из подтверждённых сцен.',btn('assets-reload','Загрузить журнал','gold'))}${renderSaveStatus()}<div class="attention">${x(state.assetIssue||'Полный журнал ещё не загружен. Старые сцены не считаются нулевыми деньгами или отсутствующими вещами.')}</div>`;
  const a=state.assets;
  const accounts=a.accounts.map(acc=>`<div class="asset-panel"><div class="eyebrow">${x(acc.person)} · ${x(acc.currency)}</div><h3 class="section-title">${x(formatAmount(acc))}</h3>${!acc.known?'<p class="hint">Начальный остаток неизвестен. Показаны только подтверждённые изменения.</p>':''}<details><summary>История денежных операций (${acc.entries.length})</summary><ul>${acc.entries.slice(-35).map(e=>`<li><b>${x(e.action)}</b> · ${x(e.amount)} ${x(e.currency)} · ${x(e.reason)} <span class="muted">(${x(e.world_time)}, сцена ${x(e.scene_id)})</span></li>`).join('')}</ul></details></div>`).join('');
  const possessions=a.items.map(item=>`<div class="asset-panel"><div class="eyebrow">${x(item.id)} · ${item.exists?'В мире':'Утрачен или использован'}</div><h3 class="section-title">${x(item.label)}</h3><p class="tiny"><b>Собственник:</b> ${x(item.owner)}</p><p class="tiny"><b>Фактический держатель:</b> ${x(item.holder||'Нет')}</p><p class="tiny"><b>Место:</b> ${x(item.location||'Не установлено')}</p>${item.condition?`<p class="tiny"><b>Состояние:</b> ${x(item.condition)}</p>`:''}<details><summary>История предмета (${item.history.length})</summary><ul>${item.history.map(h=>`<li><b>${x(h.action)}</b> — ${x(h.reason)} <span class="muted">(${x(h.world_time)}, сцена ${x(h.scene_id)})</span></li>`).join('')}</ul></details></div>`).join('');
  const newcomers=a.new_characters.map(p=>`<div class="asset-panel"><h3 class="section-title">${x(p.name)}</h3><p class="tiny">${x(p.description)}</p><p class="tiny"><b>Появление:</b> ${x(p.causal_link)} <span class="muted">(сцена ${x(p.created_scene_id)})</span></p><p class="tiny"><b>Цели:</b> ${x(p.goals)}</p><p class="tiny"><b>Что знает:</b> ${x(p.knowledge)}</p></div>`).join('');
  const issues=a.issues.length?`<div class="attention"><h3>Требуют проверки (${a.issues.length})</h3><ul>${a.issues.slice(0,25).map(z=>`<li>Сцена ${x(z.scene_id)}: ${x(z.error)}</li>`).join('')}</ul></div>`:'';
- return `${heading('Счёт и инвентарь','Живые активы','Только сыгранное в действующей ветке. Невыясненные суммы не превращаются в ноль.',btn('assets-reload','Перечитать сцены'))}${renderWorldReadiness()}<p class="sub">Проверены ${a.scanned_scenes} сцен. ${a.audit.length} подтверждённых операций. Удалённые при «На это:» события здесь не учитываются.</p>${issues}<h2 class="section-title">Деньги и счета (${a.accounts.length})</h2><div class="asset-grid">${accounts||'<div class="panel">Суммы пока не зафиксированы. Это не означает нулевой баланс.</div>'}</div><h2 class="section-title" style="margin-top:26px">Предметы и собственность (${a.items.length})</h2><div class="asset-grid">${possessions||'<div class="panel">Подтверждённых предметов в структурированном журнале пока нет.</div>'}</div><h2 class="section-title" style="margin-top:26px">Новые люди из сцен (${a.new_characters.length})</h2><div class="asset-grid">${newcomers||'<div class="panel">Пока нет новых зарегистрированных персонажей.</div>'}</div>`;
+ return `${heading('Счёт и инвентарь','Живые активы','Только сыгранное в действующей ветке. Невыясненные суммы не превращаются в ноль.',btn('assets-reload','Перечитать сцены'))}${renderSaveStatus()}${renderWorldReadiness()}<p class="sub">Проверены ${a.scanned_scenes} сцен. ${a.audit.length} подтверждённых операций. Удалённые при «На это:» события здесь не учитываются.</p>${issues}<h2 class="section-title">Деньги и счета (${a.accounts.length})</h2><div class="asset-grid">${accounts||'<div class="panel">Суммы пока не зафиксированы. Это не означает нулевой баланс.</div>'}</div><h2 class="section-title" style="margin-top:26px">Предметы и собственность (${a.items.length})</h2><div class="asset-grid">${possessions||'<div class="panel">Подтверждённых предметов в структурированном журнале пока нет.</div>'}</div><h2 class="section-title" style="margin-top:26px">Новые люди из сцен (${a.new_characters.length})</h2><div class="asset-grid">${newcomers||'<div class="panel">Пока нет новых зарегистрированных персонажей.</div>'}</div>`;
 }
 
 function renderMemory(){
@@ -547,7 +568,7 @@ async function actionHandler(action,el){switch(action){
 case 'navigate':state.worldContext=null;state.view=el.dataset.view;if(state.view==='story')state.recentLimit=40;if(state.view==='assets'||state.view==='people')await loadAssets();if(state.view==='documents')await loadDocuments();render();return;
 case 'goto-memory':state.view='memory';render();return;
 case 'goto-assets':state.view='assets';await loadAssets();render();return;
-case 'assets-reload':state.assets=null;await loadAssets();render();return;
+case 'assets-reload':state.assets=null;await loadScenes();await loadAssets();render();return;
 case 'goto-documents':state.view='documents';await loadDocuments();render();return;
 
 case 'toggle-document-import':{
