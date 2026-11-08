@@ -80,3 +80,7 @@ The private document library is defined in `supabase/reference_docs.sql`; apply 
 The MCP gateway exposes `get_reference_catalog`, `get_reference_document` (chunked full text), `get_scene_preflight`, and `get_character_memory`. `get_story_context` includes a source manifest, selected rules and a branch-derived character summary. The **Герои** screen distinguishes facts personally learned (with channels and source scenes) from subjective beliefs. The **Активы** home screen shows readiness of source documents and causal memory before play.
 
 No model can guarantee every psychological reaction is right. Strict factual ledger validation checks impossible purchases, ownership and known chronology, while source and character checks supply evidence for model reasoning; automated semantic auditing and durable year-spanning snapshots remain future work.
+
+## v1.2 first-step world setup and contextual delete
+
+The **New World** wizard offers copying a selected allowlist of source documents **before Genesis or life simulation**. Old played history, money, character sheets and checkpoints are never copied automatically. On the **Миры** page, a normal tap/click opens the world; long-press on mobile or right-click on desktop opens its contextual menu. **Удалить → Да** deletes only the chosen owner's world and cascades through its history and documents; **Нет** cancels. No typing the world name or permanently visible delete button. The actions remain protected by Supabase owner RLS.
