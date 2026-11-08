@@ -186,7 +186,7 @@ function renderSimulationPanel(w){
  return `<div class="panel" style="margin-bottom:18px"><h2 class="section-title">Время и жизнь персонажа</h2><p class="sub">Режимы используют ту же действующую ветку, её память и текущую дату. Переключение не отменяет прошлое.</p>${controls}${panel}</div>`;
 }
 
-function renderStory(){const w=state.world;if(!w)return needsWorld();const b=state.branches.find(b=>b.id===w.active_branch_id);const action=btn('goto-memory','Память действующей ветки')+btn('goto-assets','Деньги и вещи')+btn('goto-documents','Источники');
+function renderStory(){const w=state.world;if(!w)return needsWorld();const b=state.branches.find(b=>b.id===w.active_branch_id);const action=btn('story-reload','Перечитать сцены')+btn('goto-memory','Память действующей ветки')+btn('goto-assets','Деньги и вещи')+btn('goto-documents','Источники');
 const storyLabel=x(String(w.model_story||'gpt-6').toUpperCase())+' · Высокое';
 const relationLabel=x(String(w.model_relationships||'gpt-5.6').toUpperCase())+' · Высокое';
 const storyMode=state.storyMode==='relationship'?'relationship':'story';
@@ -247,7 +247,8 @@ function renderSaveStatus(){
  <p class="tiny"><b>Действующая ветка:</b> ${x(branch.name)}</p>
  <p class="tiny"><b>Последняя сцена:</b> ${x(head||'ещё не создана')}</p>
  <p class="tiny"><b>Игровая дата:</b> ${x(last?.world_time||state.world.genesis_choices?.current_period||'не установлена')}</p>
- ${head&&!structured?'<p class="hint">Полный текст хранится, но карта ресурсов и знаний может быть неполной: проверь пакет последствий сцены.</p>':''}
+ ${state.lastSceneRefreshAt?`<p class="tiny">Проверено в Supabase: ${x(new Date(state.lastSceneRefreshAt).toLocaleString('ru-RU'))}</p>`:''}
+  ${head&&!structured?'<p class="hint">Полный текст хранится, но карта ресурсов и знаний может быть неполной: проверь пакет последствий сцены.</p>':''}
  ${!aligned?'<p class="hint">Последняя запись и голова ветки не совпали в загруженных данных. Обнови состояние и не продолжай историю до проверки.</p>':''}
  <div class="row">${btn('assets-reload','Проверить сохранение в Supabase')}${btn('goto-story','Архив сцен')}</div>
  </div>`;
@@ -738,15 +739,16 @@ async function runSaveDiagnosticFromCompanion(){
 
 async function actionHandler(action,el){switch(action){
 case 'run-save-diagnostic':await runSaveDiagnosticFromCompanion();return;
-case 'navigate':state.worldContext=null;state.view=el.dataset.view;if(state.view==='library')await loadWorlds();if(state.view==='story')state.recentLimit=40;if(state.view==='assets'||state.view==='people'||state.view==='memory')await loadAssets();if(state.view==='documents')await loadDocuments();render();return;
-case 'goto-memory':state.view='memory';await loadAssets();render();return;
-case 'memory-reload':await loadScenes();await loadAssets();render();return;
+case 'navigate':await openSection(el.dataset.view);return;
+case 'goto-memory':await openSection('memory');return;
+case 'memory-reload':await reloadSceneData();return;
 case 'memory-search':state.memoryQuery=document.getElementById('memory-query')?.value?.trim()||'';state.memoryKind=document.getElementById('memory-kind')?.value||'fact';state.memoryOffset=0;render();return;
 case 'memory-prev':state.memoryOffset=Math.max(0,state.memoryOffset-40);render();return;
 case 'memory-next':state.memoryOffset+=40;render();return;
-case 'goto-assets':state.view='assets';await loadAssets();render();return;
-case 'assets-reload':state.assets=null;await loadScenes();await loadAssets();render();return;
-case 'goto-documents':state.view='documents';await loadDocuments();render();return;
+case 'goto-assets':await openSection('assets');return;
+case 'assets-reload':await reloadSceneData();return;
+case 'goto-documents':await openSection('documents');return;
+case 'story-reload':await reloadSceneData();return;
 
 case 'toggle-document-import':{
  const w=state.world;if(!w)throw Error('Сначала выбери мир.');
@@ -789,7 +791,7 @@ case 'doc-replace':{
  selector.click();return;
 }
 
-case 'goto-story':state.view='story';render();return;
+case 'goto-story':await openSection('story');return;
 case 'new-world':state.view='world-setup';render();return;
 case 'cancel-world-setup':state.view='library';render();return;
 case 'world-menu-delete':{
@@ -804,8 +806,8 @@ case 'confirm-delete-world':{
 }
 case 'cancel-delete-world':state.modal=null;render();return;
 case 'close-world-menu':state.worldContext=null;render();return;
-case 'open-world':state.worldContext=null;await openWorld(el.dataset.id);state.view=state.world.genesis_approved?'assets':'builder';if(state.view==='assets')await loadAssets();render();return;
-case 'goto-genesis':state.view='genesis';render();return;
+case 'open-world':state.worldContext=null;await openWorld(el.dataset.id);await openSection(state.world.genesis_approved?'assets':'builder');return;
+case 'goto-genesis':await openSection('genesis');return;
 
 case 'quick-answer':{
  const step=QUICK_GENESIS_STEPS[state.quickStep];
@@ -970,7 +972,7 @@ case 'setup-form':{const d=getForm('setup-form');if(!/^https:\/\/[a-z0-9.-]+\.su
 case 'login-form':{const d=getForm('login-form');const email=d.email.trim().toLowerCase();if(!email||!d.password)throw Error('Введи email и пароль.');const v=dataOrThrow(await state.client.auth.signInWithPassword({email,password:d.password}));if(!v.session||!v.user)throw Error('Не удалось получить сессию.');localStorage.setItem('lw_login_email',email);state.session=v.session;state.user=v.user;await loadWorlds();render();notify('Ты в своём мире!');return;}
 case 'password-form':{const d=getForm('password-form');if(!state.session)throw Error('Для смены пароля сначала войди.');if(d.new_password.length<12)throw Error('Пароль должен содержать минимум 12 символов.');if(d.new_password!==d.repeat_password)throw Error('Пароли не совпадают.');dataOrThrow(await state.client.auth.updateUser({password:d.new_password}));render();notify('Пароль сохранён. При следующих входах используй его.');return;}
 case 'world-form':await saveWorld(getForm('world-form'));render();return;
-case 'goto-world-auto-save':await loadWorlds();state.view='library';render();return;
+case 'goto-world-auto-save':await openSection('library');return;
 case 'models-form':{const d=getForm('models-form');state.world=dataOrThrow(await state.client.from('lw_worlds').update({model_story:d.model_story,model_relationships:d.model_relationships}).eq('id',state.world.id).select().single());render();notify('Модели записаны как предпочтения (платный API не включается).');return;}
 case 'character-form':await saveCharacter(getForm('character-form'));return;
 case 'scene-form':{const d=getForm('scene-form');if(!d.body?.trim())throw Error('Вставь текст сцены.');await appendScene(d.body,'manual');return;}
@@ -1030,8 +1032,14 @@ document.addEventListener('click',e=>{
  const el=e.target.closest('[data-action]');
  if(!el)return;
  if(el.dataset.action==='open-world'&&suppressWorldOpen(state.suppressWorldClickUntil,Date.now())){e.preventDefault();return;}
- e.preventDefault();withBusy(()=>actionHandler(el.dataset.action,el));
+ e.preventDefault();
+ const action=el.dataset.action;
+ const target={navigate:el.dataset.view,'goto-story':'story','goto-memory':'memory',
+  'goto-assets':'assets','goto-documents':'documents','goto-genesis':'genesis',
+  'goto-world-auto-save':'library'}[action]||null;
+ const label=(el.getAttribute?.('aria-label')||el.textContent||action).trim().slice(0,85);
+ void withBusy(()=>actionHandler(action,el),label,target);
 });
-document.addEventListener('submit',e=>{e.preventDefault();withBusy(()=>submitHandler(e.target));});
+document.addEventListener('submit',e=>{e.preventDefault();const form=e.target;const label=form.querySelector('button[type="submit"]')?.textContent?.trim()||'Сохранение формы';void withBusy(()=>submitHandler(form),label);});
 window.addEventListener('unhandledrejection',e=>{console.error(e.reason);notify(errtext(e.reason),true);});
 (async()=>{if(state.config){try{await connect();}catch(e){console.error(e);notify('Не удалось подключиться к Supabase: '+errtext(e),true);state.config=null;}}render();if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('/sw.js').catch(()=>{});})().catch(e=>{notify(errtext(e),true);render();});
