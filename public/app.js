@@ -89,6 +89,8 @@ function renderDocuments(){
  if(state.documentsReady===false)return header+`<div class="attention"><b>Библиотека документов пока не установлена в Supabase.</b><p>Один раз запусти SQL-миграцию — существующие миры и сцены она не изменяет.</p><a href="https://github.com/korotkowdoc-arch/living-world/blob/main/supabase/reference_docs.sql" target="_blank" rel="noopener">Открыть SQL для установки</a><p class="tiny">${x(state.documentsError)}</p></div>`;
  if(state.documentsReady!==true)return header+'<div class="panel">Загружаем список документов…</div>';
  const docs=state.documents;
+ const allowImport=state.world.genesis_choices?.document_upload_enabled===true;
+ const importToggle=`<div class="ai-status"><b>Импорт документов из этого чата: ${allowImport?'разрешён':'нуждается в разрешении'}</b><p>Разрешение позволяет подключённому MCP сохранять полный текст проектных документов в выбранный мир. Файлы и правки других миров не затрагиваются.</p>${btn('toggle-document-import',allowImport?'Запретить импорт из ChatGPT':'Разрешить импорт документов',allowImport?'':'gold')}</div>`;
  const types=DOC_CATEGORIES.map(kind=>opt(kind.id,kind.label,'world_lore')).join('');
  const rows=docs.map(d=>`<div class="asset-panel doc-card">
   <div class="eyebrow">${x(docCategory(d.category).label)} · редакция ${x(d.revision)}</div>
@@ -99,7 +101,7 @@ function renderDocuments(){
  </div>`).join('');
  const selected=state.docSelected?docs.find(d=>d.id===state.docSelected):null;
  const preview=selected?`<div class="panel doc-preview"><h3 class="section-title">${x(selected.title)} · редакция ${x(selected.revision)}</h3><p class="hint">Показывается текст, извлечённый из исходного документа. Данные приватны для владельца мира.</p>${state.docContent!==null?`<pre class="doc-text">${x(state.docContent.slice(0,30000))}${state.docContent.length>30000?'\n… Отображены первые 30 000 символов. Полная версия сохранена в Supabase.':''}</pre>`:'<p>Загрузка текста…</p>'}<div class="row">${btn('doc-close','Закрыть')}${state.docContent?btn('doc-copy','Скопировать полную редакцию'):''}</div></div>`:'';
- return header+`<div class="panel">
+ return header+importToggle+`<div class="panel">
    <h2 class="section-title">Загрузить документы мира</h2>
    <p class="sub">Можно выбрать сразу до 12 файлов DOCX, TXT или Markdown: правила, глоссарий, модели персонажей, завершённые годы и примеры. Категории определяются автоматически по именам.</p>
    <div class="field"><label for="doc-files">Выбрать файлы</label><input type="file" id="doc-files" accept=".docx,.txt,.md,.markdown" multiple></div>
@@ -254,6 +256,13 @@ case 'goto-assets':state.view='assets';await loadAssets();render();return;
 case 'assets-reload':state.assets=null;await loadAssets();render();return;
 case 'goto-documents':state.view='documents';await loadDocuments();render();return;
 
+case 'toggle-document-import':{
+ const w=state.world;if(!w)throw Error('Сначала выбери мир.');
+ const enabled=w.genesis_choices?.document_upload_enabled===true;
+ if(!enabled&&!confirm('Разрешить ChatGPT сохранять исходные документы в приватной библиотеке этого мира?'))return;
+ state.world=dataOrThrow(await state.client.from('lw_worlds').update({genesis_choices:{...(w.genesis_choices||{}),document_upload_enabled:!enabled}}).eq('id',w.id).select().single());
+ render();notify(!enabled?'Импорт документов из ChatGPT разрешён.':'Импорт документов из ChatGPT отключён.');return;
+}
 case 'docs-refresh':await loadDocuments();render();return;
 case 'docs-import':{
  const files=document.getElementById('doc-files')?.files;
