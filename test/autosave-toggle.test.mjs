@@ -1,56 +1,120 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+import {persistWorldAutosave} from '../public/world-autosave.mjs';
+
 const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const style=readFileSync(new URL('../public/style.css',import.meta.url),'utf8');
 
-test('each world card offers its own accessible autosave switch, outside the open-world button',()=>{
- const p=app.indexOf('function renderLibrary(){');
- const end=app.indexOf('function renderWorldContextMenu(){',p);
+function dbClient(worlds,events=[]){
+ return {from(table){
+  assert.equal(table,'lw_worlds');
+  let mode='read',changes=null,filters={};
+  const builder={
+   select(){return builder;},
+   update(body){mode='update';changes=body;return builder;},
+   eq(field,value){filters[field]=value;return builder;},
+   async single(){
+    const row=worlds.find(w=>w.id===filters.id&&w.owner_id===filters.owner_id);
+    if(!row)return {data:null,error:{message:'No rows for authenticated owner'}};
+    if(mode==='update'){
+     Object.assign(row,structuredClone(changes));
+     events.push({kind:'update',id:row.id,fields:Object.keys(changes)});
+    }else events.push({kind:'read',id:row.id});
+    return {data:structuredClone(row),error:null};
+   }
+  };
+  return builder;
+ }};
+}
+const worlds=()=>[
+ {id:'a',owner_id:'owner',genesis_choices:{hero_name:'Гарри Поттер',simulation_mode:'life'}},
+ {id:'b',owner_id:'owner',genesis_choices:{hero_name:'Другой герой',simulation_mode:'off'}},
+ {id:'stranger',owner_id:'different',genesis_choices:{auto_save_enabled:false}}
+];
+
+test('autosave is a real checkbox with native change event and a separate card, not a generic click button',()=>{
+ const p=app.indexOf('function renderLibrary(){'),end=app.indexOf('function renderWorldContextMenu(){',p);
  const library=app.slice(p,end);
- assert.match(library,/const rows=state\.worlds\.map\(w=>/);
- assert.match(library,/w\.genesis_choices\?\.auto_save_enabled===true/);
  assert.match(library,/data-action="open-world"/);
  assert.match(library,/<\/button>\s*<div class="world-save-footer">/);
- assert.match(library,/role="switch"/);
- assert.match(library,/aria-checked="\$\{enabled\}"/);
- assert.match(library,/data-action="world-auto-save-toggle" data-id="\$\{x\(w\.id\)\}"/);
- assert.match(library,/Автосейв сцен/);
- assert.match(library,/Включён/);
- assert.match(library,/Выключен/);
- assert.match(library,/\$\{pending\?'disabled':''\}/);
+ assert.match(library,/<input id="autosave-/);
+ assert.match(library,/type="checkbox" data-world-autosave=/);
+ assert.match(library,/\$\{enabled\?'checked':''\}/);
+ assert.match(library,/role="alert"/);
+ assert.doesNotMatch(library,/data-action="world-auto-save-toggle"/);
+ assert.match(app,/document\.addEventListener\('change',e=>\{\s*const checkbox=e\.target\?\.closest\?\.\('input\[data-world-autosave\]'\)/);
+ assert.doesNotMatch(app,/case 'world-auto-save-toggle'/);
 });
-test('card switch directly updates correct world without native confirm or changing active world',()=>{
- assert.match(app,/case 'world-auto-save-toggle':\{[\s\S]*?const worldId=el\.dataset\.id/);
- assert.match(app,/await updateWorldAutoSave\(worldId,world\.genesis_choices\?\.auto_save_enabled!==true\)/);
- const start=app.indexOf('async function updateWorldAutoSave(worldId,enabled)');
- const end=app.indexOf('async function saveWorld(fields)',start);
- const helper=app.slice(start,end);
- assert.ok(helper.length>0);
- assert.doesNotMatch(helper,/confirm\(/);
- assert.doesNotMatch(helper,/state\.world\.id!==worldId/);
- assert.match(helper,/state\.worlds\.find\(w=>w\.id===worldId\)/);
- assert.match(helper,/state\.autoSavePendingWorldId=worldId/);
- assert.match(helper,/state\.worlds=state\.worlds\.map\(w=>w\.id===worldId/);
- assert.match(helper,/if\(state\.world\?\.id===worldId\)/);
+test('owner-scoped transaction preserves Genesis and does not affect any other world',async()=>{
+ const rows=worlds(),events=[],client=dbClient(rows,events);
+ const choices=await persistWorldAutosave({client,userId:'owner',worldId:'a',enabled:true});
+ assert.equal(choices.auto_save_enabled,true);
+ assert.equal(choices.hero_name,'Гарри Поттер');
+ assert.equal(choices.simulation_mode,'life');
+ assert.equal(rows[1].genesis_choices.auto_save_enabled,undefined);
+ assert.equal(rows[2].genesis_choices.auto_save_enabled,false);
+ assert.deepEqual(events.map(x=>x.kind),['read','update','read']);
+ assert.deepEqual(events.filter(x=>x.kind==='update').map(x=>x.id),['a']);
+ await persistWorldAutosave({client,userId:'owner',worldId:'a',enabled:false});
+ assert.equal(rows[0].genesis_choices.auto_save_enabled,false);
 });
-test('autosave change is written for the authenticated owner and read back from Supabase',()=>{
- assert.match(app,/\.select\('id,owner_id,genesis_choices'\)\.eq\('id',worldId\)\.eq\('owner_id',state\.user\.id\)/);
- assert.match(app,/const merged=\{\.\.\.\(before\.genesis_choices\|\|\{\}\),auto_save_enabled:enabled\}/);
- assert.match(app,/\.update\(\{genesis_choices:merged,updated_at:new Date\(\)\.toISOString\(\)\}\)/);
- assert.match(app,/check\.genesis_choices\?\.auto_save_enabled!==enabled/);
- assert.match(app,/автосейв '\+\(enabled\?'включён':'выключен'\)\+' — проверено в Supabase/);
+test('wrong owner cannot change a world, nor fake a successful toggle',async()=>{
+ const rows=worlds(),client=dbClient(rows);
+ await assert.rejects(
+  persistWorldAutosave({client,userId:'owner',worldId:'stranger',enabled:true}),
+  /No rows/
+ );
+ assert.equal(rows[2].genesis_choices.auto_save_enabled,false);
 });
-test('global settings link to visible world switches rather than an opaque enable button',()=>{
- const start=app.indexOf('function renderSettings(){');
- const end=app.indexOf('function renderModal(){',start);
- const settings=app.slice(start,end);
- assert.match(settings,/goto-world-auto-save/);
- assert.doesNotMatch(settings,/\$\{btn\('toggle-auto-save'/);
- assert.match(app,/case 'goto-world-auto-save':await loadWorlds\(\);state\.view='library';render\(\);return/);
+test('mismatched readback rejects instead of showing success',async()=>{
+ const rows=worlds();let count=0;const client={
+  from(){
+   let changed=false;
+   return {
+    select(){return this;},eq(){return this;},
+    update(){changed=true;return this;},
+    async single(){
+     count++;
+     if(changed)return {data:{id:'a'},error:null};
+     return {data:{id:'a',owner_id:'owner',genesis_choices:{hero_name:'Гарри Поттер',auto_save_enabled:false}},error:null};
+    }
+   };
+  }
+ };
+ await assert.rejects(persistWorldAutosave({client,userId:'owner',worldId:'a',enabled:true}),/не сохранил/);
+ assert.equal(count,3);
 });
-test('per-world autosave switch remains a usable 44px+ mobile target',()=>{
- assert.match(style,/\.world-save-switch\{/);
- assert.match(style,/min-height:60px/);
- assert.match(style,/\.world-save-switch:focus-visible/);
+test('changing a world switch bypasses the global busy lock and updates visible state',async()=>{
+ const sourceStart=app.indexOf('async function updateWorldAutoSave(worldId,enabled){');
+ const sourceEnd=app.indexOf('async function saveWorld(fields)',sourceStart);
+ const handlerStart=app.indexOf("document.addEventListener('change',e=>{\n const checkbox=");
+ const handlerEnd=app.indexOf("document.addEventListener('change',e=>{if(e.target?.id==='world-setup-source'",handlerStart);
+ assert.ok(sourceStart>0&&sourceEnd>sourceStart&&handlerStart>sourceEnd&&handlerEnd>handlerStart);
+ const source=app.slice(sourceStart,sourceEnd)+app.slice(handlerStart,handlerEnd);
+ const rows=worlds(),events=[],client=dbClient(rows,events);
+ let callback,renderCount=0;
+ const state={user:{id:'owner'},client,worlds:rows.map(x=>structuredClone(x)),world:null,
+  autoSavePendingWorldId:null,autoSaveErrors:{},busy:true};
+ const sandbox={state,persistWorldAutosave,
+  render(){renderCount++;},notify(){},errtext:e=>e.message,
+  async loadWorlds(){state.worlds=rows.map(x=>structuredClone(x));},
+  document:{addEventListener(event,cb){assert.equal(event,'change');callback=cb;}}
+ };
+ vm.runInNewContext(source,sandbox);
+ const input={dataset:{worldAutosave:'a'},checked:true};
+ callback({target:{closest(sel){assert.equal(sel,'input[data-world-autosave]');return input;}}});
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(rows[0].genesis_choices.auto_save_enabled,true);
+ assert.equal(state.worlds[0].genesis_choices.auto_save_enabled,true);
+ assert.equal(state.busy,true);
+ assert.equal(state.autoSavePendingWorldId,null);
+ assert.equal(renderCount>=2,true);
+});
+test('mobile control has a large touch target and visible pending/error styles',()=>{
+ assert.match(style,/\.world-save-switch\{[^}]*min-height:64px/);
+ assert.match(style,/\.world-save-checkbox\{[^}]*-webkit-appearance:none/);
+ assert.match(style,/\.world-save-checkbox:checked/);
+ assert.match(style,/\.world-save-error\{/);
 });
