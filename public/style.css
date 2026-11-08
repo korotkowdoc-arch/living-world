@@ -75,3 +75,20 @@ body.ai-running::after{content:"ИИ создаёт сцену и фиксиру
 .ready-ok{background:#19372e;color:#a4e4ba}
 .ready-missing{background:#3a3224;color:#ffd093}
 @media(max-width:510px){.readiness-grid{grid-template-columns:1fr}}
+
+/* v1.2 world setup and deletion */
+.world-library-card{border:1px solid var(--line);border-radius:16px;background:var(--panel);min-width:0;overflow:hidden;display:flex;flex-direction:column}
+.world-library-card .world-card{width:100%;flex:1;border:0;border-radius:0;text-align:left;min-width:0}
+.world-library-card .world-card:focus-visible{outline:2px solid var(--gold);outline-offset:-3px}
+.world-card-footer{border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;flex-wrap:wrap}
+.world-card-footer .hint{flex:1;min-width:145px;font-size:12px;line-height:1.4}
+.world-delete-btn{font-size:12px;min-height:36px;border-color:#b66868;color:#ffc0c0;white-space:nowrap}
+.world-delete-btn:hover{border-color:#ff8b8b;background:#3d1f27;color:#fff}
+.world-source-categories{border:1px solid var(--line);border-radius:14px;background:var(--panel2);padding:15px;display:grid;gap:8px}
+.world-source-categories[hidden]{display:none!important}
+.world-source-check{display:flex;align-items:flex-start;gap:11px;border-radius:8px;padding:8px 10px;cursor:pointer}
+.world-source-check:hover{background:#ffffff0b}
+.world-source-check input{flex-shrink:0;width:18px;height:18px;accent-color:#d2b279;margin-top:1px}
+.world-source-check span{line-height:1.4}
+.world-source-categories .hint{margin-top:7px}
+@media(max-width:530px){.world-card-footer{align-items:flex-start}.world-card-footer .world-delete-btn{width:100%}.world-source-categories{padding:12px}}
