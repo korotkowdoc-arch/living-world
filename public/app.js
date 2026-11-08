@@ -124,6 +124,8 @@ function renderDocuments(){
  const docs=state.documents;
  const allowImport=state.world.genesis_choices?.document_upload_enabled===true;
  const importToggle=`<div class="ai-status"><b>Импорт документов из этого чата: ${allowImport?'разрешён':'нуждается в разрешении'}</b><p>Разрешение позволяет подключённому MCP сохранять полный текст проектных документов в выбранный мир. Файлы и правки других миров не затрагиваются.</p>${btn('toggle-document-import',allowImport?'Запретить импорт из ChatGPT':'Разрешить импорт документов',allowImport?'':'gold')}</div>`;
+ const sources=(state.worlds||[]).filter(w=>w.id!==state.world.id);
+ const reusable=`<div class="panel"><h2 class="section-title">Общие документы из другого мира</h2><p class="sub">Скопировать <b>правила, глоссарий, причинные ориентиры и стиль</b> из уже созданного мира. История пройденных лет, checkpoint, персонажи, их отношения и предметы не копируются. Это отдельные редакции в новом мире, старый не меняется.</p>${sources.length?`<div class="field"><label>Мир-источник</label><select id="docs-source-world">${sources.map(w=>opt(w.id,w.name,w.id===sources[0].id?sources[0].id:sources[0].id)).join('')}</select></div><div class="row" style="margin-top:12px">${btn('docs-copy-shared','Скопировать общие документы','gold')}</div>`:'<p class="hint">В библиотеке пока нет других миров-источников. После создания нового мира эта кнопка появится.</p>'}</div>`;
  const types=DOC_CATEGORIES.map(kind=>opt(kind.id,kind.label,'world_lore')).join('');
  const rows=docs.map(d=>`<div class="asset-panel doc-card">
   <div class="eyebrow">${x(docCategory(d.category).label)} · редакция ${x(d.revision)}</div>
@@ -134,7 +136,7 @@ function renderDocuments(){
  </div>`).join('');
  const selected=state.docSelected?docs.find(d=>d.id===state.docSelected):null;
  const preview=selected?`<div class="panel doc-preview"><h3 class="section-title">${x(selected.title)} · редакция ${x(selected.revision)}</h3><p class="hint">Показывается текст, извлечённый из исходного документа. Данные приватны для владельца мира.</p>${state.docContent!==null?`<pre class="doc-text">${x(state.docContent.slice(0,30000))}${state.docContent.length>30000?'\n… Отображены первые 30 000 символов. Полная версия сохранена в Supabase.':''}</pre>`:'<p>Загрузка текста…</p>'}<div class="row">${btn('doc-close','Закрыть')}${state.docContent?btn('doc-copy','Скопировать полную редакцию'):''}</div></div>`:'';
- return header+importToggle+`<div class="panel">
+ return header+importToggle+reusable+`<div class="panel">
    <h2 class="section-title">Загрузить документы мира</h2>
    <p class="sub">Можно выбрать сразу до 12 файлов DOCX, TXT или Markdown: правила, глоссарий, модели персонажей, завершённые годы и примеры. Категории определяются автоматически по именам.</p>
    <div class="field"><label for="doc-files">Выбрать файлы</label><input type="file" id="doc-files" accept=".docx,.txt,.md,.markdown" multiple></div>
@@ -289,6 +291,31 @@ async function importDocuments(files,existingKey=null){
  }
  return {imported,unchanged,issues};
 }
+async function copyReusableDocuments(sourceWorldId){
+ const destination=state.world;
+ if(!destination||state.documentsReady!==true)throw Error('Не выбрана готовая библиотека документов нового мира.');
+ const source=(state.worlds||[]).find(w=>w.id===sourceWorldId&&w.id!==destination.id);
+ if(!source)throw Error('Выбери другой принадлежащий тебе мир.');
+ const categories=['core_rules','glossary','year_anchors','style_example','director_calibration'];
+ const response=await state.client.from('lw_reference_docs').select('doc_key,revision,category,title,source_filename,content,sha256')
+  .eq('world_id',source.id).in('category',categories).order('revision',{ascending:false}).limit(150);
+ const records=dataOrThrow(response);
+ const latest=new Map();
+ for(const doc of records)if(!latest.has(doc.doc_key))latest.set(doc.doc_key,doc);
+ let copied=0,unchanged=0;
+ const errors=[];
+ for(const doc of latest.values()){
+  try{
+   const checksum=await digestText(doc.content);
+   if(checksum!==doc.sha256)throw Error('Контрольная сумма исходника не совпадает.');
+   const result=await insertDocument({title:doc.title,category:doc.category,
+    filename:doc.source_filename||'',text:doc.content,existingKey:doc.doc_key});
+   if(result.skipped)unchanged++;else copied++;
+   await loadDocuments();
+  }catch(error){errors.push(doc.title+': '+errtext(error));}
+ }
+ return {copied,unchanged,errors};
+}
 async function saveWorld(fields){const w=state.world;if(!w)throw Error('Мир не выбран');const data={name:cleanText(fields.name,140),genre:fields.genre,premise:cleanText(fields.premise,15000),world_rules:cleanText(fields.world_rules,20000),history:cleanText(fields.history,50000),timeline:cleanText(fields.timeline,50000),clock_start:cleanText(fields.clock_start,80),genesis_choices:{...(w.genesis_choices||{}),current_period:cleanText(fields.current_period,30)},updated_at:new Date().toISOString()};if(data.genesis_choices.current_period&&!validStoryClock(data.genesis_choices.current_period))throw Error('Текущий период: YYYY-MM, YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS.');if(!data.name)throw Error('Укажи название мира');state.world=dataOrThrow(await state.client.from('lw_worlds').update(data).eq('id',w.id).select().single());await loadWorlds();notify('Мир сохранён в облаке.');}
 async function newWorld(){const row=dataOrThrow(await state.client.from('lw_worlds').insert({owner_id:state.user.id,name:'Новая вселенная',genre:'Фэнтези'}).select().single());const branch=dataOrThrow(await state.client.from('lw_branches').insert({owner_id:state.user.id,world_id:row.id,name:'Основная линия'}).select().single());dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:branch.id}).eq('id',row.id));await openWorld(row.id);await loadWorlds();state.view='genesis';render();notify('Вселенная создана. Выбери четыре решения героя для быстрого старта.');}
 async function saveGenesisChoices(draft=false,kind='save'){const w=state.world;if(!w||w.genesis_approved)throw Error('Генезис уже утверждён. Создай новый мир для другого старта.');const c=kind==='import'&&Array.isArray(w.genesis_choices?.quick_answers)?w.genesis_choices:getForm('genesis-form');if(!c.hero_name?.trim())throw Error('Задай имя героя.');const data={genesis_choices:c,updated_at:new Date().toISOString()};if(kind==='demo')data.genesis_draft=demoGenesis(w,c);if(kind==='import')data.genesis_draft=parseGenesis(document.getElementById('genesis-json').value,Number(c.npc_count),c.hero_name);state.world=dataOrThrow(await state.client.from('lw_worlds').update(data).eq('id',w.id).select().single());return c;}
@@ -316,6 +343,15 @@ case 'toggle-document-import':{
  if(!enabled&&!confirm('Разрешить ChatGPT сохранять исходные документы в приватной библиотеке этого мира?'))return;
  state.world=dataOrThrow(await state.client.from('lw_worlds').update({genesis_choices:{...(w.genesis_choices||{}),document_upload_enabled:!enabled}}).eq('id',w.id).select().single());
  render();notify(!enabled?'Импорт документов из ChatGPT разрешён.':'Импорт документов из ChatGPT отключён.');return;
+}
+case 'docs-copy-shared':{
+ const sourceId=document.getElementById('docs-source-world')?.value;
+ if(!sourceId)throw Error('Выбери мир-источник.');
+ const result=await copyReusableDocuments(sourceId);
+ render();
+ notify('Общие документы: скопировано '+result.copied+', уже сохранено '+result.unchanged+
+  (result.errors.length?'. Ошибки: '+result.errors.join(' / '):'.'),result.errors.length>0);
+ return;
 }
 case 'docs-refresh':await loadDocuments();render();return;
 case 'docs-import':{
