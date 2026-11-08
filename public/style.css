@@ -30,3 +30,11 @@
 .mode-tile.active strong{color:var(--gold2);}
 .mode-tile:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
 @media(max-width:550px){.quick-options{grid-template-columns:1fr;}.quick-option{min-height:70px;}.mode-choices{grid-template-columns:1fr;gap:9px;}.mode-tile{min-height:69px;padding:14px 16px;}}
+
+/* v0.7 life and time simulation controls */
+.sim-modes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:18px;}
+.sim-modes .mode-tile{min-height:106px;}
+.sim-decisions{display:grid;grid-template-columns:repeat(auto-fit,minmax(225px,1fr));gap:10px;margin-top:18px;}
+.sim-decisions .eyebrow{grid-column:1/-1;}
+.sim-decisions .quick-option.active{border-color:var(--gold);background:#302b24;}
+@media(max-width:770px){.sim-modes{grid-template-columns:1fr;}.sim-modes .mode-tile{min-height:76px;}}
