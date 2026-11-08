@@ -1,0 +1,44 @@
+name: LIVING WORLD Bridge live smoke
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'bridge/**'
+      - 'test/bridge.test.mjs'
+      - '.github/workflows/bridge-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run offline MCP protocol and auth regression tests
+        run: |
+          node --check bridge/index.js
+          node --test test/bridge.test.mjs
+      - name: Verify public metadata is served by the live Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint='https://living-world-bridge-mcp.korotkowdoc.workers.dev/mcp'
+          for attempt in $(seq 1 12); do
+            discover=$(curl -fsS --max-time 10 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' --data '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"github-smoke","version":"1.0"},"io.modelcontextprotocol/clientCapabilities":{}}}}' "$endpoint" || true)
+            tools=$(curl -fsS --max-time 10 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"github-smoke","version":"1.0"},"io.modelcontextprotocol/clientCapabilities":{}}}}' "$endpoint" || true)
+            if jq -e '.result.resultType=="complete" and (.result.supportedVersions | index("2026-07-28") != null)' <<<"$discover" >/dev/null 2>&1 &&
+               jq -e '.result.resultType=="complete" and (.result.tools | map(.name) | index("list_worlds") != null) and (.result.tools | map(.name) | index("save_scene_package") == null)' <<<"$tools" >/dev/null 2>&1; then
+              echo 'Production Bridge v8 discovery and read-only tool list: OK'
+              exit 0
+            fi
+            echo "Attempt $attempt: production has not passed Bridge v8 metadata checks."
+            sleep 10
+          done
+          echo 'Production Bridge v8 smoke test failed; inspect Cloudflare Settings > Builds.'
+          exit 1
