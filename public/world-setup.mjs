@@ -24,6 +24,3 @@ export function latestReusableDocs(records=[],categories=[]){
  }
  return [...latest.values()].sort((a,b)=>String(a.title).localeCompare(String(b.title),'ru'));
 }
-export function validateDeleteWorldName(actual,typed){
- return typeof actual==='string'&&typeof typed==='string'&&actual.length>0&&typed.trim()===actual;
-}
