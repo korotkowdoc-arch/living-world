@@ -335,10 +335,12 @@ function boundedInteger(value,min,max) {
   if(!Number.isInteger(value)||value<min||value>max) throw new Error('Некорректные параметры страницы.');
   return value;
 }
+// Owner opted into authenticated scene writes; explicit BRIDGE_WRITES_ENABLED=false remains an emergency kill switch.
+function writesEnabled(env) { return env.BRIDGE_WRITES_ENABLED !== 'false'; }
 async function call(name,args,env,identity) {
   const live=env.BRIDGE_MODE==='live';
   if(live&&!identity) throw new Error('Требуется OAuth-вход.');
-  if(live&&name==='save_scene_package'&&env.BRIDGE_WRITES_ENABLED!=='true') throw new Error('Запись в Supabase выключена.');
+  if(live&&name==='save_scene_package'&&!writesEnabled(env)) throw new Error('Запись в Supabase выключена.');
   const mode=live?'live':'demo';
   const rpc=async (method,body)=>supabase(env,'/rest/v1/rpc/'+method,{token:identity.token,body});
   if(name==='list_worlds') {
@@ -373,7 +375,7 @@ async function call(name,args,env,identity) {
   if(!Number.isFinite(date.valueOf())||date.toISOString().slice(0,19)!==stamp) throw new Error('Некорректные дата или время мира.');
   const note=packSceneNote(packet.changes);
   if(!live&&(branchKey!==branchId||head!==headId)) throw new Error('Ветка или последняя сцена изменилась.');
-  if(live&&env.BRIDGE_WRITES_ENABLED!=='true') throw new Error('Запись в Supabase выключена.');
+  if(live&&!writesEnabled(env)) throw new Error('Запись в Supabase выключена.');
   const body={p_world:id,p_branch:branchKey,p_head:head,p_id:requestId,p_body:packet.scene,p_time:stamp,p_note:note};
   const digest=await fingerprint(JSON.stringify(body));
   if(args.approval_code===undefined) {
@@ -474,7 +476,7 @@ export default {async fetch(request,env={}){
     service:'living-world-bridge',version:'2.2.4',
     mode:env.BRIDGE_MODE==='live'?'live':'not-live',
     missing_configuration:['BRIDGE_PUBLIC_URL','SUPABASE_URL','SUPABASE_OAUTH_CLIENT_ID','BRIDGE_SUPABASE_USER_ID','SUPABASE_PUBLISHABLE_KEY','BRIDGE_SEAL_KEY'].filter(name=>!env[name]),
-    writes_enabled:env.BRIDGE_WRITES_ENABLED==='true'
+    writes_enabled:writesEnabled(env)
   });
   if(request.method==='GET' && (path==='/.well-known/oauth-protected-resource'||path==='/.well-known/oauth-protected-resource/mcp')) return json(metadata(env));
   if(['/approve','/approve.js'].includes(path)) return approvalPage(request,env,path);
@@ -496,7 +498,7 @@ export default {async fetch(request,env={}){
     catch(error) {return authRequired(message.id,env,error?.authCode??'unknown');}
   }
   if(message.method==='initialize') return ok({protocolVersion:message.params?.protocolVersion==='2026-07-28'?'2026-07-28':'2025-11-25',capabilities:{tools:{}},serverInfo:{name:'living-world-bridge',version:'2.2.0'}});
-  if(message.method==='tools/list') return ok({resultType:'complete',ttlMs:0,cacheScope:'public',tools:live&&env.BRIDGE_WRITES_ENABLED!=='true'
+  if(message.method==='tools/list') return ok({resultType:'complete',ttlMs:0,cacheScope:'public',tools:live&&!writesEnabled(env)
     ?tools.filter(tool=>tool.name!=='save_scene_package'):tools});
   if(message.method==='ping') return ok({});
   if(message.method==='tools/call') {
