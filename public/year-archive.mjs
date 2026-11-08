@@ -178,10 +178,11 @@ export function reconcileYearDocuments({documents=[],world,branch,scenes=[],char
   }
   const lastYearScene=yearScenes.at(-1);
   const reusable=records.find(({meta:m})=>ids.has(m.source_head)&&
-    m.source_head===lastYearScene.id.toLowerCase()&&m.source_head===scenes.at(-1).id.toLowerCase()&&
+    m.source_head===lastYearScene.id.toLowerCase()&&
     m.from===meta.from&&m.to===meta.to);
-  // A saved document may be used as-is only if no relevant scenes followed it.
-  // For all forks and later scenes, reproject instead of deleting the whole year.
+  // Reuse the completed archived period if its last scene is still the period head;
+  // later scenes outside this period do not invalidate a valid archived year.
+  // Otherwise rebuild from all actual scenes before and after the fork.
   if(reusable){
    canonical.push(reusable.doc);
    continue;
