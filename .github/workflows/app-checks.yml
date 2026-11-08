@@ -7,6 +7,13 @@ on:
       - 'test/**'
       - 'package.json'
       - '.github/workflows/app-checks.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'public/**'
+      - 'test/**'
+      - 'package.json'
+      - '.github/workflows/app-checks.yml'
   workflow_dispatch:
 
 permissions:

@@ -13,7 +13,7 @@ import {projectCharacterMemory} from './world-character-memory.mjs';
 
 const app=document.getElementById('app');
 const cfgKey='lw_cloud_config_v03'; // Preserve the existing Supabase connection when upgrading.
-const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[],aiReady:false,aiReason:'Подключение ещё не проверено',assets:null,assetIssue:null,documents:[],documentsReady:null,documentsError:'',docSelected:null,docContent:null,characterLedger:null,causalLedger:null,memoryQuery:'',memoryKind:'fact',memoryOffset:0,worldContext:null,suppressWorldClickUntil:0,saveDiagnostic:null,autoSavePendingWorldId:null,autoSaveErrors:{}};
+const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[],aiReady:false,aiReason:'Подключение ещё не проверено',assets:null,assetIssue:null,documents:[],documentsReady:null,documentsError:'',docSelected:null,docContent:null,characterLedger:null,causalLedger:null,memoryQuery:'',memoryKind:'fact',memoryOffset:0,worldContext:null,suppressWorldClickUntil:0,saveDiagnostic:null,autoSavePendingWorldId:null,autoSaveErrors:{},busyLabel:'',pendingView:null,lastSceneRefreshAt:null};
 const x=v=>esc(v??'');
 // Historical start and current narrative period are separate; don't fabricate a date.
 const storyClock=(w=state.world)=>state.scenes.at(-1)?.world_time||w?.genesis_choices?.current_period||(w?.genesis_approved?'':w?.clock_start)||'';
@@ -31,7 +31,29 @@ function errtext(e){
  if(/too many requests|rate limit/i.test(m))return 'Слишком много попыток входа. Не повторяй их подряд.';
  return m;
 }
-async function withBusy(fn){if(state.busy)return;state.busy=true;try{await fn();}catch(e){console.error(e);notify(errtext(e),true);}finally{state.busy=false;}}
+function showActivity(message=''){
+ const el=document.getElementById('activity');
+ if(!el)return;
+ el.hidden=!message;
+ el.textContent=message;
+}
+async function withBusy(fn,label='Загрузка данных',pendingView=null){
+ if(state.busy){
+  if(pendingView){
+   state.pendingView=pendingView;
+   notify('Раздел откроется после завершения «'+(state.busyLabel||'текущей операции')+'».');
+  }else notify('Сейчас выполняется «'+(state.busyLabel||'другая операция')+'». Повтори действие после завершения.',true);
+  return;
+ }
+ state.busy=true;state.busyLabel=label;showActivity('Выполняется: '+label+'…');
+ try{await fn();}
+ catch(e){console.error(e);notify(errtext(e),true);}
+ finally{
+  state.busy=false;state.busyLabel='';showActivity();
+  const next=state.pendingView;state.pendingView=null;
+  if(next)await withBusy(()=>openSection(next),'Открытие раздела '+next);
+ }
+}
 function dataOrThrow(result){if(result.error)throw result.error;return result.data;}
 async function clipboard(s){try{await navigator.clipboard.writeText(s);notify('Скопировано. Можно вставить в ChatGPT.');}catch{const box=document.createElement('textarea');box.value=s;document.body.append(box);box.select();document.execCommand('copy');box.remove();notify('Запрос скопирован.');}}
 function render(){if(!state.config){renderSetup();return;}if(!state.session){renderLogin();return;}renderApp();}
@@ -164,7 +186,7 @@ function renderSimulationPanel(w){
  return `<div class="panel" style="margin-bottom:18px"><h2 class="section-title">Время и жизнь персонажа</h2><p class="sub">Режимы используют ту же действующую ветку, её память и текущую дату. Переключение не отменяет прошлое.</p>${controls}${panel}</div>`;
 }
 
-function renderStory(){const w=state.world;if(!w)return needsWorld();const b=state.branches.find(b=>b.id===w.active_branch_id);const action=btn('goto-memory','Память действующей ветки')+btn('goto-assets','Деньги и вещи')+btn('goto-documents','Источники');
+function renderStory(){const w=state.world;if(!w)return needsWorld();const b=state.branches.find(b=>b.id===w.active_branch_id);const action=btn('story-reload','Перечитать сцены')+btn('goto-memory','Память действующей ветки')+btn('goto-assets','Деньги и вещи')+btn('goto-documents','Источники');
 const storyLabel=x(String(w.model_story||'gpt-6').toUpperCase())+' · Высокое';
 const relationLabel=x(String(w.model_relationships||'gpt-5.6').toUpperCase())+' · Высокое';
 const storyMode=state.storyMode==='relationship'?'relationship':'story';
@@ -225,7 +247,8 @@ function renderSaveStatus(){
  <p class="tiny"><b>Действующая ветка:</b> ${x(branch.name)}</p>
  <p class="tiny"><b>Последняя сцена:</b> ${x(head||'ещё не создана')}</p>
  <p class="tiny"><b>Игровая дата:</b> ${x(last?.world_time||state.world.genesis_choices?.current_period||'не установлена')}</p>
- ${head&&!structured?'<p class="hint">Полный текст хранится, но карта ресурсов и знаний может быть неполной: проверь пакет последствий сцены.</p>':''}
+ ${state.lastSceneRefreshAt?`<p class="tiny">Проверено в Supabase: ${x(new Date(state.lastSceneRefreshAt).toLocaleString('ru-RU'))}</p>`:''}
+  ${head&&!structured?'<p class="hint">Полный текст хранится, но карта ресурсов и знаний может быть неполной: проверь пакет последствий сцены.</p>':''}
  ${!aligned?'<p class="hint">Последняя запись и голова ветки не совпали в загруженных данных. Обнови состояние и не продолжай историю до проверки.</p>':''}
  <div class="row">${btn('assets-reload','Проверить сохранение в Supabase')}${btn('goto-story','Архив сцен')}</div>
  </div>`;
@@ -323,10 +346,33 @@ function aiButton(id,title){
 }
 async function connect(){if(!state.config)return;const {url,key}=state.config;if(!/^https:\/\/[a-z0-9.-]+\.supabase\.co\/?$/i.test(url)||!key)throw Error('Некорректный Project URL или ключ Supabase.');const sdk=await import('https://esm.sh/@supabase/supabase-js@2');state.client=sdk.createClient(url,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});const result=await state.client.auth.getSession();if(result.error)throw result.error;state.session=result.data.session;state.user=state.session?.user||null;state.client.auth.onAuthStateChange((_event,session)=>{const old=state.user?.id;state.session=session;state.user=session?.user||null;if(state.user&&!old){loadWorlds().then(render).catch(e=>notify(errtext(e),true));}else if(!state.user){state.world=null;state.worlds=[];render();}});if(state.user)await loadWorlds();await checkAiConnection();}
 async function loadWorlds(){state.worlds=dataOrThrow(await state.client.from('lw_worlds').select('*').order('updated_at',{ascending:false}));}
-async function openWorld(id){state.assets=null;state.assetIssue=null;state.documents=[];state.documentsReady=null;state.documentsError='';state.docSelected=null;state.docContent=null;state.characterLedger=null;state.causalLedger=null;state.memoryQuery='';state.memoryKind='fact';state.memoryOffset=0;state.world=dataOrThrow(await state.client.from('lw_worlds').select('*').eq('id',id).single());const savedAnswers=state.world.genesis_choices?.quick_answers;state.quickAnswers=Array.isArray(savedAnswers)?savedAnswers.slice(0,QUICK_GENESIS_STEPS.length):[];state.quickStep=state.quickAnswers.length===QUICK_GENESIS_STEPS.length?QUICK_GENESIS_STEPS.length:0;state.storyMode=localStorage.getItem('lw_story_mode_'+id)==='relationship'?'relationship':'story';state.sceneLength=['normal','large','detailed'].includes(localStorage.getItem('lw_scene_length_'+id))?localStorage.getItem('lw_scene_length_'+id):'large';const [chars,branches]=await Promise.all([state.client.from('lw_characters').select('*').eq('world_id',id).order('created_at'),state.client.from('lw_branches').select('*').eq('world_id',id).order('created_at')]);state.characters=dataOrThrow(chars);state.branches=dataOrThrow(branches);if(!state.world.active_branch_id && state.branches[0]){state.world.active_branch_id=state.branches[0].id;dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:state.world.active_branch_id}).eq('id',id));}await loadScenes();await loadDocuments();}
-async function loadScenes(){if(!state.world?.active_branch_id){state.scenes=[];state.memoryScenes=[];return;}const id=state.world.active_branch_id;const [visible,memory]=await Promise.all([state.client.rpc('lw_recent_scenes',{p_branch_id:id,p_limit:state.recentLimit}),state.client.rpc('lw_recent_scenes',{p_branch_id:id,p_limit:200})]);state.scenes=dataOrThrow(visible);state.memoryScenes=dataOrThrow(memory);}
+async function openWorld(id){state.assets=null;state.assetIssue=null;state.lastSceneRefreshAt=null;state.documents=[];state.documentsReady=null;state.documentsError='';state.docSelected=null;state.docContent=null;state.characterLedger=null;state.causalLedger=null;state.memoryQuery='';state.memoryKind='fact';state.memoryOffset=0;state.world=dataOrThrow(await state.client.from('lw_worlds').select('*').eq('id',id).single());const savedAnswers=state.world.genesis_choices?.quick_answers;state.quickAnswers=Array.isArray(savedAnswers)?savedAnswers.slice(0,QUICK_GENESIS_STEPS.length):[];state.quickStep=state.quickAnswers.length===QUICK_GENESIS_STEPS.length?QUICK_GENESIS_STEPS.length:0;state.storyMode=localStorage.getItem('lw_story_mode_'+id)==='relationship'?'relationship':'story';state.sceneLength=['normal','large','detailed'].includes(localStorage.getItem('lw_scene_length_'+id))?localStorage.getItem('lw_scene_length_'+id):'large';const [chars,branches]=await Promise.all([state.client.from('lw_characters').select('*').eq('world_id',id).order('created_at'),state.client.from('lw_branches').select('*').eq('world_id',id).order('created_at')]);state.characters=dataOrThrow(chars);state.branches=dataOrThrow(branches);if(!state.world.active_branch_id && state.branches[0]){state.world.active_branch_id=state.branches[0].id;dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:state.world.active_branch_id}).eq('id',id));}await loadScenes();await loadDocuments();}
+async function refreshWorldAndBranch(){
+ const w=state.world;
+ if(!w)return;
+ const [worldResult,branchResult]=await Promise.all([
+  state.client.from('lw_worlds').select('*').eq('id',w.id).single(),
+  state.client.from('lw_branches').select('*').eq('world_id',w.id).order('created_at')
+ ]);
+ const currentWorld=dataOrThrow(worldResult),currentBranches=dataOrThrow(branchResult);
+ if(state.world?.id!==w.id)throw Error('Мир сменился во время обновления. Повтори действие в выбранном мире.');
+ if(currentWorld.active_branch_id&&!currentBranches.some(b=>b.id===currentWorld.active_branch_id))
+  throw Error('Supabase не вернул действующую ветку. История не изменена.');
+ state.world=currentWorld;state.branches=currentBranches;
+}
+async function loadScenes(){
+ if(!state.world?.active_branch_id){state.scenes=[];state.memoryScenes=[];return;}
+ await refreshWorldAndBranch();
+ const id=state.world.active_branch_id;
+ const [visible,memory]=await Promise.all([
+  state.client.rpc('lw_recent_scenes',{p_branch_id:id,p_limit:state.recentLimit}),
+  state.client.rpc('lw_recent_scenes',{p_branch_id:id,p_limit:200})
+ ]);
+ state.scenes=dataOrThrow(visible);state.memoryScenes=dataOrThrow(memory);
+}
 
-async function loadAssets(){
+async function loadAssets(refreshHead=true){
+ if(refreshHead)await refreshWorldAndBranch();
  const w=state.world;
  if(!w){state.assets=null;return;}
  const branch=state.branches.find(b=>b.id===w.active_branch_id);
@@ -346,6 +392,33 @@ async function loadAssets(){
  state.assetIssue=null;
 }
 
+const SECTION_NAMES=new Set(['library','builder','genesis','story','memory','assets','documents','people','history','settings']);
+async function openSection(view){
+ if(!SECTION_NAMES.has(view))throw Error('Неизвестный раздел приложения.');
+ const previous=state.view;
+ if(view==='library')await loadWorlds();
+ if(view==='story')state.recentLimit=40;
+ if(['story','memory','assets','people','history'].includes(view))await loadScenes();
+ if(['memory','assets','people','history'].includes(view))await loadAssets(false);
+ if(view==='documents')await loadDocuments();
+ state.worldContext=null;state.view=view;render();
+ if(previous!==view&&typeof window.scrollTo==='function')window.scrollTo(0,0);
+}
+async function reloadSceneData(){
+ if(!state.world)throw Error('Сначала выбери мир.');
+ await loadScenes();
+ await loadAssets(false);
+ state.lastSceneRefreshAt=new Date().toISOString();
+ render();
+ const branch=state.branches.find(b=>b.id===state.world.active_branch_id);
+ const last=state.memoryScenes.at(-1);
+ if(branch?.head_scene_id&&branch.head_scene_id!==last?.id){
+  notify('Ветка обновилась, но последняя сцена не совпадает. Проверь историю перед продолжением.',true);
+  return;
+ }
+ notify('Supabase перечитан: '+(state.assets?.scanned_scenes??0)+' сцен, '+(state.assets?.items?.length??0)+
+  ' предметов, '+(state.assets?.new_characters?.length??0)+' новых персонажей.');
+}
 let mammothLoader=null;
 async function loadDocuments(){
  if(!state.world){state.documents=[];state.documentsReady=null;return;}
@@ -519,7 +592,7 @@ async function deleteWorld(worldId){
 async function saveGenesisChoices(draft=false,kind='save'){const w=state.world;if(!w||w.genesis_approved)throw Error('Генезис уже утверждён. Создай новый мир для другого старта.');const c=kind==='import'&&Array.isArray(w.genesis_choices?.quick_answers)?w.genesis_choices:getForm('genesis-form');if(!c.hero_name?.trim())throw Error('Задай имя героя.');const data={genesis_choices:c,updated_at:new Date().toISOString()};if(kind==='demo')data.genesis_draft=demoGenesis(w,c);if(kind==='import')data.genesis_draft=parseGenesis(document.getElementById('genesis-json').value,Number(c.npc_count),c.hero_name);state.world=dataOrThrow(await state.client.from('lw_worlds').update(data).eq('id',w.id).select().single());return c;}
 async function approveGenesis(){const w=state.world;const d=w?.genesis_draft;if(!d||w.genesis_approved)throw Error('Нет неутверждённого Генезиса');if(state.characters.length||state.scenes.length)throw Error('Старт можно утвердить только в пустом мире');const rows=d.characters.map(c=>({owner_id:state.user.id,world_id:w.id,...Object.fromEntries(['role',...CHARACTER_FIELDS].map(k=>[k,c[k]||'']))}));dataOrThrow(await state.client.from('lw_characters').insert(rows));const extra=`\n\nГЕНЕЗИС (утверждённое прошлое):\n${d.summary}\n${d.past_changes.map(s=>'- '+s).join('\n')}`;state.world=dataOrThrow(await state.client.from('lw_worlds').update({genesis_approved:true,history:(w.history||'')+extra}).eq('id',w.id).select().single());await openWorld(w.id);state.view='people';render();notify('Персонажи и стартовое прошлое закреплены в облаке.');}
 async function saveCharacter(fields){const rec=Object.fromEntries(['role',...CHARACTER_FIELDS].map(k=>[k,cleanText(fields[k],20000)]));if(!rec.name)throw Error('Имя обязательно');const id=state.modal?.character?.id;if(id)dataOrThrow(await state.client.from('lw_characters').update(rec).eq('id',id));else dataOrThrow(await state.client.from('lw_characters').insert({...rec,owner_id:state.user.id,world_id:state.world.id}));state.modal=null;await openWorld(state.world.id);render();notify('Персонаж сохранён.');}
-async function appendScene(body,model='manual',extra={}){const w=state.world;const branch=state.branches.find(b=>b.id===w.active_branch_id);if(!branch)throw Error('Нет действующей ветки');const t=cleanText(extra.world_time||document.getElementById('story-clock')?.value||storyClock(w),80);if(!validStoryClock(t))throw Error('Перед записью сцены задай текущий период в разделе «Мир» (например, 1999-06), затем открой «Историю» заново.');const previous=state.memoryScenes.at(-1)?.world_time;if(previous&&!isNondecreasingStoryTime(previous,t))throw Error('Новая сцена не может оказаться раньше последней подтверждённой точки времени. Для изменения прошлого используй «На это» или новую ветку.');const rawNote=extra.note!==undefined?extra.note:document.getElementById('story-note')?.value||'';dataOrThrow(await state.client.rpc('lw_append_scene',{p_world_id:w.id,p_branch_id:branch.id,p_expected_head:branch.head_scene_id||null,p_body:cleanText(body,150000),p_world_time:t,p_model:model,p_note:(()=>{const note=String(rawNote||'');if(note.length>60000)throw Error('Пакет изменений слишком велик для сохранения.');return note;})()}));await openWorld(w.id);render();notify('Сцена и её последствия сохранены в действующей ветке.');}
+async function appendScene(body,model='manual',extra={}){await loadScenes();const w=state.world;const branch=state.branches.find(b=>b.id===w.active_branch_id);if(!branch)throw Error('Нет действующей ветки');const t=cleanText(extra.world_time||document.getElementById('story-clock')?.value||storyClock(w),80);if(!validStoryClock(t))throw Error('Перед записью сцены задай текущий период в разделе «Мир» (например, 1999-06), затем открой «Историю» заново.');const previous=state.memoryScenes.at(-1)?.world_time;if(previous&&!isNondecreasingStoryTime(previous,t))throw Error('Новая сцена не может оказаться раньше последней подтверждённой точки времени. Для изменения прошлого используй «На это» или новую ветку.');const rawNote=extra.note!==undefined?extra.note:document.getElementById('story-note')?.value||'';dataOrThrow(await state.client.rpc('lw_append_scene',{p_world_id:w.id,p_branch_id:branch.id,p_expected_head:branch.head_scene_id||null,p_body:cleanText(body,150000),p_world_time:t,p_model:model,p_note:(()=>{const note=String(rawNote||'');if(note.length>60000)throw Error('Пакет изменений слишком велик для сохранения.');return note;})()}));await openWorld(w.id);render();notify('Сцена и её последствия сохранены в действующей ветке.');}
 
 async function switchBranch(id){const w=state.world;dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:id}).eq('id',w.id));await openWorld(w.id);state.view='story';render();notify('Переключено на выбранную временную линию.');}
 function markRevision(){if(!state.revision)return;const ta=document.getElementById('revision-source');state.revision.prefix=ta.value.slice(0,ta.selectionStart);document.getElementById('revision-anchor-status').textContent=`Сохранено символов: ${state.revision.prefix.length}. Остальной хвост будет отменён.`;}
@@ -666,15 +739,16 @@ async function runSaveDiagnosticFromCompanion(){
 
 async function actionHandler(action,el){switch(action){
 case 'run-save-diagnostic':await runSaveDiagnosticFromCompanion();return;
-case 'navigate':state.worldContext=null;state.view=el.dataset.view;if(state.view==='library')await loadWorlds();if(state.view==='story')state.recentLimit=40;if(state.view==='assets'||state.view==='people'||state.view==='memory')await loadAssets();if(state.view==='documents')await loadDocuments();render();return;
-case 'goto-memory':state.view='memory';await loadAssets();render();return;
-case 'memory-reload':await loadScenes();await loadAssets();render();return;
+case 'navigate':await openSection(el.dataset.view);return;
+case 'goto-memory':await openSection('memory');return;
+case 'memory-reload':await reloadSceneData();return;
 case 'memory-search':state.memoryQuery=document.getElementById('memory-query')?.value?.trim()||'';state.memoryKind=document.getElementById('memory-kind')?.value||'fact';state.memoryOffset=0;render();return;
 case 'memory-prev':state.memoryOffset=Math.max(0,state.memoryOffset-40);render();return;
 case 'memory-next':state.memoryOffset+=40;render();return;
-case 'goto-assets':state.view='assets';await loadAssets();render();return;
-case 'assets-reload':state.assets=null;await loadScenes();await loadAssets();render();return;
-case 'goto-documents':state.view='documents';await loadDocuments();render();return;
+case 'goto-assets':await openSection('assets');return;
+case 'assets-reload':await reloadSceneData();return;
+case 'goto-documents':await openSection('documents');return;
+case 'story-reload':await reloadSceneData();return;
 
 case 'toggle-document-import':{
  const w=state.world;if(!w)throw Error('Сначала выбери мир.');
@@ -717,7 +791,7 @@ case 'doc-replace':{
  selector.click();return;
 }
 
-case 'goto-story':state.view='story';render();return;
+case 'goto-story':await openSection('story');return;
 case 'new-world':state.view='world-setup';render();return;
 case 'cancel-world-setup':state.view='library';render();return;
 case 'world-menu-delete':{
@@ -732,8 +806,8 @@ case 'confirm-delete-world':{
 }
 case 'cancel-delete-world':state.modal=null;render();return;
 case 'close-world-menu':state.worldContext=null;render();return;
-case 'open-world':state.worldContext=null;await openWorld(el.dataset.id);state.view=state.world.genesis_approved?'assets':'builder';if(state.view==='assets')await loadAssets();render();return;
-case 'goto-genesis':state.view='genesis';render();return;
+case 'open-world':state.worldContext=null;await openWorld(el.dataset.id);await openSection(state.world.genesis_approved?'assets':'builder');return;
+case 'goto-genesis':await openSection('genesis');return;
 
 case 'quick-answer':{
  const step=QUICK_GENESIS_STEPS[state.quickStep];
@@ -898,7 +972,7 @@ case 'setup-form':{const d=getForm('setup-form');if(!/^https:\/\/[a-z0-9.-]+\.su
 case 'login-form':{const d=getForm('login-form');const email=d.email.trim().toLowerCase();if(!email||!d.password)throw Error('Введи email и пароль.');const v=dataOrThrow(await state.client.auth.signInWithPassword({email,password:d.password}));if(!v.session||!v.user)throw Error('Не удалось получить сессию.');localStorage.setItem('lw_login_email',email);state.session=v.session;state.user=v.user;await loadWorlds();render();notify('Ты в своём мире!');return;}
 case 'password-form':{const d=getForm('password-form');if(!state.session)throw Error('Для смены пароля сначала войди.');if(d.new_password.length<12)throw Error('Пароль должен содержать минимум 12 символов.');if(d.new_password!==d.repeat_password)throw Error('Пароли не совпадают.');dataOrThrow(await state.client.auth.updateUser({password:d.new_password}));render();notify('Пароль сохранён. При следующих входах используй его.');return;}
 case 'world-form':await saveWorld(getForm('world-form'));render();return;
-case 'goto-world-auto-save':await loadWorlds();state.view='library';render();return;
+case 'goto-world-auto-save':await openSection('library');return;
 case 'models-form':{const d=getForm('models-form');state.world=dataOrThrow(await state.client.from('lw_worlds').update({model_story:d.model_story,model_relationships:d.model_relationships}).eq('id',state.world.id).select().single());render();notify('Модели записаны как предпочтения (платный API не включается).');return;}
 case 'character-form':await saveCharacter(getForm('character-form'));return;
 case 'scene-form':{const d=getForm('scene-form');if(!d.body?.trim())throw Error('Вставь текст сцены.');await appendScene(d.body,'manual');return;}
@@ -958,8 +1032,14 @@ document.addEventListener('click',e=>{
  const el=e.target.closest('[data-action]');
  if(!el)return;
  if(el.dataset.action==='open-world'&&suppressWorldOpen(state.suppressWorldClickUntil,Date.now())){e.preventDefault();return;}
- e.preventDefault();withBusy(()=>actionHandler(el.dataset.action,el));
+ e.preventDefault();
+ const action=el.dataset.action;
+ const target={navigate:el.dataset.view,'goto-story':'story','goto-memory':'memory',
+  'goto-assets':'assets','goto-documents':'documents','goto-genesis':'genesis',
+  'goto-world-auto-save':'library'}[action]||null;
+ const label=(el.getAttribute?.('aria-label')||el.textContent||action).trim().slice(0,85);
+ void withBusy(()=>actionHandler(action,el),label,target);
 });
-document.addEventListener('submit',e=>{e.preventDefault();withBusy(()=>submitHandler(e.target));});
+document.addEventListener('submit',e=>{e.preventDefault();const form=e.target;const label=form.querySelector('button[type="submit"]')?.textContent?.trim()||'Сохранение формы';void withBusy(()=>submitHandler(form),label);});
 window.addEventListener('unhandledrejection',e=>{console.error(e.reason);notify(errtext(e.reason),true);});
 (async()=>{if(state.config){try{await connect();}catch(e){console.error(e);notify('Не удалось подключиться к Supabase: '+errtext(e),true);state.config=null;}}render();if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('/sw.js').catch(()=>{});})().catch(e=>{notify(errtext(e),true);render();});
