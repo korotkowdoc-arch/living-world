@@ -34,7 +34,7 @@ test('initialize and tools/list work without a Bearer token',async()=>{
  assert.equal(r.status,200);
  const d=(await r.json()).result;
  assert.equal(d.resultType,'complete');
- assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_scene_receipt','get_story_context','save_reference_document','get_character_memory','get_reference_catalog','get_reference_document','get_scene_preflight','get_companion_state','get_branch_history']);
+ assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_causal_memory','get_scene_receipt','get_story_context','save_reference_document','get_character_memory','get_reference_catalog','get_reference_document','get_scene_preflight','get_companion_state','get_branch_history']);
  assert.ok(d.tools.every(t=>t._meta.securitySchemes[0].type==='oauth2'));
 });
 test('real data calls are forbidden without a validated OAuth token',async()=>{
@@ -215,6 +215,11 @@ test('companion MCP excludes invalidated branch purchases and reads precise ledg
   assert.equal(context.branch.head_scene_id,sceneB.id);
   assert.equal(context.character_memory.complete,true);
   assert.ok(Array.isArray(context.character_memory.profiles));
+  assert.equal(context.causal_memory.complete,true);
+  assert.equal(context.causal_memory.counts.facts,0);
+  const deep=await call('tools/call',{name:'get_causal_memory',arguments:{world_id:worldId,kind:'fact',limit:20}},{authorization:'Bearer '+testJwt('authenticated')});
+  const summary=(await deep.json()).result.structuredContent;
+  assert.equal(summary.complete,true);assert.equal(summary.total,0);
  }finally{globalThis.fetch=original;}
 });
 
