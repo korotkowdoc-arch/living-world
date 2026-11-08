@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseGenesis,genesisPrompt,scenePrompt,revisionPrompt,demoGenesis,demoScene,escapeHTML} from '../public/logic.mjs';
+import {parseGenesis,genesisPrompt,scenePrompt,revisionPrompt,demoGenesis,demoScene,escapeHTML,QUICK_GENESIS_STEPS,quickGenesisPrompt} from '../public/logic.mjs';
 const world={id:'w',name:'Проверка',genre:'Фэнтези',clock_start:'1998-09-01T08:00:00',world_rules:'Нет смартфонов',premise:'Альтернативный мир',history:'Прошлое',timeline:'Календарь'};
 const choices={hero_name:'Героиня',npc_count:'4',turning_point:'Побег',childhood:'На улице',origin:'Изгой'};
 test('demo genesis yields hero + exactly 4 independent NPCs',()=>{
@@ -19,3 +19,35 @@ test('scene prompt reads supplied state but does not invent deleted scene',()=>{
 test('revision includes only authoritative prefix and correction',()=>{const p=revisionPrompt(world,[],'Она ответила.','Не должна уходить.',[]);assert.match(p,/Она ответила/);assert.match(p,/Не должна уходить/);assert.doesNotMatch(p,/Аннулированная сцена/);});
 test('escape HTML in user-generated scenes',()=>{assert.equal(escapeHTML('<script>"x"</script>'),'&lt;script&gt;&quot;x&quot;&lt;/script&gt;');});
 test('demo scene is visibly identified as demo',()=>{assert.match(demoScene(world,demoGenesis(world,choices).characters,0),/ДЕМО/);});
+
+test('four decisions guide AI without being invented past facts',()=>{
+ const c={hero_name:'Мира',hero_age:'18',npc_count:'3',
+   quick_answers:QUICK_GENESIS_STEPS.map(step=>step.options[0].id),
+   world_title:'Проверка нового мира',world_idea:'Магическая академия',
+   npc_ideas:'Ника — подруга героя'};
+ const p=quickGenesisPrompt(world,c);
+ assert.match(p,/четыре решения|ЧЕТЫРЕ РЕШЕНИЯ/i);
+ assert.match(p,/ситуации буквально произошли/);
+ assert.match(p,/самостоятельно|САМОСТОЯТЕЛЬНО/);
+ assert.match(p,/Ника — подруга героя/);
+ assert.match(p,/ровно 4 объекта|ровно 4 самостоятельных|ровно 3 самостоятельных NPC|ровно 4 объектов/i);
+ assert.match(p,/Мира/);
+ assert.match(p,/knowledge/);
+});
+test('rapid genesis validates each choice and hero name',()=>{
+ const c={hero_name:'Ника',npc_count:'4',quick_answers:['confront','plan','freedom','autonomous']};
+ assert.ok(quickGenesisPrompt(world,c).includes('Ника'));
+ assert.throws(()=>quickGenesisPrompt(world,{...c,quick_answers:['unknown','plan','freedom','autonomous']}),/недействителен/);
+ assert.throws(()=>quickGenesisPrompt(world,{...c,hero_name:'Главный герой'}),/имя главного героя/);
+ assert.throws(()=>quickGenesisPrompt(world,{...c,npc_count:'7'}),/от 2 до 6/);
+});
+test('high effort scene labels differ while continuity remains the same',()=>{
+ const chars=[{name:'Мира',role:'hero',knowledge:'Не знает тайну'}];
+ const p1=scenePrompt(world,chars,[], 'story');
+ const p2=scenePrompt(world,chars,[], 'relationship');
+ assert.match(p1,/GPT-6 · Высокое/);
+ assert.match(p2,/GPT-5.6 · Высокое/);
+ assert.match(p1,/Не знает тайну/);
+ assert.match(p2,/Не знает тайну/);
+ assert.match(p2,/вручную/);
+});
