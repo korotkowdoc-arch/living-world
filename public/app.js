@@ -1104,16 +1104,7 @@ document.addEventListener('change',e=>{
   render();
  });
 });
-document.addEventListener('change',e=>{
- if(e.target?.id==='world-setup-source'){
-  const choices=document.getElementById('world-setup-categories');
-  if(choices)choices.hidden=!e.target.value;
- }
- if(e.target?.id==='world-setup-upload-files')updateWorldSetupFilesSummary();
- if(e.target?.id==='scene-length'&&state.world){
-  state.sceneLength=e.target.value;localStorage.setItem('lw_scene_length_'+state.world.id,state.sceneLength);
- }
-});
+document.addEventListener('change',e=>{if(e.target?.id==='world-setup-source'){const choices=document.getElementById('world-setup-categories');if(choices)choices.hidden=!e.target.value;}if(e.target?.id==='world-setup-upload-files')updateWorldSetupFilesSummary();if(e.target?.id==='scene-length'&&state.world){state.sceneLength=e.target.value;localStorage.setItem('lw_scene_length_'+state.world.id,state.sceneLength);}});
 let worldPressTimer=null,worldTouchStart=null;
 function clearWorldPress(){if(worldPressTimer!==null){clearTimeout(worldPressTimer);worldPressTimer=null;}worldTouchStart=null;}
 document.addEventListener('contextmenu',e=>{
