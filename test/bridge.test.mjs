@@ -168,6 +168,7 @@ test('owner-authorized bridge write tool is listed only when enabled',async()=>{
  assert.equal(r.status,200);
  const list=(await r.json()).result.tools.map(x=>x.name);
  assert.ok(list.includes('save_scene_package'));
+ assert.ok(list.includes('save_scene_auto'));
  const health=await bridge.fetch(new Request(root+'/health'),enabled);
  assert.equal((await health.json()).writes_enabled,true);
  const turnedOff=await bridge.fetch(new Request(root+'/health'),env);
@@ -208,4 +209,39 @@ test('companion MCP excludes invalidated branch purchases and reads precise ledg
   assert.equal(d.scanned_scenes,2);
   assert.equal(d.audit.some(a=>a.reason==='Другая ветка'),false);
  }finally{globalThis.fetch=original;}
+});
+
+test('one-call autosave is forbidden unless owner opted in for this world',async()=>{
+ const live={...env,BRIDGE_WRITES_ENABLED:'true'};
+ const head=null;const requestId='10000000-0000-4000-8000-000000000090';
+ let allow=false,writeCount=0,lastBody=null;
+ const prev=globalThis.fetch;
+ globalThis.fetch=async (url,opts={})=>{
+  const u=String(url);
+  if(u.endsWith('/auth/v1/user'))return Response.json({id:env.BRIDGE_SUPABASE_USER_ID});
+  if(u.endsWith('/rest/v1/rpc/lw_bridge_v2_state'))return Response.json({
+   world:{id:worldId,name:'Сцена в мире',genesis_choices:{auto_save_enabled:allow}},
+   branch:{id:branchId,head_scene_id:head}
+  });
+  if(u.endsWith('/rest/v1/rpc/lw_bridge_v2_append')){
+   writeCount++;lastBody=JSON.parse(opts.body);return Response.json('10000000-0000-4000-8000-000000000091');
+  }
+  throw Error('Unexpected '+u);
+ };
+ const args={world_id:worldId,branch_id:branchId,expected_head:head,request_id:requestId,scene:'Гарри получил двадцать галеонов.',world_time:'1999-06',
+  changes:{facts:['Гарри получил двадцать галеонов.'],economy:[{id:'money',action:'credit',account:'Гарри',currency:'GALLEON',amount:20,scale:0,reason:'Получил деньги',source:'В сцене передали двадцать галеонов'}],items:[],new_characters:[]}};
+ try{
+  const denied=await call('tools/call',{name:'save_scene_auto',arguments:args},{authorization:'Bearer '+testJwt('authenticated')},live);
+  assert.equal((await denied.json()).result.isError,true);
+  assert.equal(writeCount,0);
+  allow=true;
+  const allowed=await call('tools/call',{name:'save_scene_auto',arguments:args},{authorization:'Bearer '+testJwt('authenticated')},live);
+  const data=(await allowed.json()).result.structuredContent;
+  assert.equal(data.persisted,true);
+  assert.equal(data.scene_id,'10000000-0000-4000-8000-000000000091');
+  assert.equal(lastBody.p_id,requestId);
+  assert.equal(lastBody.p_time,'1999-06');
+  assert.ok(lastBody.p_note.includes('GALLEON'));
+  assert.equal(writeCount,1);
+ } finally {globalThis.fetch=prev;}
 });
