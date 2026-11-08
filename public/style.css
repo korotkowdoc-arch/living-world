@@ -55,3 +55,13 @@ body.ai-running::after{content:"ИИ создаёт сцену и фиксиру
 .asset-panel li{margin:7px 0;line-height:1.45;overflow-wrap:anywhere}
 .asset-panel p{margin:5px 0}
 @media(max-width:560px){.asset-grid{grid-template-columns:1fr}.asset-panel{padding:14px 16px}}
+
+/* v1.0 world document source library */
+.doc-card{display:flex;flex-direction:column;align-items:flex-start;gap:7px}
+.doc-card .row{margin-top:auto;flex-wrap:wrap}
+.doc-card code{font-size:11px;overflow-wrap:anywhere}
+.doc-preview{margin:20px 0}
+.doc-text{white-space:pre-wrap;word-break:break-word;max-height:560px;overflow:auto;background:#0c1720;border:1px solid var(--line);border-radius:11px;padding:16px;color:#d6dfe5;font:13px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
+#doc-files{width:100%;border:1px dashed #566579;border-radius:12px;padding:17px;background:#122333;color:var(--text)}
+#doc-text-form textarea{min-height:180px}
+@media(max-width:520px){.doc-text{padding:11px;font-size:12px}.doc-card .btn{font-size:12px}}
