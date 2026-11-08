@@ -96,3 +96,7 @@ Full backups use \`living-world-cloud-v1.0\` (legacy v0.3 still imports). They c
 The source-document library is already installed, but the current ChatGPT OAuth connector's cached schema may still expose **read-only** actions. Updating the Worker is not enough to grant this chat write tools. Refresh/reconnect that connector and confirm \`save_scene_auto\` is discoverable before claiming automated writing works. The legacy developer bridge is demo-only and must never be used as a substitute for live saves.
 
 Remaining blockers: one real persisted scene from the refreshed OAuth client, semantic review of literary scenes, durable checkpoints beyond 200 narrative scenes and full reversible revision deltas for «На это:».
+
+## v1.4 durable causal replay
+
+The current branch's facts, opened/resolved threads and offscreen events are now replayed from confirmed scene ancestry rather than the prior 200-scene preview. Each event has the original scene ID and recorded world time, and can be searched or paged. The `get_world_state`, `get_story_context` and `get_scene_preflight` responses include a full-lineage causal summary and clearly distinguish incomplete history. The `get_causal_memory` OAuth tool offers older facts and source evidence on demand. The companion's Memory page searches across up to 3,000 archived world scenes instead of claiming that the most recent 200 are the whole world. A durable snapshot system for longer worlds remains to be built; beyond the current cap the app reports incomplete state rather than fabricating facts.
