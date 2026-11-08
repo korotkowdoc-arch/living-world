@@ -253,6 +253,32 @@ case 'goto-memory':state.view='memory';render();return;
 case 'goto-assets':state.view='assets';await loadAssets();render();return;
 case 'assets-reload':state.assets=null;await loadAssets();render();return;
 case 'goto-documents':state.view='documents';await loadDocuments();render();return;
+
+case 'docs-refresh':await loadDocuments();render();return;
+case 'docs-import':{
+ const files=document.getElementById('doc-files')?.files;
+ const result=await importDocuments(files||[]);
+ state.docSelected=null;state.docContent=null;render();
+ notify('Импортировано: '+result.imported+', без изменений: '+result.unchanged+(result.issues.length?'. Ошибки: '+result.issues.join(' / '):'.'),result.issues.length>0);
+ return;
+}
+case 'doc-open':await readDocument(el.dataset.id);render();return;
+case 'doc-close':state.docSelected=null;state.docContent=null;render();return;
+case 'doc-copy':if(state.docContent)await clipboard(state.docContent);return;
+case 'doc-replace':{
+ const source=state.documents.find(d=>d.doc_key===el.dataset.key);
+ if(!source)throw Error('Исходный документ не найден.');
+ const selector=document.createElement('input');
+ selector.type='file';selector.accept='.docx,.txt,.md,.markdown';
+ selector.onchange=()=>withBusy(async()=>{
+  if(!selector.files?.length)return;
+  const result=await importDocuments(selector.files,source.doc_key);
+  state.docSelected=null;state.docContent=null;render();
+  notify('Редакций сохранено: '+result.imported+'. '+result.issues.join(' '),result.issues.length>0);
+ });
+ selector.click();return;
+}
+
 case 'goto-story':state.view='story';render();return;
 case 'new-world':await newWorld();return;
 case 'open-world':await openWorld(el.dataset.id);state.view=state.world.genesis_approved?'assets':'builder';if(state.view==='assets')await loadAssets();render();return;
@@ -401,7 +427,15 @@ case 'import-open':state.modal={type:'import'};render();return;
 case 'import-file':await importBackup(document.getElementById('backup-file').files?.[0]);return;
 }}
 
-async function submitHandler(form){switch(form.id){
+async function submitHandler(form){
+ if(form.id==='doc-text-form'){
+  const values=getForm('doc-text-form');
+  const title=values.title?.trim();
+  if(!title||!DOC_CATEGORIES.some(k=>k.id===values.category))throw Error('Название и тип источника обязательны.');
+  await insertDocument({title,category:values.category,text:values.content});
+  await loadDocuments();render();notify('Новый текстовый источник сохранён.');return;
+ }
+switch(form.id){
 case 'setup-form':{const d=getForm('setup-form');if(!/^https:\/\/[a-z0-9.-]+\.supabase\.co\/?$/i.test(d.url.trim()))throw Error('Project URL должен выглядеть как https://xxxx.supabase.co');if(!d.key.trim()||/service_role|secret/i.test(d.key))throw Error('Вставь только publishable / anon key, не секретный ключ');state.config={url:d.url.trim().replace(/\/$/,''),key:d.key.trim()};localStorage.setItem(cfgKey,JSON.stringify(state.config));await connect();render();return;}
 case 'login-form':{const d=getForm('login-form');const email=d.email.trim().toLowerCase();if(!email||!d.password)throw Error('Введи email и пароль.');const v=dataOrThrow(await state.client.auth.signInWithPassword({email,password:d.password}));if(!v.session||!v.user)throw Error('Не удалось получить сессию.');localStorage.setItem('lw_login_email',email);state.session=v.session;state.user=v.user;await loadWorlds();render();notify('Ты в своём мире!');return;}
 case 'password-form':{const d=getForm('password-form');if(!state.session)throw Error('Для смены пароля сначала войди.');if(d.new_password.length<12)throw Error('Пароль должен содержать минимум 12 символов.');if(d.new_password!==d.repeat_password)throw Error('Пароли не совпадают.');dataOrThrow(await state.client.auth.updateUser({password:d.new_password}));render();notify('Пароль сохранён. При следующих входах используй его.');return;}
