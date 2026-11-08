@@ -175,6 +175,64 @@ async function loadAssets(){
  state.assetIssue=null;
 }
 
+let mammothLoader=null;
+async function loadDocuments(){
+ if(!state.world){state.documents=[];state.documentsReady=null;return;}
+ const response=await state.client.from('lw_reference_doc_manifest').select('*').eq('world_id',state.world.id).limit(150);
+ if(response.error){state.documentsReady=false;state.documentsError=response.error.message||'Не удалось получить документы.';state.documents=[];return;}
+ state.documents=(response.data||[]).sort((a,b)=>docCategory(b.category).priority-docCategory(a.category).priority||a.title.localeCompare(b.title,'ru'));
+ state.documentsReady=true;state.documentsError='';
+}
+async function readDocument(id){
+ if(!state.world)throw Error('Мир не выбран.');
+ const r=await state.client.from('lw_reference_docs').select('id,world_id,doc_key,revision,category,title,content').eq('id',id).eq('world_id',state.world.id).single();
+ const doc=dataOrThrow(r);
+ state.docSelected=id;state.docContent=doc.content;
+}
+async function browserDocxParser(){
+ if(window.mammoth?.convertToHtml)return window.mammoth;
+ if(!mammothLoader)mammothLoader=new Promise((resolve,reject)=>{
+  const script=document.createElement('script');
+  script.src='https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.13.0/mammoth.browser.min.js';
+  script.crossOrigin='anonymous';
+  script.onload=()=>window.mammoth?.convertToHtml?resolve(window.mammoth):reject(Error('Обработчик DOCX не запустился.'));
+  script.onerror=()=>reject(Error('Не удалось загрузить локальный обработчик DOCX. При необходимости сохрани документ в TXT.'));
+  document.head.appendChild(script);
+ });
+ return mammothLoader;
+}
+async function insertDocument({title,category,filename='',text,existingKey=null}){
+ if(!state.documentsReady)throw Error('Библиотека документов ещё не установлена.');
+ const content=normalizedDocumentText(text);
+ const sha=await digestText(content);
+ const key=existingKey||category+'-'+(await digestText((filename||title).toLocaleLowerCase('ru'))).slice(0,22);
+ const old=state.documents.find(d=>d.doc_key===key);
+ if(old?.sha256===sha)return {skipped:true,doc:old};
+ const obj={world_id:state.world.id,owner_id:state.user.id,doc_key:key,revision:old?old.revision+1:1,category,title:title.slice(0,250),source_filename:filename.slice(0,250),content,sha256:sha};
+ const r=await state.client.from('lw_reference_docs').insert(obj).select('id,doc_key,revision').single();
+ return {skipped:false,doc:dataOrThrow(r)};
+}
+async function importDocuments(files,existingKey=null){
+ if(!state.documentsReady)throw Error('Сначала установи SQL-миграцию библиотеки документов.');
+ const list=[...files];
+ if(!list.length)throw Error('Выбери файлы DOCX, TXT или Markdown.');
+ if(list.length>12)throw Error('За один раз можно импортировать не больше 12 документов.');
+ let imported=0,unchanged=0;
+ const issues=[];
+ for(const f of list){
+  try{
+   const category=guessCategory(f.name);
+   const isDocx=/\.docx$/i.test(f.name);
+   const content=await extractDocumentFile(f,{mammoth:isDocx?await browserDocxParser():undefined});
+   const replace=existingKey&&list.length===1?existingKey:null;
+   const parent=replace?state.documents.find(d=>d.doc_key===replace):null;
+   const result=await insertDocument({title:f.name.replace(/\.[^.]+$/,''),category:parent?.category||category,filename:f.name,text:content,existingKey:replace});
+   if(result.skipped)unchanged++;else imported++;
+   await loadDocuments();
+  }catch(error){issues.push(f.name+': '+errtext(error));}
+ }
+ return {imported,unchanged,issues};
+}
 async function saveWorld(fields){const w=state.world;if(!w)throw Error('Мир не выбран');const data={name:cleanText(fields.name,140),genre:fields.genre,premise:cleanText(fields.premise,15000),world_rules:cleanText(fields.world_rules,20000),history:cleanText(fields.history,50000),timeline:cleanText(fields.timeline,50000),clock_start:cleanText(fields.clock_start,80),genesis_choices:{...(w.genesis_choices||{}),current_period:cleanText(fields.current_period,30)},updated_at:new Date().toISOString()};if(data.genesis_choices.current_period&&!validStoryClock(data.genesis_choices.current_period))throw Error('Текущий период: YYYY-MM, YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS.');if(!data.name)throw Error('Укажи название мира');state.world=dataOrThrow(await state.client.from('lw_worlds').update(data).eq('id',w.id).select().single());await loadWorlds();notify('Мир сохранён в облаке.');}
 async function newWorld(){const row=dataOrThrow(await state.client.from('lw_worlds').insert({owner_id:state.user.id,name:'Новая вселенная',genre:'Фэнтези'}).select().single());const branch=dataOrThrow(await state.client.from('lw_branches').insert({owner_id:state.user.id,world_id:row.id,name:'Основная линия'}).select().single());dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:branch.id}).eq('id',row.id));await openWorld(row.id);await loadWorlds();state.view='genesis';render();notify('Вселенная создана. Выбери четыре решения героя для быстрого старта.');}
 async function saveGenesisChoices(draft=false,kind='save'){const w=state.world;if(!w||w.genesis_approved)throw Error('Генезис уже утверждён. Создай новый мир для другого старта.');const c=kind==='import'&&Array.isArray(w.genesis_choices?.quick_answers)?w.genesis_choices:getForm('genesis-form');if(!c.hero_name?.trim())throw Error('Задай имя героя.');const data={genesis_choices:c,updated_at:new Date().toISOString()};if(kind==='demo')data.genesis_draft=demoGenesis(w,c);if(kind==='import')data.genesis_draft=parseGenesis(document.getElementById('genesis-json').value,Number(c.npc_count),c.hero_name);state.world=dataOrThrow(await state.client.from('lw_worlds').update(data).eq('id',w.id).select().single());return c;}
