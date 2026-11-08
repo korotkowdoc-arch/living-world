@@ -1,3 +1,4 @@
+import {handleAiRequest} from './ai.js';
 /** LIVING WORLD Bridge v8 — Git-connected production deployment 2026-11-08.
  * Continuity engine originally built for LIVING WORLD v0.5.
  *
@@ -226,9 +227,9 @@ async function verifyBearer(request,env,{mcp=true}={}) {
   if(user?.id!==claims.sub||user.id!==env.BRIDGE_SUPABASE_USER_ID) authReject('supabase_user_mismatch');
   return {user:user.id,token,claims};
 }
-async function supabase(env,path,{token,body}={}) {
-  const res=await fetch(supabaseBase(env)+path,{method:body===undefined?'GET':'POST',
-    headers:{apikey:env.SUPABASE_PUBLISHABLE_KEY,authorization:'Bearer '+token,...(body===undefined?{}:{'content-type':'application/json'})},
+async function supabase(env,path,{token,body,method}={}) {
+  const res=await fetch(supabaseBase(env)+path,{method:method||(body===undefined?'GET':'POST'),
+    headers:{apikey:env.SUPABASE_PUBLISHABLE_KEY,authorization:'Bearer '+token,...(body===undefined?{}:{'content-type':'application/json'}),...(method==='PATCH'?{prefer:'return=representation'}:{})},
     body:body===undefined?undefined:JSON.stringify(body),redirect:'manual',signal:AbortSignal.timeout(10000)});
   const data=await res.json().catch(()=>null);
   if(!res.ok) {
@@ -477,6 +478,7 @@ export default {async fetch(request,env={}){
   });
   if(request.method==='GET' && (path==='/.well-known/oauth-protected-resource'||path==='/.well-known/oauth-protected-resource/mcp')) return json(metadata(env));
   if(['/approve','/approve.js'].includes(path)) return approvalPage(request,env,path);
+   if(path.startsWith('/api/ai/'))return handleAiRequest(request,env,{verifyBearer,supabase});
   if(path!=='/mcp') return json({error:'Маршрут не найден.'},404);
   if(request.method!=='POST') return new Response(null,{status:405,headers:{allow:'POST'}});
   let message;
