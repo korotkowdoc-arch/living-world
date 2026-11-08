@@ -144,7 +144,9 @@ case 'quick-answer':{
  render();return;
 }
 case 'quick-back':state.quickStep=Math.max(0,state.quickStep-1);render();return;
+case 'quick-auto':
 case 'quick-generate':{
+ const automated=action==='quick-auto';
  const w=state.world;if(!w||w.genesis_approved)throw Error('Для нового Генезиса создай новую вселенную.');
  const d=getForm('quick-genesis-form');
  const name=cleanText(d.world_title,140);
@@ -158,13 +160,21 @@ case 'quick-generate':{
  const previous=w.genesis_choices||{};const c={hero_name:cleanText(d.hero_name,100),hero_age:String(age),school_entry_age:schoolAge,birth_date:birthDate,simulation_mode:d.start_mode==='life'?'life':'off',npc_count:String(count),base_world:d.base_world==='existing'?'existing':'original',world_title:name,world_idea:cleanText(d.world_idea,3000),npc_ideas:cleanText(d.npc_ideas,1800),current_period:start,quick_answers:state.quickAnswers.slice(0,QUICK_GENESIS_STEPS.length),...(previous.divergence?{divergence:previous.divergence}:{}),...(previous.source_material?{source_material:previous.source_material}:{}),...(previous.custom_details?{custom_details:previous.custom_details}:{})};
  const world={...w,name,clock_start:start,premise:c.world_idea||w.premise,genesis_choices:c};
  const prompt=quickGenesisPrompt(world,c);
- await clipboard(prompt);
+ if(!automated)await clipboard(prompt);
  state.world=dataOrThrow(await state.client.from('lw_worlds').update({name,clock_start:start, premise:world.premise, genesis_choices:c,genesis_draft:null,updated_at:new Date().toISOString()}).eq('id',w.id).select().single());
  await loadWorlds();
- notify('Выборы сохранены. Запрос для ИИ скопирован — открой ChatGPT, затем верни JSON в поле ниже.');
+ if(automated){
+   const result=await runAI({kind:'genesis',world_id:w.id});
+   await openWorld(w.id);state.view='genesis';render();
+   notify('ИИ создал '+result.draft.characters.length+' персонажей. Проверь их и утверди Генезис.');
+ }else notify('Выборы сохранены. Запрос для ИИ скопирован — открой ChatGPT, затем верни JSON в поле ниже.');
  return;
 }
 case 'open-chatgpt':window.open('https://chatgpt.com/','_blank','noopener,noreferrer');return;
+case 'genesis-auto':{
+ await saveGenesisChoices();const result=await runAI({kind:'genesis',world_id:state.world.id});
+ await openWorld(state.world.id);state.view='genesis';render();notify('ИИ создал '+result.draft.characters.length+' персонажей. Проверь и утверди Генезис.');return;
+}
 case 'genesis-save':await saveGenesisChoices();notify('Выборы сохранены в облаке.');return;
 case 'genesis-demo':await saveGenesisChoices(true,'demo');render();notify('Демо-предыстория готова. Это только шаблон.');return;
 case 'genesis-copy':{const c=getForm('genesis-form');await clipboard(genesisPrompt(state.world,c));await saveGenesisChoices();return;}
@@ -232,6 +242,26 @@ case 'sim-copy':{
  const prompt=simulationPrompt(w,state.characters,memory,state.scenes,{kind,span,decision,clock});
  await clipboard(prompt);
  notify('Запрос симуляции скопирован. В ChatGPT получи JSON, затем вставь через «Сцена + последствия».');return;
+}
+
+case 'auto-scene':{
+ if(!state.world||!state.world.genesis_approved)throw Error('Сначала утверди Генезис.');
+ const note=document.getElementById('story-note')?.value||'';
+ const length=document.getElementById('scene-length')?.value||state.sceneLength;
+ const result=await runAI({kind:'scene',world_id:state.world.id,mode:state.storyMode||'story',length,note});
+ await openWorld(state.world.id);state.view='story';render();
+ notify('Сцена создана и сохранена автоматически ('+result.model+').');return;
+}
+case 'sim-auto':{
+ const w=state.world,kind=w?.genesis_choices?.simulation_mode;
+ if(!['life','skip'].includes(kind))throw Error('Сначала выбери режим симуляции.');
+ const scene=state.memoryScenes.at(-1);
+ const decisions=readSceneNote(scene?.prompt_note)?.decisions||[];
+ const chosen=scene?localStorage.getItem('lw_sim_choice_'+w.id+'_'+scene.id)||'':'';
+ if(decisions.length&&!chosen)throw Error('Сначала выбери решение героя для следующего отрезка.');
+ const result=await runAI({kind:'simulation',world_id:w.id,span:document.getElementById('sim-span')?.value||'quarter',choice_id:chosen});
+ await openWorld(w.id);state.view='story';render();
+ notify('Время продвинулось до '+result.world_time+'. Сцена и последствия сохранены.');return;
 }
 case 'copy-scene-prompt':if(!state.world)throw Error('Нет мира');if(!validStoryClock(document.getElementById('story-clock')?.value||storyClock()))throw Error('Сначала установи текущий период в разделе «Мир» (например, 1999-06).');await clipboard(scenePrompt(state.world,state.characters,state.scenes,state.storyMode||'story',document.getElementById('story-note')?.value||'',document.getElementById('scene-length')?.value||state.sceneLength)+'\n\nАКТУАЛЬНАЯ ПАМЯТЬ ВЕТКИ (собственные знания каждого отделяй от общих):\n'+JSON.stringify(compactMemory(makeContinuity(state.characters,state.memoryScenes)),null,2));return;
 case 'copy-scene-packet':{if(!state.world)throw Error('Нет мира');const basic=scenePrompt(state.world,state.characters,state.scenes,state.storyMode||'story',document.getElementById('story-note')?.value||'',document.getElementById('scene-length')?.value||state.sceneLength);const clock=document.getElementById('story-clock')?.value||storyClock();if(!validStoryClock(clock))throw Error('Сначала установи текущий период в разделе «Мир» (например, 1999-06).');await clipboard(scenePackagePrompt(basic,makeContinuity(state.characters,state.memoryScenes),clock));return;}
