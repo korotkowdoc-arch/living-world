@@ -411,7 +411,11 @@ async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,ass
  const findings=[];
  if(!kinds.has('core_rules'))findings.push({severity:'warning',code:'NO_CORE_RULES',message:'Нет основного документа правил. Краткое поле world_rules не заменяет полный источник.'});
  if(!kinds.has('glossary'))findings.push({severity:'info',code:'NO_GLOSSARY',message:'Глоссарий не загружен. Термины будут менее стабильны.'});
- if(base?.memory_coverage?.complete===false)findings.push({severity:'warning',code:'INCOMPLETE_STORY_MEMORY',message:'Краткая причинная память не охватывает все сыгранные сцены: используй Year Documents или более глубокую историю.'});
+ if(base?.memory_coverage?.complete===false){
+  if(assets?.causal_memory?.complete)
+   findings.push({severity:'info',code:'SHORT_PREVIEW',message:'Последние 200 сцен — только быстрый обзор. Полная причинная история восстановлена отдельно.'});
+  else findings.push({severity:'warning',code:'INCOMPLETE_STORY_MEMORY',message:'Причинная память не охватывает сыгранную историю. Перед сценой требуется полный архив или checkpoint.'});
+ }
  if(assets?.complete===false)findings.push({severity:'warning',code:'INCOMPLETE_ASSET_MEMORY',message:'Состояние денег и предметов не восстановлено полностью.'});
  if(assets?.issues?.length)findings.push({severity:'warning',code:'LEDGER_ISSUES',message:'В учёте ресурсов обнаружены несогласованные операции: '+assets.issues.length});
  return {installed:true,ready:!!base&&!findings.some(f=>f.severity==='warning'),findings,
@@ -585,6 +589,7 @@ async function call(name,args,env,identity) {
     const intent=String(args.scene_intent||'').slice(0,1400);
     return {mode,world_id:id,branch:base.branch,world_time:base.world_time,
       memory_coverage:base.memory_coverage,resource_memory:{complete:assets.complete,issues:assets.issues||[]},
+      causal_memory:assets.complete?assets.causal_memory:{complete:false,reason:assets.reason},
       character_memory:assets.complete?{complete:true,profiles:(assets.character_memory||[]).filter(p=>actors.some(name=>name.toLocaleLowerCase('ru')===p.name.toLocaleLowerCase('ru'))),warnings:assets.character_warnings||[]}:{complete:false,reason:assets.reason},
       documents:live?await sourcePreflight(env,identity,id,intent,actors,base,assets):{installed:false,ready:false},
       narrative_checks:['Хронология и точное время','Цели, характер и изменения отношений','Что каждый знает и каким каналом','Травмы, состояние, ресурсы и местонахождение','Какие сцены и ветки аннулированы','Правила, глоссарий и актуальные изменения']}
