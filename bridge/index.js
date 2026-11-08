@@ -234,9 +234,9 @@ async function verifyBearer(request,env,{mcp=true}={}) {
   if(user?.id!==claims.sub||user.id!==env.BRIDGE_SUPABASE_USER_ID) authReject('supabase_user_mismatch');
   return {user:user.id,token,claims};
 }
-async function supabase(env,path,{token,body,method}={}) {
+async function supabase(env,path,{token,body,method,returnRepresentation=false}={}) {
   const res=await fetch(supabaseBase(env)+path,{method:method||(body===undefined?'GET':'POST'),
-    headers:{apikey:env.SUPABASE_PUBLISHABLE_KEY,authorization:'Bearer '+token,...(body===undefined?{}:{'content-type':'application/json'}),...(method==='PATCH'?{prefer:'return=representation'}:{})},
+    headers:{apikey:env.SUPABASE_PUBLISHABLE_KEY,authorization:'Bearer '+token,...(body===undefined?{}:{'content-type':'application/json'}),...(method==='PATCH'||returnRepresentation?{prefer:'return=representation'}:{})},
     body:body===undefined?undefined:JSON.stringify(body),redirect:'manual',signal:AbortSignal.timeout(10000)});
   const data=await res.json().catch(()=>null);
   if(!res.ok) {
@@ -742,6 +742,114 @@ async function approvalPage(request,env,path) {
   } catch(error) {return html('<h1>Не удалось подтвердить</h1><p>'+escapeHtml(error.message)+'</p>',400);}
 }
 
+
+const DIAGNOSTIC_ORIGIN='https://livingworld-35q.pages.dev';
+function diagnosticCors(origin){
+ return origin===DIAGNOSTIC_ORIGIN?{
+  'access-control-allow-origin':origin,'access-control-allow-headers':'authorization,content-type',
+  'access-control-allow-methods':'POST,OPTIONS','access-control-max-age':'300',
+  'vary':'Origin','cache-control':'no-store'
+ }:null;
+}
+/** A disposable technical world is the ONLY world touched by this smoke test.
+ * Same call('save_scene_auto') logic as ChatGPT OAuth, but using the verified
+ * owner's website session for diagnostics. This does NOT prove plugin refresh.
+ */
+async function runSaveDiagnostic(env,identity){
+ let worldId=null,cleanupSucceeded=false,receipt=null,stage='create';
+ try{
+  const worlds=await supabase(env,'/rest/v1/lw_worlds?select=id,name',{
+   token:identity.token,method:'POST',returnRepresentation:true,
+   body:{owner_id:identity.user,name:'Техническая проверка сейвов (временная)',
+    genre:'Диагностика',clock_start:'1995-07-01T12:00:00',
+    genesis_choices:{auto_save_enabled:true}}
+  });
+  if(!Array.isArray(worlds)||worlds.length!==1||!worlds[0]?.id)throw Error('Не удалось создать тестовый мир.');
+  worldId=checkId(worlds[0].id);
+  stage='branch';
+  const branches=await supabase(env,'/rest/v1/lw_branches?select=id',{
+   token:identity.token,method:'POST',returnRepresentation:true,
+   body:{owner_id:identity.user,world_id:worldId,name:'Техническая ветка'}
+  });
+  if(!Array.isArray(branches)||branches.length!==1||!branches[0]?.id)throw Error('Не удалось создать тестовую ветку.');
+  const branchId=checkId(branches[0].id);
+  await supabase(env,'/rest/v1/lw_worlds?id=eq.'+worldId,{
+   token:identity.token,method:'PATCH',body:{active_branch_id:branchId}
+  });
+  stage='first_scene';
+  const sceneId=crypto.randomUUID(),itemId='test-token-'+sceneId.slice(0,8);
+  const scene='Технический тест LIVING WORLD: персонаж получил 100 условных галеонов и тестовый жетон. Это не часть истории Гарри.';
+  const args={
+   world_id:worldId,branch_id:branchId,expected_head:null,request_id:sceneId,
+   scene,world_time:'1995-07-01T12:01:00',
+   changes:{
+    facts:['В техническом мире персонаж получил 100 галеонов и жетон.'],
+    economy:[{id:'test-income',action:'opening',account:'Тестовый персонаж',currency:'GALLEON',
+     amount:100,scale:0,reason:'Техническое начальное состояние',source:scene}],
+    items:[{id:'test-item',action:'acquire',item_id:itemId,label:'Тестовый жетон',
+     owner:'Тестовый персонаж',reason:'Техническое получение жетона',source:scene}]
+   }
+  };
+  const first=await call('save_scene_auto',args,env,identity);
+  if(first?.persisted!==true||first?.scene_id!==sceneId||first.already_saved)throw Error('Первое сохранение не подтверждено.');
+  stage='repeat_scene';
+  const again=await call('save_scene_auto',args,env,identity);
+  if(again?.persisted!==true||again?.scene_id!==sceneId||again?.already_saved!==true)
+   throw Error('Повторное сохранение не распознано как дубль.');
+  stage='readback';
+  const state=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_state',{token:identity.token,body:{p_world:worldId}});
+  const assets=await companionState(env,identity,worldId);
+  const wallet=assets.accounts?.find(x=>x.person==='Тестовый персонаж'&&x.currency==='GALLEON');
+  const item=assets.items?.find(x=>x.id===itemId);
+  if(state.branch?.head_scene_id!==sceneId||assets.scanned_scenes!==1||
+     wallet?.balance!==100||wallet?.known!==true||item?.owner!=='Тестовый персонаж'||assets.issues?.length)
+   throw Error('Сохранённые последствия не совпали после повторного чтения.');
+  receipt={scene_id:sceneId,head_scene_id:state.branch.head_scene_id,scanned_scenes:assets.scanned_scenes,
+    balance:wallet.balance,currency:wallet.currency,item_owner:item.owner,
+    duplicate_prevented:true,structured_facts:assets.causal_memory?.counts?.facts??null};
+  stage='cleanup';
+  const deleted=await supabase(env,'/rest/v1/lw_worlds?id=eq.'+worldId+'&select=id',{
+   token:identity.token,method:'DELETE',returnRepresentation:true
+  });
+  if(!Array.isArray(deleted)||deleted.length!==1||deleted[0].id!==worldId)
+   throw Error('Не удалось подтвердить удаление временного мира.');
+  cleanupSucceeded=true;
+  return {ok:true,mode:'live',cleanup:'completed',temporary_world_removed:true,
+   test:'write_then_idempotent_repeat_then_readback',receipt};
+ }catch(error){
+  receipt={ok:false,mode:'live',stage,reason:error?.message||'Ошибка диагностики.',
+    temporary_world_id:worldId,temporary_world_removed:false,cleanup_attempted:false};
+  return receipt;
+ }finally{
+  // A test failure never deletes or edits any pre-existing world; only the temporary world.
+  if(worldId&&!cleanupSucceeded){
+   try{
+    const deleted=await supabase(env,'/rest/v1/lw_worlds?id=eq.'+worldId+'&select=id',{
+      token:identity.token,method:'DELETE',returnRepresentation:true
+    });
+    cleanupSucceeded=Array.isArray(deleted)&&deleted.length===1&&deleted[0].id===worldId;
+    if(receipt&&!receipt.ok){receipt.cleanup_attempted=true;receipt.temporary_world_removed=cleanupSucceeded;}
+   }catch{if(receipt&&!receipt.ok)receipt.cleanup_attempted=true;}
+  }
+ }
+}
+async function handleSaveDiagnostic(request,env){
+ const cors=diagnosticCors(request.headers.get('origin'));
+ if(!cors)return new Response(null,{status:403});
+ if(request.method==='OPTIONS')return new Response(null,{status:204,headers:cors});
+ if(request.method!=='POST')return new Response(null,{status:405,headers:{...cors,allow:'POST,OPTIONS'}});
+ if(env.BRIDGE_MODE!=='live'||!writesEnabled(env))
+  return json({ok:false,reason:'Запись на рабочем мосте выключена.'},503,cors);
+ try{
+  const identity=await verifyBearer(request,env,{mcp:false});
+  const outcome=await runSaveDiagnostic(env,identity);
+  return Response.json(outcome,{status:outcome.ok?200:409,headers:cors});
+ }catch{
+  return Response.json({ok:false,reason:'Авторизация владельца не подтверждена.'},
+    {status:401,headers:cors});
+ }
+}
+
 export default {async fetch(request,env={}){
   const path=new URL(request.url).pathname;
   const live=env.BRIDGE_MODE==='live';
@@ -761,6 +869,7 @@ export default {async fetch(request,env={}){
   if(request.method==='GET' && (path==='/.well-known/oauth-protected-resource'||path==='/.well-known/oauth-protected-resource/mcp')) return json(metadata(env));
   if(['/approve','/approve.js'].includes(path)) return approvalPage(request,env,path);
    if(path.startsWith('/api/ai/'))return handleAiRequest(request,env,{verifyBearer,supabase});
+  if(path==='/api/diagnostics/save-test')return handleSaveDiagnostic(request,env);
   if(path!=='/mcp') return json({error:'Маршрут не найден.'},404);
   if(request.method!=='POST') return new Response(null,{status:405,headers:{allow:'POST'}});
   let message;
