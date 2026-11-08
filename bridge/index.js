@@ -1,5 +1,6 @@
 import {handleAiRequest} from './ai.js';
 import {extractCompanionChanges,activeLineage,projectCompanion} from '../public/world-ledger.mjs';
+import {latestDocumentVersions,buildSourcePreflight} from '../public/reference-documents.mjs';
 import {validStoryClock} from '../public/continuity.mjs';
 /** LIVING WORLD Bridge v8 — Git-connected production deployment 2026-11-08.
  * Continuity engine originally built for LIVING WORLD v0.5.
@@ -357,6 +358,55 @@ function branchState({world,branch,characters,scenes,has_older_scenes=false},mod
       history_page_size:20},ancestry_limit:200};
 }
 
+function sourceDocList(env,identity,id,{full=true}={}){
+ const fields=full?'id,world_id,doc_key,revision,category,title,source_filename,sha256,created_at,content':'id,world_id,doc_key,revision,category,title,source_filename,sha256,created_at';
+ const url='/rest/v1/lw_reference_docs?world_id=eq.'+encodeURIComponent(id)+'&select='+encodeURIComponent(fields)+'&order=doc_key.asc,revision.desc&limit=150';
+ return supabase(env,url,{token:identity.token}).then(rows=>{
+  if(!Array.isArray(rows))throw Error('Не удалось загрузить библиотеку документов.');
+  const latest=latestDocumentVersions(rows);
+  return {installed:true,docs:latest,total_revisions_loaded:rows.length};
+ }).catch(error=>({installed:false,docs:[],message:'Библиотека документов недоступна. Проверь миграцию lw_reference_docs и авторизацию. '+(error?.message||'')}));
+}
+async function sourceDocRead(env,identity,id,key,revision=null,offset=0,limit=15000){
+ const validated=String(key||'');
+ if(!/^[a-z0-9][a-z0-9._-]{2,127}$/.test(validated))throw Error('Некорректный ключ документа.');
+ if(revision!==null&&(!Number.isInteger(revision)||revision<1||revision>1000000))throw Error('Некорректная редакция.');
+ if(!Number.isInteger(offset)||offset<0||offset>750000)throw Error('Некорректное смещение.');
+ if(!Number.isInteger(limit)||limit<1||limit>25000)throw Error('За один запрос можно получить максимум 25 000 символов.');
+ const path='/rest/v1/lw_reference_docs?world_id=eq.'+encodeURIComponent(id)+'&doc_key=eq.'+encodeURIComponent(validated)+(revision===null?'':'&revision=eq.'+revision)+
+ '&select=id,world_id,doc_key,revision,category,title,source_filename,sha256,content&order=revision.desc&limit=1';
+ const docs=await supabase(env,path,{token:identity.token});
+ if(!Array.isArray(docs)||!docs.length)throw Error('Документ или редакция не найдены.');
+ const d=docs[0],part=d.content.slice(offset,offset+limit);
+ return {id:d.id,world_id:d.world_id,doc_key:d.doc_key,revision:d.revision,
+  category:d.category,title:d.title,source_filename:d.source_filename,sha256:d.sha256,
+  content:part,offset,returned_length:part.length,total_length:d.content.length,next_offset:offset+part.length<d.content.length?offset+part.length:null,
+  complete:offset===0&&part.length===d.content.length};
+}
+async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,assets=null){
+ const docStore=await sourceDocList(env,identity,id,{full:true});
+ if(!docStore.installed)return {installed:false,ready:false,reason:docStore.message,
+  required_action:'Установить supabase/reference_docs.sql и загрузить оригинальные проектные документы в разделе «Документы».',manifest:[],selected:[]};
+ const ref=buildSourcePreflight(docStore.docs,{intent,actors,maxExcerptChars:34000});
+ const kinds=new Set(ref.manifest.map(d=>d.category));
+ const findings=[];
+ if(!kinds.has('core_rules'))findings.push({severity:'warning',code:'NO_CORE_RULES',message:'Нет основного документа правил. Краткое поле world_rules не заменяет полный источник.'});
+ if(!kinds.has('glossary'))findings.push({severity:'info',code:'NO_GLOSSARY',message:'Глоссарий не загружен. Термины будут менее стабильны.'});
+ if(base?.memory_coverage?.complete===false)findings.push({severity:'warning',code:'INCOMPLETE_STORY_MEMORY',message:'Краткая причинная память не охватывает все сыгранные сцены: используй Year Documents или более глубокую историю.'});
+ if(assets?.complete===false)findings.push({severity:'warning',code:'INCOMPLETE_ASSET_MEMORY',message:'Состояние денег и предметов не восстановлено полностью.'});
+ if(assets?.issues?.length)findings.push({severity:'warning',code:'LEDGER_ISSUES',message:'В учёте ресурсов обнаружены несогласованные операции: '+assets.issues.length});
+ return {installed:true,ready:!!base&&!findings.some(f=>f.severity==='warning'),findings,
+  source_hierarchy:[
+   'PROJECT CORE RULES: обязательные глобальные правила, если не противоречат более поздним явным режиссёрским изменениям правил.',
+   'Валидные сыгранные сцены и CURRENT STATE: доказанные события; отменённый хвост никогда не существовал.',
+   'Актуальный checkpoint: текущее состояние активной ветки.',
+   'Year Documents: подтверждённые результаты завершённых годов, не прогноз.',
+   'Character Start/Baselines: исходные версии; не сбрасывать развитие из сыгранных сцен.',
+   'Year Anchors: возможные узлы и ограничения календаря, не обязательные исходы.',
+   'ROSMAN glossary: формы имён и терминов; не источник биографических событий.',
+   'Style examples: только манера и полнота описаний, не обязательные действия или события.'
+  ],...ref};
+}
 async function companionState(env,identity,id){
  const data=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_state',{token:identity.token,body:{p_world:id}});
  if(!data?.branch||data.world?.id!==id)throw Error('Действующий мир недоступен.');
