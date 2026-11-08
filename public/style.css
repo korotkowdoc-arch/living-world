@@ -65,3 +65,13 @@ body.ai-running::after{content:"ИИ создаёт сцену и фиксиру
 #doc-files{width:100%;border:1px dashed #566579;border-radius:12px;padding:17px;background:#122333;color:var(--text)}
 #doc-text-form textarea{min-height:180px}
 @media(max-width:520px){.doc-text{padding:11px;font-size:12px}.doc-card .btn{font-size:12px}}
+
+/* v1.1 causal memory readiness */
+.readiness{margin:16px 0 22px}
+.readiness-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:16px 0}
+.readiness-line{display:flex;gap:11px;align-items:flex-start;padding:11px 13px;background:#101d29;border:1px solid var(--line);border-radius:11px}
+.readiness-line p{margin:4px 0 0;line-height:1.4}
+.ready-ok,.ready-missing{width:24px;height:24px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border-radius:50%;font-weight:700}
+.ready-ok{background:#19372e;color:#a4e4ba}
+.ready-missing{background:#3a3224;color:#ffd093}
+@media(max-width:510px){.readiness-grid{grid-template-columns:1fr}}
