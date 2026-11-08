@@ -124,3 +124,36 @@ test('Supabase transport failures expose only safe diagnostics, never exception 
    console.warn=originalWarn;
  }
 });
+
+test('Workers redirect compatibility: auth and RPC fetches never follow redirects',async()=>{
+ const originalFetch=globalThis.fetch;
+ const originalWarn=console.warn;
+ const redirects=[];
+ console.warn=()=>{};
+ try {
+   const token=testJwt('authenticated');
+   globalThis.fetch=async (url,init)=>{
+     redirects.push({url:String(url),redirect:init?.redirect});
+     return new Response(null,{status:302,headers:{location:'https://example.com/should-not-follow'}});
+   };
+   const badAuth=await call('tools/call',{name:'list_worlds',arguments:{}},{authorization:'Bearer '+token});
+   assert.equal(badAuth.status,401);
+   assert.equal(badAuth.headers.get('x-lw-auth-failure'),'supabase_auth_302');
+   assert.deepEqual(redirects.map(r=>r.redirect),['manual']);
+   redirects.length=0;
+   globalThis.fetch=async (url,init)=>{
+     redirects.push({url:String(url),redirect:init?.redirect});
+     if(String(url).endsWith('/auth/v1/user'))return Response.json({id:env.BRIDGE_SUPABASE_USER_ID});
+     return new Response(null,{status:302,headers:{location:'https://example.com/should-not-follow'}});
+   };
+   const badRpc=await call('tools/call',{name:'list_worlds',arguments:{}},{authorization:'Bearer '+token});
+   assert.equal(badRpc.status,200);
+   const result=(await badRpc.json()).result;
+   assert.equal(result.isError,true);
+   assert.match(result.content[0].text,/Supabase не выполнил запрос/);
+   assert.deepEqual(redirects.map(r=>r.redirect),['manual','manual']);
+ } finally {
+   globalThis.fetch=originalFetch;
+   console.warn=originalWarn;
+ }
+});
