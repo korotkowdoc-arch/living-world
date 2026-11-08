@@ -345,7 +345,7 @@ function shortScene({id,body,body_length=body.length,body_truncated=false,world_
 }
 function branchState({world,branch,characters,scenes,has_older_scenes=false},mode) {
   const memory=makeContinuity(characters,scenes);
-  return {mode,world,branch,world_time:scenes.at(-1)?.world_time??world.clock_start,
+  return {mode,world,branch,world_time:scenes.at(-1)?.world_time??world.genesis_choices?.current_period??world.clock_start,
     recent_scenes:scenes.slice(-12).map(shortScene),characters,
     continuity:compactMemory(memory),
     causal_events:scenes.flatMap(scene=>{
