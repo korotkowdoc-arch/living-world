@@ -786,7 +786,20 @@ case 'year-archive-build':{
  await loadScenes();
  await loadAssets(false);
  const branch=state.branches.find(b=>b.id===state.world.active_branch_id);
- state.yearDraft=buildYearArchive({world:state.world,branch,scenes:state.activeLineage,characters:state.characters,from,to});
+ const missing=state.activeLineage.filter(scene=>{
+  const month=String(scene.world_time||'').slice(0,7);
+  return month>=from&&month<=to&&!readSceneNote(scene.prompt_note);
+ });
+ const bodies=new Map();
+ for(let i=0;i<Math.min(missing.length,80);i+=20){
+  const ids=missing.slice(i,i+20).map(row=>row.id);
+  const rows=dataOrThrow(await state.client.from('lw_scenes').select('id,body')
+   .eq('world_id',state.world.id).in('id',ids));
+  for(const row of rows)if(typeof row.body==='string')bodies.set(row.id,row.body);
+ }
+ const completeLineage=state.activeLineage.map(scene=>bodies.has(scene.id)?
+  {...scene,body:bodies.get(scene.id)}:scene);
+ state.yearDraft=buildYearArchive({world:state.world,branch,scenes:completeLineage,characters:state.characters,from,to});
  render();notify('Годовой архив сформирован. Проверь, затем утверди его сохранение.');return;
 }
 case 'year-archive-cancel':state.yearDraft=null;render();return;
