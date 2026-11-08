@@ -161,3 +161,33 @@ export function formatAmount(account){
   const fmt=n=>(n/div).toLocaleString('ru-RU',{minimumFractionDigits:account.scale,maximumFractionDigits:account.scale});
   return account.known?fmt(account.balance)+' '+account.currency:'неизвестно (учтённое изменение '+(account.observed_delta>=0?'+':'')+fmt(account.observed_delta)+' '+account.currency+')';
 }
+
+export function validateNextEvents(current,delta,knownPeople=[]){
+ if(!current||current.complete===false)throw Error('Полное состояние ресурсов не восстановлено; нельзя надёжно проверить расходы и предметы.');
+ if(current.issues?.length)throw Error('Существующие противоречия в журнале ресурсов требуют проверки перед новой записью.');
+ const parsed=validateCompanionDelta(delta);
+ const names=new Set([...knownPeople,...(current.new_characters||[])].map(p=>typeof p==='string'?p:p?.name).filter(Boolean).map(s=>s.toLocaleLowerCase('ru')));
+ for(const p of parsed.new_characters)if(names.has(p.name.toLocaleLowerCase('ru')))throw Error('Новый NPC уже существует: '+p.name+'. Уточни его развитие, а не создавай заново.');
+ const accounts=(current.accounts||[]).map((a,i)=>({
+  id:'base_acc_'+i,action:'opening',account:a.person,currency:a.currency,scale:a.scale,amount:a.known?a.balance:0,
+  reason:'Восстановление подтверждённого состояния перед проверкой',source:'Журнал действующей ветки'
+ })).filter((e,i)=>(current.accounts||[])[i].known);
+ const items=[];
+ for(const [i,item] of (current.items||[]).entries()){
+  items.push({id:'base_item_'+i,action:'acquire',item_id:item.id,label:item.label,owner:item.owner,holder:item.holder||item.owner,
+   location:item.location||'',condition:item.condition||'',reason:'Восстановлен из журнала',source:'Действующая ветка'});
+  if(!item.exists)items.push({id:'base_destroy_'+i,action:'destroy',item_id:item.id,
+   reason:'Уже утрачен',source:'Действующая ветка'});
+ }
+ const existing=new Set((current.accounts||[]).map(a=>JSON.stringify([a.person,a.currency,a.scale])));
+ for(const op of parsed.economy){
+  if(op.action==='opening'&&existing.has(JSON.stringify([op.account,op.currency,op.scale])))throw Error('Счёт уже существует: используй reconcile для подтверждённого нового остатка, а не opening.');
+ }
+ const projected=projectCompanion([
+  {id:'baseline',world_time:'previous',changes:{economy:accounts,items}},
+  {id:'candidate',world_time:'candidate',changes:parsed}
+ ],{strict:true});
+ return {ok:true,balances:projected.accounts.map(a=>({person:a.person,currency:a.currency,scale:a.scale,known:a.known,balance:a.balance})),
+  items:projected.items.map(a=>({id:a.id,label:a.label,owner:a.owner,holder:a.holder,exists:a.exists})),
+  new_characters:parsed.new_characters};
+}
