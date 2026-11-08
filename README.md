@@ -1,11 +1,14 @@
-# LIVING WORLD — open-source PWA (v0.5)
+# LIVING WORLD — open-source PWA (v0.6)
 
 Mobile-first interactive fiction world simulator. Create worlds on iPhone, define their rules and an alternate protagonist backstory, maintain autonomous NPC profiles, branch scenes with **«На это:»**, and preserve story state in an owner-scoped Supabase database.
 
-**Status:** early prototype. The app does **not** automatically call a language model. It offers manually copied prompts and validates imported JSON. Demo generation is marked as demo. A ChatGPT Plus subscription is **not automatically reusable** from a Cloudflare-hosted open-source PWA.
+**Status:** early prototype. The app does **not** automatically call a language model. Quick start prepares a prompt, opens ChatGPT through a user action, and validates the JSON pasted or read from clipboard (when supported). Demo generation is marked as demo. A ChatGPT Plus subscription is **not automatically reusable** from a Cloudflare-hosted open-source PWA.
 
 ## Features
 
+- Four-decision quick start: choose how the hero reacts, then copy an AI genesis prompt that requests independently motivated NPCs. Review and import the generated JSON before approving the world.
+- Original-world / existing-AU choice, optional NPC names and single-sentence world premise; advanced settings remain available.
+- Two one-tap story prompt modes: GPT-6 · Высокое for plotting, GPT-5.6 · Высокое for relationships. Their selection changes prompt content and is remembered per world, **but cannot programmatically change the actual ChatGPT model**.
 - World builder on iPhone, character genesis, NPC editor.
 - Story scenes and branching history with revision points.
 - Structured event/knowledge continuity from up to 200 recent scenes on the active branch.
@@ -47,3 +50,13 @@ OpenAI's open-source sign-in guidance is primarily for locally run tools/persona
 ## License
 
 MIT (see `LICENSE`).
+
+## Creating a new world quickly
+
+1. In **Миры**, tap **Новая вселенная**. Four interactive decisions profile the hero; they are not recorded as literal past events.
+2. Enter a hero name, optional world setting/NPC hints, choose existing AU or original setting and a start time.
+3. Tap **Скопировать запрос для ИИ**, then **Открыть ChatGPT**. Select an available model there and paste the prompt. The model returns full JSON character biographies.
+4. Copy the JSON, return to **Генезис**, choose **Вставить ответ из буфера** when clipboard permissions permit (or paste manually), inspect the characters and approve. No individual character biography needs to be typed.
+5. During play, use **GPT-6 · Высокое** or **GPT-5.6 · Высокое** cards to prepare different prompts against the same world state. Change actual model/effort from the ChatGPT selector manually.
+
+**Limitations:** There is no built-in paid AI generation or automatic model switching; neither ChatGPT subscriptions nor the OAuth MCP bridge make model-selection controls available to an external website. Manual copy/paste is still needed. The active-branch causal memory spans at most the last 200 scenes; archival snapshots and full source-document storage are future work. Do not mistake the model-mode buttons for API calls.
