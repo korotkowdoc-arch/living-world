@@ -240,9 +240,23 @@ async function supabase(env,path,{token,body,method,returnRepresentation=false}=
     body:body===undefined?undefined:JSON.stringify(body),redirect:'manual',signal:AbortSignal.timeout(10000)});
   const data=await res.json().catch(()=>null);
   if(!res.ok) {
-    if(data?.code==='LW409') throw Error('Ветка или последняя сцена изменились.');
-    if(data?.code==='LW403') throw Error('Мир недоступен.');
-    throw Error('Supabase не выполнил запрос.');
+    // Structured, allowlisted DB diagnostics; never print raw SQL errors or credentials.
+    const code=String(data?.code||'');
+    const allowed=['PGRST202','PGRST204','42883','42501','23505','23503','23514','22023','LW409','LW403'];
+    const fault=allowed.includes(code)?code:'DB_ERROR';
+    let message='Supabase отклонил запрос.';
+    if(code==='PGRST202'||code==='42883')
+      message='В Supabase отсутствует функция записи lw_bridge_v2_append (либо схема PostgREST не обновилась). Примени supabase/bridge_save.sql и повтори тест.';
+    else if(code==='PGRST204')
+      message='Supabase не распознаёт поля RPC: проверь версию SQL и обновление схемы PostgREST.';
+    else if(code==='LW409')message='Ветка или последняя сцена изменились.';
+    else if(code==='LW403'||code==='42501')message='Недостаточно разрешений для записи или мир недоступен.';
+    else if(code==='23505')message='Запись конфликтует с уже существующим идентификатором.';
+    else if(code==='22023'||code==='23514')message='База отклонила формат сцены или её последствий.';
+    else if(code==='23503')message='База не нашла связанную ветку или родительскую сцену.';
+    const error=new Error(message);
+    error.diagnosticCode=fault;
+    throw error;
   }
   return data;
 }
@@ -818,7 +832,8 @@ async function runSaveDiagnostic(env,identity){
    test:'write_then_idempotent_repeat_then_readback',receipt};
  }catch(error){
   receipt={ok:false,mode:'live',stage,reason:error?.message||'Ошибка диагностики.',
-    temporary_world_id:worldId,temporary_world_removed:false,cleanup_attempted:false};
+    error_code:error?.diagnosticCode||'UNCLASSIFIED',temporary_world_id:worldId,
+    temporary_world_removed:false,cleanup_attempted:false};
   return receipt;
  }finally{
   // A test failure never deletes or edits any pre-existing world; only the temporary world.
