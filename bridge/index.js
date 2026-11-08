@@ -267,7 +267,7 @@ const object = (properties, required = Object.keys(properties)) => ({ type:'obje
 const strings = {type:'array', items:{type:'string'}, maxItems:40};
 const fields = Object.fromEntries(['location','health','mood','status','goals','relationships','inventory'].map(k=>[k,{type:'string'}]));
 const economic=object({
- id:{type:'string',maxLength:64},action:{type:'string',enum:['opening','credit','debit','transfer']},
+ id:{type:'string',maxLength:64},action:{type:'string',enum:['opening','credit','debit','transfer','reconcile']},
  account:{type:'string',maxLength:120},currency:{type:'string',maxLength:20},
  amount:{type:'integer',minimum:0},scale:{type:'integer',minimum:0,maximum:4},
  to:{type:'string',maxLength:120},reason:{type:'string',maxLength:400},source:{type:'string',maxLength:600}
