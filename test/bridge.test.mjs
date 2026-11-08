@@ -4,6 +4,8 @@ import bridge from '../bridge/index.js';
 import {packSceneNote} from '../public/continuity.mjs';
 
 const root='https://living-world-bridge-mcp.korotkowdoc.workers.dev';
+const worldId='10000000-0000-4000-8000-000000000009';
+const branchId='10000000-0000-4000-8000-000000000010';
 const env={
   BRIDGE_MODE:'live',
   BRIDGE_PUBLIC_URL:root+'/mcp',
