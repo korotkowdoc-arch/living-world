@@ -839,7 +839,7 @@ async function handleSaveDiagnostic(request,env){
  if(request.method==='OPTIONS')return new Response(null,{status:204,headers:cors});
  if(request.method!=='POST')return new Response(null,{status:405,headers:{...cors,allow:'POST,OPTIONS'}});
  if(env.BRIDGE_MODE!=='live'||!writesEnabled(env))
-  return json({ok:false,reason:'Запись на рабочем мосте выключена.'},503,cors);
+  return Response.json({ok:false,reason:'Запись на рабочем мосте выключена.'},{status:503,headers:cors});
  try{
   const identity=await verifyBearer(request,env,{mcp:false});
   const outcome=await runSaveDiagnostic(env,identity);
