@@ -42,6 +42,14 @@ The OAuth callback pinned in the consent config is
 plugin is created and has a different callback, update its Supabase OAuth
 application registration and consent config together.
 
+## First post-connection deployment
+
+After linking the existing Cloudflare Worker to repository `korotkowdoc-arch/living-world`
+with branch `main` and root directory `bridge`, this Git commit triggers the
+first Workers Builds deployment. Verify build status under **Settings > Builds**
+and that the live Worker answers MCP discovery before reconnecting ChatGPT.
+Do not change `BRIDGE_MODE=live` or enable scene writes to troubleshoot discovery.
+
 ## Validate
 
 - `npm test` (includes Bridge no-token-discovery and read-only enforcement)
