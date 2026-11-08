@@ -44,3 +44,14 @@ body.ai-running::after{content:"ИИ создаёт сцену и фиксиру
 .btn:disabled{cursor:not-allowed;opacity:.55;}
 .ai-status{border:1px solid #465064;border-radius:11px;padding:12px 14px;background:#142131;color:var(--muted);font-size:13px;line-height:1.5;margin:12px 0;}
 .ai-status b{color:var(--text)}
+
+/* v0.9 companion assets */
+.asset-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:13px;margin-top:13px}
+.asset-panel{border:1px solid var(--line);background:var(--panel);border-radius:14px;padding:17px 19px;min-width:0}
+.asset-panel h3{margin-top:8px;margin-bottom:13px;overflow-wrap:anywhere}
+.asset-panel details{margin-top:13px;color:var(--muted);font-size:13px}
+.asset-panel summary{cursor:pointer;color:var(--gold2);padding:7px 0}
+.asset-panel ul{padding-left:20px;max-height:330px;overflow:auto}
+.asset-panel li{margin:7px 0;line-height:1.45;overflow-wrap:anywhere}
+.asset-panel p{margin:5px 0}
+@media(max-width:560px){.asset-grid{grid-template-columns:1fr}.asset-panel{padding:14px 16px}}
