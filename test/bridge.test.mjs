@@ -395,3 +395,47 @@ test('website diagnostic writes, retries, reads back, then deletes only its disp
   assert.equal(deleted,true);
  }finally{globalThis.fetch=original;}
 });
+
+
+test('missing Supabase save RPC is classified, never silently passed, and cleans only the temporary world',async()=>{
+ const tmp='10000000-0000-4000-8000-000000000201';
+ const branch='10000000-0000-4000-8000-000000000202';
+ const original=globalThis.fetch;
+ let deletion=false,attempts=0;
+ const cfg={...env,BRIDGE_WRITES_ENABLED:'true'};
+ globalThis.fetch=async (url,opts={})=>{
+  const value=String(url),method=opts.method||'GET';
+  if(value.endsWith('/auth/v1/user'))return Response.json({id:env.BRIDGE_SUPABASE_USER_ID});
+  if(method==='POST'&&value.includes('/rest/v1/lw_worlds?select=id,name'))return Response.json([{id:tmp,name:'Технический мир'}]);
+  if(method==='POST'&&value.includes('/rest/v1/lw_branches?select=id'))return Response.json([{id:branch}]);
+  if(method==='PATCH'&&value.includes('/rest/v1/lw_worlds?id=eq.'))return Response.json([{id:tmp}]);
+  if(method==='DELETE'&&value.includes('/rest/v1/lw_worlds?id=eq.')){
+    assert.ok(value.includes(tmp));deletion=true;return Response.json([{id:tmp}]);
+  }
+  if(value.endsWith('/rest/v1/rpc/lw_bridge_v2_state'))return Response.json({
+    world:{id:tmp,genesis_choices:{auto_save_enabled:true}},
+    branch:{id:branch,head_scene_id:null},scenes:[],characters:[]
+  });
+  if(value.includes('/rest/v1/lw_scenes?'))return Response.json([]);
+  if(value.endsWith('/rest/v1/rpc/lw_bridge_v2_append')){
+    attempts++;
+    return Response.json({code:'PGRST202',message:'Could not find public.lw_bridge_v2_append function'}, {status:404});
+  }
+  throw Error('Unexpected mock '+method+' '+value);
+ };
+ try{
+  const token=testJwt('authenticated',{client_id:undefined});
+  const res=await bridge.fetch(new Request(root+'/api/diagnostics/save-test',{
+   method:'POST',headers:{origin:'https://livingworld-35q.pages.dev',authorization:'Bearer '+token}
+  }),cfg);
+  assert.equal(res.status,409);
+  const result=await res.json();
+  assert.equal(result.ok,false);
+  assert.equal(result.stage,'first_scene');
+  assert.equal(result.error_code,'PGRST202');
+  assert.match(result.reason,/bridge_save\.sql/);
+  assert.equal(result.temporary_world_removed,true);
+  assert.equal(attempts,1);
+  assert.equal(deletion,true);
+ }finally{globalThis.fetch=original;}
+});
