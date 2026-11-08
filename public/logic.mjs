@@ -26,6 +26,82 @@ export function parseGenesis(raw, count=4, hero='Главный герой') {
   }
   return data;
 }
+
+/** Short, consequence-focused simulation. Choices are calibration signals, not historical facts. */
+export const QUICK_GENESIS_STEPS = [
+  {
+    title:'Тебя несправедливо обвиняют. Твой первый ход?',
+    context:'Никто не знает всей правды, но решение нужно принять сейчас.',
+    options:[
+      {id:'confront',label:'Скажу прямо, что думаю',hint:'Прямота и риск конфликта'},
+      {id:'evidence',label:'Сначала найду доказательства',hint:'Проверка фактов и терпение'},
+      {id:'workaround',label:'Найду неожиданный выход',hint:'Гибкость и практичность'}
+    ]
+  },
+  {
+    title:'Близкий человек просит о помощи, но цена высока.',
+    context:'Нет заранее правильного варианта — у любого выбора будут последствия.',
+    options:[
+      {id:'protect',label:'Помогу, даже рискуя собой',hint:'Преданность и самоотдача'},
+      {id:'plan',label:'Составлю план и попрошу поддержки',hint:'Доверие и координация'},
+      {id:'boundary',label:'Обозначу границу и предложу иной путь',hint:'Независимость и переговоры'}
+    ]
+  },
+  {
+    title:'У тебя появляется возможность начать жизнь иначе.',
+    context:'Что больше всего хочется получить от этой перемены?',
+    options:[
+      {id:'freedom',label:'Свободу и новые дороги',hint:'Самостоятельность'},
+      {id:'home',label:'Дом и близких людей',hint:'Привязанность и стабильность'},
+      {id:'truth',label:'Ответы на давние вопросы',hint:'Знания и любопытство'},
+      {id:'influence',label:'Возможность влиять на события',hint:'Ответственность и амбиции'}
+    ]
+  },
+  {
+    title:'Какие люди должны окружать героя?',
+    context:'ИИ придумает их прошлое и цели самостоятельно — это только пожелание к составу.',
+    options:[
+      {id:'autonomous',label:'Полностью доверяю ИИ',hint:'Непредсказуемое самостоятельное окружение'},
+      {id:'mixed',label:'Друзья и соперники, со своими интересами',hint:'Сложные пересекающиеся связи'},
+      {id:'family',label:'Семья, долги и прежние знакомства',hint:'Сила общего прошлого'},
+      {id:'strangers',label:'Герой начинает почти один',hint:'Новые связи возникают по ходу истории'}
+    ]
+  }
+];
+export function quickGenesisPrompt(world,choices) {
+  const answers=choices.quick_answers;
+  if(!Array.isArray(answers)||answers.length!==QUICK_GENESIS_STEPS.length)throw Error('Ответь на четыре ситуации быстрого старта.');
+  const decisions=QUICK_GENESIS_STEPS.map((step,i)=>{
+    const option=step.options.find(o=>o.id===answers[i]);
+    if(!option)throw Error('Выбор для шага '+(i+1)+' недействителен.');
+    return {situation:step.title,decision:option.label,meaning:option.hint};
+  });
+  const hero=cleanText(choices.hero_name,100);
+  if(!hero || hero==='Главный герой')throw Error('Укажи имя главного героя.');
+  const npcCount=Number(choices.npc_count);
+  if(!Number.isInteger(npcCount)||npcCount<2||npcCount>6)throw Error('Количество NPC должно быть от 2 до 6.');
+  const names=cleanText(choices.npc_ideas||'',1800);
+  const setting=cleanText(choices.world_idea||world.premise||'',3000);
+  const worldName=cleanText(choices.world_title||world.name,140);
+  const base=genesisPrompt({...world,name:worldName,premise:setting},{...choices,hero_name:hero,npc_count:String(npcCount)});
+  return `БЫСТРЫЙ СТАРТ LIVING WORLD — построй полноценный генезис, а не анкету-заглушку.
+Я выбираю только направление. Ты САМОСТОЯТЕЛЬНО создаёшь причинно связанную биографию героя и ${npcCount} автономных NPC с собственными целями, ошибками, отношениями, ресурсами и событиями вне кадра.
+
+МИР / ЖАНР: ${worldName} / ${world.genre||'Фэнтези'}
+ОСНОВА И ПОЖЕЛАНИЯ К МИРУ: ${setting||'Предложи сам, не противореча имеющимся правилам мира.'}
+ГЕРОЙ: ${hero}, возраст ${choices.hero_age||'18'}.
+ВОЗМОЖНЫЕ ЗНАКОМЫЕ ИЛИ ПОЖЕЛАНИЯ О NPC (необязательно): ${names||'Придумай всех NPC самостоятельно.'}
+
+ЧЕТЫРЕ РЕШЕНИЯ В КОРОТКОЙ СИМУЛЯЦИИ:
+${JSON.stringify(decisions,null,2)}
+
+ВАЖНО: эти решения показывают склонности героя и желательную динамику, но НЕ означают, что указанные ситуации буквально произошли до начала истории. Преврати выборы в правдоподобные качества и жизненные обстоятельства, не объявляя сами вымышленные задания каноном.
+Дай каждому NPC независимую жизнь, отношения и реальные знания с каналами получения; не делай всех спутниками или поклонниками героя. Пусть хотя бы часть NPC знает друг друга независимо от героя, если это причинно оправданно. Их жизненные обстоятельства должны вытекать из среды и решений, а не выбираться случайно без причин. Если перечислены имена, включи этих людей в пределах заданного количества; остальные персонажи — твой выбор.
+Не задавай мне дополнительные вопросы: решение за ИИ. Не придумывай будущие исходы и не подменяй уже сыгранные факты.
+
+${base}`;
+}
+
 export function genesisPrompt(world,choices) {
   const npcCount=Math.min(10,Math.max(1,Number(choices.npc_count)||4));
   const hero=cleanText(choices.hero_name||'Главный герой',100);
@@ -34,7 +110,7 @@ export function genesisPrompt(world,choices) {
 export function scenePrompt(world,characters,scenes,mode='story',directorNote='') {
   const models=characters.map(c=>({name:c.name,role:c.role,description:c.description,personality:c.personality,goals:c.goals,relationships:c.relationships,knowledge:c.knowledge,location:c.location,health:c.health,mood:c.mood,status:c.status,inventory:c.inventory}));
   const recent=scenes.slice(-8).map(s=>({time:s.world_time,body:s.body}));
-  return `Продолжи АВТОНОМНУЮ художественную историю, от третьего лица, без меню решений и без обязательной остановки на реплике героя. ИИ самостоятельно ведёт героя, NPC и мир. Не подгоняй канон, не давай скрытых знаний и не возвращай отменённые события. Важные сцены показывай полно и причинно. Все герои действуют из текущего опыта и собственных целей.\n\nМИР: ${JSON.stringify({name:world.name,genre:world.genre,premise:world.premise,rules:world.world_rules,history:world.history,timeline:world.timeline,clock_start:world.clock_start,current_period:world.genesis_choices?.current_period||null},null,2)}\n\nКАЛЕНДАРЬ: clock_start — историческое начало мира, а current_period — текущая граница сюжета. Не возвращайся к началу года и не придумывай число/час, если известен только месяц.\n\nПЕРСОНАЖИ: ${JSON.stringify(models,null,2)}\n\nПОСЛЕДНИЕ ВАЛИДНЫЕ СЦЕНЫ: ${JSON.stringify(recent,null,2)}\n\nРЕЖИМ: ${mode==='relationship'?'отношения, психологическая достоверность':'события, хронология, причинность'}\n\nРЕЖИССЁРСКОЕ УТОЧНЕНИЕ: ${directorNote||'нет'}\n\nВерни только литературное продолжение без служебных пояснений.`;
+  return `Продолжи АВТОНОМНУЮ художественную историю, от третьего лица, без меню решений и без обязательной остановки на реплике героя. ИИ самостоятельно ведёт героя, NPC и мир. Не подгоняй канон, не давай скрытых знаний и не возвращай отменённые события. Важные сцены показывай полно и причинно. Все герои действуют из текущего опыта и собственных целей.\n\nМИР: ${JSON.stringify({name:world.name,genre:world.genre,premise:world.premise,rules:world.world_rules,history:world.history,timeline:world.timeline,clock_start:world.clock_start,current_period:world.genesis_choices?.current_period||null},null,2)}\n\nКАЛЕНДАРЬ: clock_start — историческое начало мира, а current_period — текущая граница сюжета. Не возвращайся к началу года и не придумывай число/час, если известен только месяц.\n\nПЕРСОНАЖИ: ${JSON.stringify(models,null,2)}\n\nПОСЛЕДНИЕ ВАЛИДНЫЕ СЦЕНЫ: ${JSON.stringify(recent,null,2)}\n\nРЕЖИМ: ${mode==='relationship'?'GPT-5.6 · Высокое — отношения, нюансы психологии, диалоги и взаимные границы':'GPT-6 · Высокое — сюжет, развитие мира, хронология и причинность'}\nНастройка модели внутри LIVING WORLD — только предпочтение для запроса: пользователь выбирает реальную модель и уровень «Высокое» в ChatGPT вручную. Обе модели обязаны учитывать одну и ту же подтверждённую память мира.\n\nРЕЖИССЁРСКОЕ УТОЧНЕНИЕ: ${directorNote||'нет'}\n\nВерни только литературное продолжение без служебных пояснений.`;
 }
 export function revisionPrompt(world,characters,prefix,correction,scenes) {
   return scenePrompt(world,characters,scenes,'story',`РЕЖИССЁРСКАЯ ПРАВКА «НА ЭТО»: ${correction}\nСохрани валидный префикс текущей сцены неизменным. Весь старый текст после точки вмешательства никогда не происходил. Продолжай НЕПОСРЕДСТВЕННО после этого фрагмента, не переписывая префикс и не создавая новый старт:\n${prefix}\n\nВерни ТОЛЬКО НОВОЕ ПРОДОЛЖЕНИЕ после префикса.`);
