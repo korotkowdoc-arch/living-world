@@ -34,7 +34,7 @@ test('initialize and tools/list work without a Bearer token',async()=>{
  assert.equal(r.status,200);
  const d=(await r.json()).result;
  assert.equal(d.resultType,'complete');
- assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_companion_state','get_branch_history']);
+ assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_story_context','get_companion_state','get_branch_history']);
  assert.ok(d.tools.every(t=>t._meta.securitySchemes[0].type==='oauth2'));
 });
 test('real data calls are forbidden without a validated OAuth token',async()=>{
@@ -208,6 +208,11 @@ test('companion MCP excludes invalidated branch purchases and reads precise ledg
   assert.equal(d.items.find(i=>i.id==='cloak01').owner,'Лия');
   assert.equal(d.scanned_scenes,2);
   assert.equal(d.audit.some(a=>a.reason==='Другая ветка'),false);
+  const next=await call('tools/call',{name:'get_story_context',arguments:{world_id:worldId}},{authorization:'Bearer '+testJwt('authenticated')});
+  const context=(await next.json()).result.structuredContent;
+  assert.equal(context.companion.complete,true);
+  assert.equal(context.companion.accounts[0].balance,410);
+  assert.equal(context.branch.head_scene_id,sceneB.id);
  }finally{globalThis.fetch=original;}
 });
 
