@@ -1,4 +1,4 @@
-# LIVING WORLD — open-source PWA (v0.6)
+# LIVING WORLD — open-source PWA (v0.7)
 
 Mobile-first interactive fiction world simulator. Create worlds on iPhone, define their rules and an alternate protagonist backstory, maintain autonomous NPC profiles, branch scenes with **«На это:»**, and preserve story state in an owner-scoped Supabase database.
 
@@ -6,6 +6,8 @@ Mobile-first interactive fiction world simulator. Create worlds on iPhone, defin
 
 ## Features
 
+- Life simulation, story fast-forward and an explicit stop/"start playing here" action. Each interval is one reviewed JSON package; continuous automatic simulation requires future direct AI access.
+- Scene length presets: 1500–3000, 3000–5000 and 5000–8000 words as **suggested targets**, not output guarantees.
 - Four-decision quick start: choose how the hero reacts, then copy an AI genesis prompt that requests independently motivated NPCs. Review and import the generated JSON before approving the world.
 - Original-world / existing-AU choice, optional NPC names and single-sentence world premise; advanced settings remain available.
 - Two one-tap story prompt modes: GPT-6 · Высокое for plotting, GPT-5.6 · Высокое for relationships. Their selection changes prompt content and is remembered per world, **but cannot programmatically change the actual ChatGPT model**.
