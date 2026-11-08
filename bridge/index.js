@@ -418,6 +418,29 @@ async function sourceDocRead(env,identity,id,key,revision=null,offset=0,limit=15
   content:part,offset,returned_length:part.length,total_length:d.content.length,next_offset:offset+part.length<d.content.length?offset+part.length:null,
   complete:offset===0&&part.length===d.content.length};
 }
+/** Read full text ONLY for current valid scenes lacking structured consequences.
+ * Old, invalidated scene IDs are never loaded or used as replacements.
+ * Bound the number of body reads; any unavailable bodies remain explicitly flagged.
+ */
+async function hydrateActiveYearTexts(env,identity,id,lineage,ranges){
+ const filtered=Array.isArray(ranges)?ranges.filter(x=>x&&x.from&&x.to):[];
+ if(!filtered.length)return lineage;
+ const unstructured=lineage.filter(scene=>!readSceneNote(scene.prompt_note)&&filtered.some(r=>{
+  const month=String(scene.world_time||'').slice(0,7);return month>=r.from&&month<=r.to;
+ }));
+ if(!unstructured.length)return lineage;
+ const bodies=new Map();
+ for(let i=0;i<Math.min(unstructured.length,80);i+=20){
+  const chunk=unstructured.slice(i,i+20).map(s=>s.id);
+  const query='in.('+chunk.join(',')+')';
+  const path='/rest/v1/lw_scenes?world_id=eq.'+encodeURIComponent(id)+
+   '&id='+encodeURIComponent(query)+'&select=id,body&limit='+chunk.length;
+  const rows=await supabase(env,path,{token:identity.token});
+  if(!Array.isArray(rows))throw Error('Не удалось прочитать валидные тексты правок для годового документа.');
+  for(const row of rows)if(typeof row.body==='string')bodies.set(row.id,row.body);
+ }
+ return lineage.map(s=>bodies.has(s.id)?{...s,body:bodies.get(s.id)}:s);
+}
 async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,assets=null){
  const docStore=await sourceDocList(env,identity,id,{full:true});
  if(!docStore.installed)return {installed:false,ready:false,reason:docStore.message,
@@ -428,7 +451,9 @@ async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,ass
   if(full.complete){
    yearReconciliation=reconcileYearDocuments({
     documents:docStore.docs,world:full.state.world,branch:full.state.branch,
-    scenes:full.lineage,characters:full.state.characters||[]
+    scenes:await hydrateActiveYearTexts(env,identity,id,full.lineage,
+     docStore.docs.map(yearArchiveMetadata).filter(Boolean)),
+    characters:full.state.characters||[]
    });
   }else yearReconciliation.warnings.push({code:'YEAR_RECONCILIATION_BLOCKED',reason:full.reason});
  }
@@ -585,7 +610,9 @@ async function call(name,args,env,identity) {
     if(!full.complete)throw Error('Год нельзя восстановить полностью: '+full.reason);
     const result=buildYearArchive({
      world:full.state.world,branch:full.state.branch,
-     scenes:full.lineage,characters:full.state.characters||[],
+     scenes:await hydrateActiveYearTexts(env,identity,id,full.lineage,
+      [{from:String(args.from||''),to:String(args.to||'')}]),
+     characters:full.state.characters||[],
      from:String(args.from||''),to:String(args.to||''),allowPartial:true
     });
     const off=boundedInteger(args.offset??0,0,250000),limit=boundedInteger(args.limit??20000,1,25000);
