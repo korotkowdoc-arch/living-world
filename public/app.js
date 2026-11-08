@@ -10,10 +10,11 @@ import {WORLD_BACKUP_FORMAT,sealWorldBackup,validateWorldBackup} from './world-b
 import {projectCausalMemory,searchCausalMemory} from './world-causality.mjs';
 import {persistWorldAutosave} from './world-autosave.mjs';
 import {projectCharacterMemory} from './world-character-memory.mjs';
+import {buildYearArchive} from './year-archive.mjs';
 
 const app=document.getElementById('app');
 const cfgKey='lw_cloud_config_v03'; // Preserve the existing Supabase connection when upgrading.
-const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[],aiReady:false,aiReason:'Подключение ещё не проверено',assets:null,assetIssue:null,documents:[],documentsReady:null,documentsError:'',docSelected:null,docContent:null,characterLedger:null,causalLedger:null,memoryQuery:'',memoryKind:'fact',memoryOffset:0,worldContext:null,suppressWorldClickUntil:0,saveDiagnostic:null,autoSavePendingWorldId:null,autoSaveErrors:{},busyLabel:'',pendingView:null,lastSceneRefreshAt:null};
+const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[],aiReady:false,aiReason:'Подключение ещё не проверено',assets:null,assetIssue:null,documents:[],documentsReady:null,documentsError:'',docSelected:null,docContent:null,characterLedger:null,causalLedger:null,memoryQuery:'',memoryKind:'fact',memoryOffset:0,worldContext:null,suppressWorldClickUntil:0,saveDiagnostic:null,autoSavePendingWorldId:null,autoSaveErrors:{},busyLabel:'',pendingView:null,lastSceneRefreshAt:null,activeLineage:[],yearDraft:null};
 const x=v=>esc(v??'');
 // Historical start and current narrative period are separate; don't fabricate a date.
 const storyClock=(w=state.world)=>state.scenes.at(-1)?.world_time||w?.genesis_choices?.current_period||(w?.genesis_approved?'':w?.clock_start)||'';
@@ -219,8 +220,18 @@ function renderDocuments(){
   <div class="row"><button class="btn small" data-action="doc-open" data-id="${x(d.id)}">Прочитать</button><button class="btn small" data-action="doc-replace" data-key="${x(d.doc_key)}">Новая редакция</button></div>
  </div>`).join('');
  const selected=state.docSelected?docs.find(d=>d.id===state.docSelected):null;
+ const year=state.yearDraft;
+ const yearArchive=`<div class="panel" id="year-archive">
+   <h2 class="section-title">Итоговый документ года</h2>
+   <p class="sub">Сформировать проверяемый фактологический Year Document только из сыгранных сцен действующей ветки. Документ сохраняется в приватной библиотеке Supabase, откуда мост читает его в другом чате. В проект ChatGPT файлы автоматически не прикрепляются.</p>
+   <div class="form two" style="margin-top:14px"><div class="field"><label for="year-from">Начало года (YYYY-MM)</label><input class="input" id="year-from" placeholder="1998-09" value="${x(year?.from||'')}"></div>
+   <div class="field"><label for="year-to">Конец года (YYYY-MM)</label><input class="input" id="year-to" placeholder="1999-08" value="${x(year?.to||'')}"></div></div>
+   <p class="hint">Для учебного года, например, сентябрь 1998 — август 1999; для календарного — январь — декабрь. Сначала должна быть сохранена сцена с датой не раньше конца периода. Нет сцены — нет доказанного года.</p>
+   <div class="row" style="margin-top:12px">${btn('year-archive-build','Сформировать годовой отчёт','gold')}${year?btn('year-archive-cancel','Отменить черновик'):''}</div>
+   ${year?`<div class="doc-preview" style="margin-top:16px"><h3 class="section-title">Черновик: ${x(year.title)}</h3><p class="hint">Сцен: ${year.scene_count}; без структурированных последствий: ${year.unstructured_scenes}. Сверь важные события в разделе «История» перед утверждением.</p><pre class="doc-text">${x(year.content.slice(0,20000))}${year.content.length>20000?'\\n… Остальной текст будет сохранён целиком.':''}</pre><div class="row">${btn('year-archive-save','Утвердить и сохранить Year Document','gold')}${btn('year-archive-copy','Скопировать в проект ChatGPT')}</div></div>`:''}
+  </div>`;
  const preview=selected?`<div class="panel doc-preview"><h3 class="section-title">${x(selected.title)} · редакция ${x(selected.revision)}</h3><p class="hint">Показывается текст, извлечённый из исходного документа. Данные приватны для владельца мира.</p>${state.docContent!==null?`<pre class="doc-text">${x(state.docContent.slice(0,30000))}${state.docContent.length>30000?'\n… Отображены первые 30 000 символов. Полная версия сохранена в Supabase.':''}</pre>`:'<p>Загрузка текста…</p>'}<div class="row">${btn('doc-close','Закрыть')}${state.docContent?btn('doc-copy','Скопировать полную редакцию'):''}</div></div>`:'';
- return header+importToggle+reusable+`<div class="panel">
+ return header+importToggle+reusable+yearArchive+`<div class="panel">
    <h2 class="section-title">Загрузить документы мира</h2>
    <p class="sub">Можно выбрать сразу до 12 файлов DOCX, TXT или Markdown: правила, глоссарий, модели персонажей, завершённые годы и примеры. Категории определяются автоматически по именам.</p>
    <div class="field"><label for="doc-files">Выбрать файлы</label><input type="file" id="doc-files" accept=".docx,.txt,.md,.markdown" multiple></div>
@@ -346,7 +357,7 @@ function aiButton(id,title){
 }
 async function connect(){if(!state.config)return;const {url,key}=state.config;if(!/^https:\/\/[a-z0-9.-]+\.supabase\.co\/?$/i.test(url)||!key)throw Error('Некорректный Project URL или ключ Supabase.');const sdk=await import('https://esm.sh/@supabase/supabase-js@2');state.client=sdk.createClient(url,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});const result=await state.client.auth.getSession();if(result.error)throw result.error;state.session=result.data.session;state.user=state.session?.user||null;state.client.auth.onAuthStateChange((_event,session)=>{const old=state.user?.id;state.session=session;state.user=session?.user||null;if(state.user&&!old){loadWorlds().then(render).catch(e=>notify(errtext(e),true));}else if(!state.user){state.world=null;state.worlds=[];render();}});if(state.user)await loadWorlds();await checkAiConnection();}
 async function loadWorlds(){state.worlds=dataOrThrow(await state.client.from('lw_worlds').select('*').order('updated_at',{ascending:false}));}
-async function openWorld(id){state.assets=null;state.assetIssue=null;state.lastSceneRefreshAt=null;state.documents=[];state.documentsReady=null;state.documentsError='';state.docSelected=null;state.docContent=null;state.characterLedger=null;state.causalLedger=null;state.memoryQuery='';state.memoryKind='fact';state.memoryOffset=0;state.world=dataOrThrow(await state.client.from('lw_worlds').select('*').eq('id',id).single());const savedAnswers=state.world.genesis_choices?.quick_answers;state.quickAnswers=Array.isArray(savedAnswers)?savedAnswers.slice(0,QUICK_GENESIS_STEPS.length):[];state.quickStep=state.quickAnswers.length===QUICK_GENESIS_STEPS.length?QUICK_GENESIS_STEPS.length:0;state.storyMode=localStorage.getItem('lw_story_mode_'+id)==='relationship'?'relationship':'story';state.sceneLength=['normal','large','detailed'].includes(localStorage.getItem('lw_scene_length_'+id))?localStorage.getItem('lw_scene_length_'+id):'large';const [chars,branches]=await Promise.all([state.client.from('lw_characters').select('*').eq('world_id',id).order('created_at'),state.client.from('lw_branches').select('*').eq('world_id',id).order('created_at')]);state.characters=dataOrThrow(chars);state.branches=dataOrThrow(branches);if(!state.world.active_branch_id && state.branches[0]){state.world.active_branch_id=state.branches[0].id;dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:state.world.active_branch_id}).eq('id',id));}await loadScenes();await loadDocuments();}
+async function openWorld(id){state.assets=null;state.assetIssue=null;state.lastSceneRefreshAt=null;state.activeLineage=[];state.yearDraft=null;state.documents=[];state.documentsReady=null;state.documentsError='';state.docSelected=null;state.docContent=null;state.characterLedger=null;state.causalLedger=null;state.memoryQuery='';state.memoryKind='fact';state.memoryOffset=0;state.world=dataOrThrow(await state.client.from('lw_worlds').select('*').eq('id',id).single());const savedAnswers=state.world.genesis_choices?.quick_answers;state.quickAnswers=Array.isArray(savedAnswers)?savedAnswers.slice(0,QUICK_GENESIS_STEPS.length):[];state.quickStep=state.quickAnswers.length===QUICK_GENESIS_STEPS.length?QUICK_GENESIS_STEPS.length:0;state.storyMode=localStorage.getItem('lw_story_mode_'+id)==='relationship'?'relationship':'story';state.sceneLength=['normal','large','detailed'].includes(localStorage.getItem('lw_scene_length_'+id))?localStorage.getItem('lw_scene_length_'+id):'large';const [chars,branches]=await Promise.all([state.client.from('lw_characters').select('*').eq('world_id',id).order('created_at'),state.client.from('lw_branches').select('*').eq('world_id',id).order('created_at')]);state.characters=dataOrThrow(chars);state.branches=dataOrThrow(branches);if(!state.world.active_branch_id && state.branches[0]){state.world.active_branch_id=state.branches[0].id;dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:state.world.active_branch_id}).eq('id',id));}await loadScenes();await loadDocuments();}
 async function refreshWorldAndBranch(){
  const w=state.world;
  if(!w)return;
@@ -386,6 +397,7 @@ async function loadAssets(refreshHead=true){
   if(page.length<500||offset===3000)break;
  }
  const lineage=activeLineage(all,branch.head_scene_id);
+ state.activeLineage=lineage;
  state.assets=projectCompanion(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{},strict:false});
  state.characterLedger=projectCharacterMemory(state.characters,lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
  state.causalLedger=projectCausalMemory(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
@@ -767,6 +779,36 @@ case 'docs-copy-shared':{
  return;
 }
 case 'docs-refresh':await loadDocuments();render();return;
+case 'year-archive-build':{
+ if(!state.world?.genesis_approved)throw Error('Сначала утверди Генезис и сохрани сцены.');
+ const from=document.getElementById('year-from')?.value?.trim();
+ const to=document.getElementById('year-to')?.value?.trim();
+ await loadScenes();
+ await loadAssets(false);
+ const branch=state.branches.find(b=>b.id===state.world.active_branch_id);
+ state.yearDraft=buildYearArchive({world:state.world,branch,scenes:state.activeLineage,characters:state.characters,from,to});
+ render();notify('Годовой архив сформирован. Проверь, затем утверди его сохранение.');return;
+}
+case 'year-archive-cancel':state.yearDraft=null;render();return;
+case 'year-archive-copy':{
+ if(!state.yearDraft)throw Error('Сначала сформируй документ.');
+ await clipboard(state.yearDraft.content);return;
+}
+case 'year-archive-save':{
+ const draft=state.yearDraft;
+ if(!draft||!state.world)throw Error('Нет годового отчёта для сохранения.');
+ await refreshWorldAndBranch();
+ const branch=state.branches.find(b=>b.id===state.world.active_branch_id);
+ if(state.world.id!==draft.content.match(/^LW_ARCHIVE_WORLD_ID: (.+)$/m)?.[1]||
+   branch?.id!==draft.branch_id||branch?.head_scene_id!==draft.source_head)
+   throw Error('Состояние мира изменилось после создания отчёта. Пересобери годовой архив.');
+ const saved=await insertDocument({title:draft.title,category:'year_document',
+   filename:'YEAR_DOCUMENT_'+draft.from+'_'+draft.to+'.md',text:draft.content,existingKey:draft.key});
+ state.yearDraft=null;await loadDocuments();render();
+ notify(saved.skipped?'Этот Year Document уже сохранён.':
+   'Year Document сохранён в Supabase. Его можно прочитать через OAuth-мост в другом чате.');
+ return;
+}
 case 'docs-import':{
  const files=document.getElementById('doc-files')?.files;
  const result=await importDocuments(files||[]);
