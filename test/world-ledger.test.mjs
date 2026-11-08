@@ -68,3 +68,15 @@ test('money transfers are balanced and source scene is recorded',()=>{
  assert.equal(p.accounts.find(a=>a.person==='Лия').balance,23);
  assert.equal(p.audit.find(x=>x.id==='t').scene_id,'b');
 });
+
+test('explicit verified balance may be reconciled after unknown earlier expenses',()=>{
+ const p=projectCompanion([
+  {id:'first',world_time:'1998-09',changes:changes([e('earned','credit','Гарри',120),e('spent','debit','Гарри',25)])},
+  {id:'bank',world_time:'1998-10',changes:changes([e('statement','reconcile','Гарри',240,{reason:'Выписка банка',source:'Банкир объявил остаток'})])},
+  {id:'gift',world_time:'1998-11',changes:changes([e('gift','debit','Гарри',40)])}
+ ],{strict:true});
+ const a=p.accounts[0];
+ assert.equal(a.known,true);
+ assert.equal(a.balance,200);
+ assert.equal(a.entries.length,4);
+});
