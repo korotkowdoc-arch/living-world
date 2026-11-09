@@ -7,6 +7,9 @@ import {projectCausalMemory,causalSummary,searchCausalMemory} from '../public/wo
 import {validStoryClock,isNondecreasingStoryTime} from '../public/continuity.mjs';
 import {yearArchiveMetadata,reconcileYearDocuments,buildYearArchive} from '../public/year-archive.mjs';
 import {companionSettings,companionGuidance} from '../public/companion-settings.mjs';
+import {STAGE_CONTROL_KEY,STAGE_CONTROL_FORMAT,CHAT_CHECKPOINT_FORMAT,chooseStageControl,
+ buildChatCheckpoint,buildStoryYear,chooseCheckpoint,stageYearMetadata,validStageYearDocs,
+ indexStoryMemories,searchStoryMemories,validateSceneMemories} from '../public/story-memory.mjs';
 /** LIVING WORLD Bridge v8 — Git-connected production deployment 2026-11-08.
  * Continuity engine originally built for LIVING WORLD v0.5.
  *
@@ -83,6 +86,7 @@ function parseScenePackage(raw) {
    found.add(d.id);
   }
   Object.assign(changes,extractCompanionChanges(c));
+  changes.memories=validateSceneMemories(c.memories,result.scene);
   return {scene:result.scene.trim(),world_time:result.world_time||null,changes,decisions};
 }
 function packSceneNote(changes, directorNote='',decisions=[]) {
@@ -359,8 +363,17 @@ const emergingCharacter=object({
  location:{type:'string',maxLength:1800},health:{type:'string',maxLength:1800},mood:{type:'string',maxLength:1800},
  status:{type:'string',maxLength:1800},inventory:{type:'string',maxLength:1800}
 },['name','description','causal_link','goals','knowledge']);
+const storyMemoryEntry=object({
+ id:{type:'string',maxLength:80},kind:{type:'string',enum:['joke','quote','promise','gift','secret','shared_memory','conflict','relationship','event','other']},
+ title:{type:'string',maxLength:180},detail:{type:'string',maxLength:1800},
+ quote:{type:'string',maxLength:600},emotional_context:{type:'string',maxLength:700},
+ participants:{type:'array',items:{type:'string',maxLength:100},maxItems:20},
+ known_by:{type:'array',items:{type:'string',maxLength:100},maxItems:20},
+ tags:{type:'array',items:{type:'string',maxLength:100},maxItems:20},related_to:{type:'string',maxLength:80}
+},['id','kind','title','detail']);
 const changes = object({
   facts:strings, open_threads:strings, resolved_threads:strings, offscreen_events:strings,
+  memories:{type:'array',maxItems:16,items:storyMemoryEntry},
   economy:{type:'array',items:economic,maxItems:35},items:{type:'array',items:itemChange,maxItems:40},new_characters:{type:'array',items:emergingCharacter,maxItems:15},
   characters:{type:'array', maxItems:30, items:object({
     name:{type:'string'}, ...fields, beliefs:strings,
