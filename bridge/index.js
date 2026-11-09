@@ -1162,9 +1162,12 @@ async function runSaveDiagnostic(env,identity){
   stage='first_scene';
   const sceneId=crypto.randomUUID(),itemId='test-token-'+sceneId.slice(0,8);
   const scene='Технический тест LIVING WORLD: персонаж получил 100 условных галеонов и тестовый жетон. Это не часть истории Гарри.';
+  const preflightState=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_state',{
+   token:identity.token,body:{p_world:worldId}});
+  const preflight_token=await issueScenePreflight(env,identity,worldId,branchState(preflightState,'live'));
   const args={
    world_id:worldId,branch_id:branchId,expected_head:null,request_id:sceneId,
-   scene,world_time:'1995-07-01T12:01:00',
+   preflight_token,scene,world_time:'1995-07-01T12:01:00',
    changes:{
     facts:['В техническом мире персонаж получил 100 галеонов и жетон.'],
     economy:[{id:'test-income',action:'opening',account:'Тестовый персонаж',currency:'GALLEON',
@@ -1272,7 +1275,7 @@ export default {async fetch(request,env={}){
   }
   if(message.method==='initialize') return ok({protocolVersion:message.params?.protocolVersion==='2026-07-28'?'2026-07-28':'2025-11-25',capabilities:{tools:{}},serverInfo:{name:'living-world-bridge',version:'2.2.0'}});
   if(message.method==='tools/list') return ok({resultType:'complete',ttlMs:0,cacheScope:'public',tools:live&&!writesEnabled(env)
-    ?tools.filter(tool=>!['save_scene_package','save_scene_auto'].includes(tool.name)):tools});
+    ?tools.filter(tool=>!['save_scene_package','save_scene_auto','commit_scene_revision'].includes(tool.name)):tools});
   if(message.method==='ping') return ok({});
   if(message.method==='tools/call') {
     try {
