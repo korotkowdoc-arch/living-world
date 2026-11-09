@@ -176,3 +176,36 @@ The PWA does **not** call the paid OpenAI API when generating these prompts. The
 **Genesis (Генезис):** one visible button **«Сформировать JSON-запрос и скопировать»** is placed after the quick-start parameters and expandable advanced options. Both feed the same strict `genesisPrompt` schema; quick start preserves the four selected calibration decisions, the age-0 guard and optional unique advanced details. The exact inputs are saved to Supabase **before** copy and also used to validate the returned JSON: `summary`, `opening`, string arrays for `past_changes`, `open_threads`, `uncertainties`, and `characters` with hero plus precisely the chosen NPC count. The prior duplicated generation controls are removed from the interface. The generator never changes the story canon, world date or existing source documents.
 
 No automatic execution of ChatGPT by the PWA, no covert model switching and no OpenAI API charges.
+
+## v1.9.0 — Reliable ChatGPT ↔ LIVING WORLD companion protocol
+
+The LIVING WORLD PWA remains a durable Supabase memory companion. All narrative text is authored in ChatGPT under the user's subscription. No paid OpenAI API is required.
+
+### Verified scene preflight and autosave
+
+1. **BEFORE writing each new scene**, call OAuth `get_scene_preflight` for the current world, intent and actors. It returns the live world options, causal memory, documents, **`preflight_token`** and expiry. Read any required document pages.
+2. Write a scene from that current state. Do not invent information for actors or change user-selected world history.
+3. Call `save_scene_auto` with the exact `preflight_token`, current `branch_id`, `expected_head`, a unique persistent `request_id`, full scene text, actual in-world time and real structured consequences. The token is valid for two hours and cryptographically binds the account, world, branch head, current world settings and source document revision fingerprints. A changed head, settings, document revision or expired token forces a new preflight.
+4. Require `persisted:true`. Verify with `get_scene_receipt`, which now supplies complete stored text length, text SHA256 fingerprint and presence of structured consequences. **On uncertain network results use the same `request_id` to query the receipt before retrying**; never create a second scene blindly. An already-committed idempotent retry is still allowed even if its preflight expires.
+
+The website's disposable `/api/diagnostics/save-test` also uses a signed preflight for its temporary world.
+
+### Director corrections via ChatGPT («На это:»)
+
+- Use OAuth `get_revision_context` with the active world and the exact target scene ID. It returns the complete original text, active source branch/head, original causal delta and encrypted `revision_token`.
+- Preserve only the **literal untouched prefix** and send it with the **new continuation** and new structured consequences to `commit_scene_revision`. Empty prefixes require `replace_from_start:true`; no automatically recycled invalidated facts.
+- The bridge uses the owner-only **transactionally head-checked** `lw_bridge_v2_fork` RPC. It creates an entirely new branch and replacement scene; it NEVER deletes, modifies or imports the invalidated old tail. It rejects stale heads and invalid prefixes **inside the SQL transaction**. There is no unsafe fallback to the legacy non-CAS fork RPC.
+- **One-time Supabase setup:** run [`supabase/bridge_revision.sql`](supabase/bridge_revision.sql) in the authenticated project's SQL Editor. This does not delete or mutate existing stories, and the original PWA «На это» UI remains usable as before. Until this migration is installed, `commit_scene_revision` reports a clear setup error without writing anything.
+
+### Sync health and timeline journal
+
+- In **История** or **Настройки**, select **«Проверить в Supabase»** to refresh the latest branch, saved scene bodies, structured consequences, core rules, inventory and character memory. The report shows last-12-scene metadata with actual stored body sizes and causal delta counts. It does not claim to verify the OAuth session of a particular ChatGPT chat.
+- In ChatGPT call read-only `get_sync_health` to verify **that chat's** OAuth authorization and latest scene integrity. The tool never creates a scene.
+- Both PWA and OAuth now paginate full replay up to **30,000 world rows**, with a detectable incomplete-memory error above the bound. Source scenes are never truncated or deleted by this boundary. The PWA also rejects a world whose head changes during pagination instead of displaying a misleading inventory.
+
+**Project instruction update** (place in ChatGPT Project instructions, under 8000 characters):
+> Before EVERY new scene call LIVING WORLD OAuth `get_world_state` and `get_scene_preflight`. Follow `companion_settings` and `companion_guidance`; pass the returned `preflight_token` unchanged to `save_scene_auto` alongside the current IDs, full scene and structured consequences. Verify `persisted:true` or `get_scene_receipt`. If the preflight expires or branch/settings/rules changed, reread and do not save stale text. For «На это:» use `get_revision_context` → `commit_scene_revision` rather than an ordinary save. Never claim a save until the bridge confirms it.
+
+### Remaining limits
+
+A client can still choose not to invoke tools despite project instructions. The signed preflight makes the server **reject unverifiable new autosaves**, but does not force an AI model to issue a tool call. `get_sync_health` can prove an individual call had OAuth access; it cannot guarantee future calls. Full replay is limited to 30k scene rows; annual checkpoints are auditable artifacts and are not yet an unbounded replay seed. The app has no direct view into ChatGPT conversations.

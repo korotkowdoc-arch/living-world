@@ -175,6 +175,48 @@ async function key(env,purpose) {
   if(!/^[A-Za-z0-9_-]{43}$/.test(env.BRIDGE_SEAL_KEY??'')) throw Error('Ключ шифрования не настроен.');
   return crypto.subtle.importKey('raw',await sha(purpose+':'+env.BRIDGE_SEAL_KEY),'AES-GCM',false,['encrypt','decrypt']);
 }
+const SCENE_PREFLIGHT_MAX_AGE_MS=2*60*60*1000;
+/** Fingerprint the settings and written world premise seen in GPT's preflight. */
+async function sceneContextFingerprint(world){
+ return fingerprint(JSON.stringify({
+  id:world?.id,name:world?.name,genre:world?.genre,premise:world?.premise,
+  world_rules:world?.world_rules,history:world?.history,timeline:world?.timeline,
+  clock_start:world?.clock_start,genesis_approved:world?.genesis_approved,
+  genesis_draft:world?.genesis_draft,genesis_choices:world?.genesis_choices,
+  model_story:world?.model_story,model_relationships:world?.model_relationships
+ }));
+}
+async function referenceContextFingerprint(env,identity,id){
+ if(!identity?.token)return 'demo';
+ const catalog=await sourceDocList(env,identity,id,{full:false});
+ if(!catalog.installed)return 'not-installed';
+ return fingerprint(JSON.stringify(catalog.docs.map(d=>[d.doc_key,d.revision,d.sha256])
+  .sort((a,b)=>a[0].localeCompare(b[0]))));
+}
+async function issueScenePreflight(env,identity,id,base){
+ return seal(env,'scene-preflight-v1',{
+  v:1,user:identity?.user||'demo',world:id,branch:base.branch?.id||null,
+  head:base.branch?.head_scene_id||null,world_time:base.world_time||null,
+  context:await sceneContextFingerprint(base.world),
+  sources:await referenceContextFingerprint(env,identity,id),
+  expiry:Date.now()+SCENE_PREFLIGHT_MAX_AGE_MS
+ });
+}
+async function verifyScenePreflight(env,identity,id,token,state,branchId,head){
+ if(!token)throw Error('Перед автосохранением вызови get_scene_preflight и передай выданный preflight_token.');
+ const proof=await unseal(env,'scene-preflight-v1',token);
+ if(proof?.v!==1||proof.expiry<Date.now()||
+    proof.user!==(identity?.user||'demo')||proof.world!==id)
+  throw Error('Предсценовая проверка истекла или относится к другому миру. Вызови get_scene_preflight заново.');
+ if(proof.branch!==branchId||proof.head!==head||
+    state.branch?.id!==branchId||state.branch?.head_scene_id!==head)
+  throw Error('Ветка или её последняя сцена изменились после preflight. Перечитай мир, не сохраняй устаревшее продолжение.');
+ if(proof.context!==await sceneContextFingerprint(state.world))
+  throw Error('Настройки/правила мира изменились после preflight. Перечитай параметры и пересчитай сцену.');
+ if(proof.sources!==await referenceContextFingerprint(env,identity,id))
+  throw Error('Редакции документов изменились после preflight. Сначала перечитай правила мира.');
+ return {checked:true,head,branch_id:branchId,world_time:proof.world_time};
+}
 async function seal(env,purpose,data) {
   const iv=crypto.getRandomValues(new Uint8Array(12));
   const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv},await key(env,purpose),utf8.encode(JSON.stringify(data)));
@@ -351,10 +393,21 @@ const tools = [
   { name:'get_current_year_archive',description:'Читать годовую сводку, пересчитанную из актуальных сцен до и после режиссёрской правки. Отменённые события исключаются; незавершённый год помечается. Полный текст доступен порциями.',inputSchema:object({world_id:uuid,from:{type:'string'},to:{type:'string'},offset:{type:'integer',minimum:0,maximum:250000},limit:{type:'integer',minimum:1,maximum:25000}},['world_id','from','to']),annotations:{readOnlyHint:true,openWorldHint:false} },
  { name:'get_companion_state',description:'Полный журнал денег и предметов активной ветки, владельцы и держатели вещей, а также новые NPC, созданные в сценах. Не выдумывает неизвестный баланс, проверяет происхождение операций и исключает отменённые ветки. Если не удаётся восстановить полную историю, возвращает incomplete вместо неверного остатка.', inputSchema:object({world_id:uuid}),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_branch_history', description:'История действующей ветки от новых сцен к старым. Для следующей страницы передай next_offset, branch.id и branch.head_scene_id. body_truncated показывает обрезку. Для полного текста одной сцены передай full_text=true и limit=1.', inputSchema:object({world_id:uuid,offset:{type:'integer',minimum:0,maximum:2000},limit:{type:'integer',minimum:1,maximum:20},branch_id:uuid,expected_head:{type:['string','null'],format:'uuid'},full_text:{type:'boolean'}},['world_id']), annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_sync_health',description:'OAuth-проверка компаньона: активная ветка, автосейв, полнота последней сцены, структурированные последствия, документы и источники. Только чтение, без технической записи.',inputSchema:object({world_id:uuid},['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_revision_context',description:'До исправления «На это:» прочитай полный исходный текст валидной сцены и получи защищённый токен актуальной ветки. Ничего не изменяет.',inputSchema:object({world_id:uuid,target_scene_id:uuid},['world_id','target_scene_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'commit_scene_revision',description:'Только по запросу «На это:»: сохраняет исходный валидный префикс плюс новое продолжение в НОВУЮ ветку, без удаления старых сцен. Требует get_revision_context и реальные последствия изменения.',inputSchema:object({
+    world_id:uuid,source_branch_id:uuid,expected_head:{type:['string','null'],format:'uuid'},
+    target_scene_id:uuid,revision_token:{type:'string',minLength:20,maxLength:5000},
+    prefix:{type:'string',maxLength:150000},continuation:{type:'string',minLength:1,maxLength:150000},
+    world_time:{type:'string'},director_note:{type:'string',maxLength:1200},
+    replace_from_start:{type:'boolean'},changes
+  },['world_id','source_branch_id','expected_head','target_scene_id','revision_token','prefix','continuation','changes']),
+   annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false} },
   { name:'save_scene_auto', description:'Сохраняй только реально сыгранную и согласованную сцену, если владелец включил auto_save_enabled в LIVING WORLD. Без ручного копирования: атомарная запись в действующую ветку с защитой от повторов по request_id и expected_head. Не используй для планов, отменённых сцен или неподтверждённых сумм. В мире без согласия на автосохранение инструмент отказывает.',inputSchema:object({
     world_id:uuid, branch_id:uuid, expected_head:{type:['string','null'],format:'uuid'}, request_id:uuid,
+    preflight_token:{type:'string',minLength:20,maxLength:5000,description:'Токен, полученный непосредственно из get_scene_preflight'},
     scene:{type:'string',maxLength:150000}, world_time:{type:'string',description:'Фактическое завершение сцены с известной точностью'},changes,decisions:decisionSchema
-  },['world_id','branch_id','expected_head','request_id','scene','world_time','changes']),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false} },
+  },['world_id','branch_id','expected_head','request_id','preflight_token','scene','world_time','changes']),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false} },
   { name:'save_scene_package', description:'Вызывай только по просьбе пользователя. Первый вызов без approval_code возвращает ссылку подтверждения. Покажи проверяемые текст сцены и последствия, затем ссылку пользователю и попроси открыть её, проверить пакет и вернуть полученный код. Второй вызов передаёт тот же пакет и approval_code. Не открывай ссылку и не подтверждай за пользователя. В демо результат не сохраняется.', inputSchema:object({
     world_id:uuid, branch_id:uuid, expected_head:{type:['string','null'],format:'uuid'}, request_id:uuid,
     scene:{type:'string',maxLength:150000}, world_time:{type:'string',description:'Фактическое время: YYYY-MM или YYYY-MM-DD или точный timestamp'}, changes,decisions:decisionSchema,
@@ -638,6 +691,79 @@ async function companionState(env,identity,id){
   character_memory:people.characters.map(c=>({name:c.name,origin:c.origin,state:c.state,knowledge_count:c.knowledge.length,belief_count:c.beliefs.length})),
   character_warnings:people.warnings,causal_memory:causalSummary(causal)};
 }
+async function getRevisionSource(env,identity,id,targetId){
+ const full=await loadFullWorldLineage(env,identity,id);
+ if(!full.complete)throw Error('Не удалось проверить полную действующую ветку: '+full.reason);
+ if(!full.lineage.some(row=>row.id===targetId))
+  throw Error('Целевая сцена не находится в действующей ветке. Отменённый хвост нельзя переписывать.');
+ const url='/rest/v1/lw_scenes?world_id=eq.'+encodeURIComponent(id)+'&id=eq.'+
+  encodeURIComponent(targetId)+'&select=id,body,world_time,prompt_note,parent_scene_id&limit=1';
+ const rows=await supabase(env,url,{token:identity.token});
+ if(!Array.isArray(rows)||rows.length!==1)throw Error('Целевая сцена не найдена.');
+ return {full,scene:rows[0]};
+}
+async function prepareSceneRevision(env,identity,id,targetId){
+ const {full,scene}=await getRevisionSource(env,identity,id,targetId);
+ const source=full.state.branch;
+ const token=await seal(env,'revision-v1',{v:1,user:identity.user,world:id,source:source.id,
+  head:source.head_scene_id,target:targetId,digest:await fingerprint(scene.body),
+  context:await sceneContextFingerprint(full.state.world),expires:Date.now()+7200000});
+ return {world_id:id,source_branch_id:source.id,expected_head:source.head_scene_id,
+  target_scene_id:targetId,revision_token:token,original_body:scene.body,
+  original_world_time:scene.world_time,previous_scene_id:scene.parent_scene_id,
+  old_consequences:readSceneNote(scene.prompt_note)?.delta??null,
+  instructions:'Скопируй только неизменённый префикс от НАЧАЛА оригинальной сцены до места «На это:». Новый текст должен продолжаться непосредственно от него. В changes опиши последствия только сохранённого префикса и нового продолжения; старый хвост полностью отменён.'};
+}
+async function saveSceneRevision(env,identity,id,args){
+ const source=checkId(args.source_branch_id),target=checkId(args.target_scene_id);
+ const head=args.expected_head===null?null:checkId(args.expected_head);
+ if(!args.revision_token)throw Error('Сначала вызови get_revision_context.');
+ const proof=await unseal(env,'revision-v1',args.revision_token);
+ if(proof?.v!==1||proof.user!==identity.user||proof.world!==id||
+  proof.source!==source||proof.head!==head||proof.target!==target||proof.expires<Date.now())
+  throw Error('Подтверждение правки устарело или относится к другой ветке. Подготовь его заново.');
+ const {full,scene}=await getRevisionSource(env,identity,id,target);
+ if(full.state.branch.id!==source||full.state.branch.head_scene_id!==head)
+  throw Error('Действующая ветка изменилась с момента «На это:». Нельзя повторять устаревшую правку.');
+ if(proof.context!==await sceneContextFingerprint(full.state.world)||
+  proof.digest!==await fingerprint(scene.body))
+  throw Error('Исходная сцена или правила изменились. Подготовь правку заново.');
+ const prefix=String(args.prefix??''),continuation=String(args.continuation??'');
+ if(!scene.body.startsWith(prefix))throw Error('Префикс не совпадает с буквальным началом сцены.');
+ if(!prefix&&!args.replace_from_start)
+  throw Error('Пустой префикс требует явного replace_from_start=true.');
+ if(!continuation.trim())throw Error('Новое продолжение отсутствует.');
+ const stamp=String(args.world_time||scene.world_time);
+ const packet=parseScenePackage(JSON.stringify({scene:prefix+continuation,world_time:stamp,
+  changes:args.changes}));
+ if(!validStoryClock(stamp))throw Error('Некорректное игровое время исправления.');
+ const note=packSceneNote(packet.changes,String(args.director_note||'').slice(0,1200));
+ // New owner-only SQL function locks the world and active branch and rechecks
+ // expected_head + exact prefix inside a single transaction, never deleting old scenes.
+ let newBranch,newScene;
+ try{
+  const written=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_fork',{token:identity.token,
+   body:{p_world:id,p_source_branch:source,p_expected_head:head,p_target:target,
+    p_prefix:prefix,p_continuation:continuation,p_note:note,p_time:stamp}});
+  newBranch=checkId(written.branch_id);
+  newScene=checkId(written.scene_id);
+ }catch(error){
+  if(/PGRST202|42883|could not find|not found|does not exist/i.test(String(error?.message||'')))
+   throw Error('Безопасное ветвление ещё не установлено в Supabase. Один раз выполни supabase/bridge_revision.sql в SQL Editor. Старые сцены не изменены.');
+  throw error;
+ }
+ const confirmed=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_state',
+  {token:identity.token,body:{p_world:id}});
+ const last=confirmed.scenes?.at(-1)||null;
+ if(confirmed.branch?.id!==newBranch||last?.id!==newScene||last?.body!==packet.scene||
+  last?.world_time!==stamp||last?.prompt_note!==note)
+  return {persisted:'unverified',new_branch_id:newBranch,
+   warning:'RPC могла создать ветку, но полное чтение не подтвердило результат. НЕ повторяй запись. Вызови get_world_state.'};
+ return {persisted:true,new_branch_id:newBranch,new_scene_id:last.id,
+  active_head:confirmed.branch.head_scene_id,source_head_before:head,
+  invalidated_old_tail:true,world_time:stamp,body_length:last.body.length,
+  atomic_head_check:true,notice:'Сохранена новая ветка. Старые сцены не удалены; SQL транзакционно проверил действующий head и буквальный префикс.'};
+}
 async function findSavedScene(env,identity,worldId,requestId){
  const url='/rest/v1/lw_scenes?id=eq.'+encodeURIComponent(requestId)+'&world_id=eq.'+encodeURIComponent(worldId)+
   '&select=id,world_id,branch_id,parent_scene_id,body,world_time,prompt_note&limit=1';
@@ -747,6 +873,41 @@ async function call(name,args,env,identity) {
       scanned_scenes:full.lineage.length,counts:memory.counts,
       ...searchCausalMemory(memory,{kind:args.kind??'fact',query:args.query??'',offset:args.offset??0,limit:args.limit??40})};
   }
+  if(name==='get_sync_health'){
+    const state=live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState();
+    const base=branchState(state,mode);
+    const docs=live?await sourceDocList(env,identity,id,{full:false}):{installed:false,docs:[]};
+    const types=new Set((docs.docs||[]).map(d=>d.category));
+    const last=state.scenes?.at(-1)||null;
+    const delta=readSceneNote(last?.prompt_note)?.delta||null;
+    const aligned=!state.branch?.head_scene_id||last?.id===state.branch.head_scene_id;
+    const warnings=[];
+    if(!aligned)warnings.push('Голова ветки и последняя сцена не совпадают.');
+    if(state.world?.genesis_choices?.auto_save_enabled!==true)warnings.push('Автосохранение не включено.');
+    if(!docs.installed||!types.has('core_rules'))warnings.push('Библиотека правил недоступна или core_rules отсутствует.');
+    if(last&&!delta)warnings.push('У последней сцены нет структурированных последствий.');
+    return {mode,world_id:id,oauth_authenticated:!!identity?.token,
+      auto_save_enabled:state.world?.genesis_choices?.auto_save_enabled===true,
+      branch_id:state.branch?.id||null,head_scene_id:state.branch?.head_scene_id||null,
+      head_matches_last_scene:aligned,memory_preview_complete:base.memory_coverage.complete,
+      documents_installed:!!docs.installed,core_rules_loaded:types.has('core_rules'),
+      glossary_loaded:types.has('glossary'),documents_count:docs.docs?.length||0,
+      latest_scene:last?{scene_id:last.id,world_time:last.world_time,model:last.model||'unknown',
+       body_length:last.body?.length||0,body_sha256:await fingerprint(last.body||''),
+       structured_consequences:!!delta,facts:delta?.facts?.length||0,
+       character_updates:delta?.characters?.length||0,
+       resource_operations:(delta?.items?.length||0)+(delta?.economy?.length||0)}:null,
+      ready:warnings.length===0,warnings,
+      note:'OAuth и сохранение проверяются только для этого вызова. Само по себе здоровье компаньона не заставляет GPT записывать будущие сцены.'};
+  }
+  if(name==='get_revision_context'){
+    if(!live)throw Error('Режиссёрская правка недоступна в демо.');
+    return {mode,...await prepareSceneRevision(env,identity,id,checkId(args.target_scene_id))};
+  }
+  if(name==='commit_scene_revision'){
+    if(!live||!writesEnabled(env))throw Error('Запись исправлений отключена.');
+    return {mode,...await saveSceneRevision(env,identity,id,args)};
+  }
   if(name==='get_scene_receipt'){
     if(!live)return {mode,world_id:id,saved:false,reason:'В демонстрационном режиме ничего не сохраняется.'};
     const req=checkId(args.request_id);
@@ -756,6 +917,8 @@ async function call(name,args,env,identity) {
     return {mode,world_id:id,request_id:req,saved:true,scene_id:record.id,
       branch_id:record.branch_id,parent_scene_id:record.parent_scene_id,
       world_time:record.world_time,body_length:record.body?.length??0,
+      body_sha256:await fingerprint(record.body||''),
+      structured_consequences:!!readSceneNote(record.prompt_note)?.delta,
       active_branch:state.branch?.id===record.branch_id};
   }
   if(name==='get_character_memory'){
@@ -785,7 +948,9 @@ async function call(name,args,env,identity) {
     const assets=live?await companionState(env,identity,id):{complete:true,issues:[]};
     const actors=Array.isArray(args.actor_names)?args.actor_names:[];
     const intent=String(args.scene_intent||'').slice(0,1400);
+    const preflight_token=await issueScenePreflight(env,identity,id,base);
     return {mode,world_id:id,branch:base.branch,world_time:base.world_time,
+      preflight_token,preflight_expires_at:new Date(Date.now()+SCENE_PREFLIGHT_MAX_AGE_MS).toISOString(),
       memory_coverage:base.memory_coverage,
       companion_settings:companionSettings(base.world,base.branch?.head_scene_id,base.world_time),
       companion_guidance:companionGuidance(companionSettings(base.world,base.branch?.head_scene_id,base.world_time)),
@@ -854,6 +1019,7 @@ async function call(name,args,env,identity) {
     const confirmed=live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState();
     if(confirmed.branch?.id!==branchKey||confirmed.branch.head_scene_id!==head)throw Error('Действующая ветка изменилась: не сохраняй старую сцену.');
     if(confirmed.world?.genesis_choices?.auto_save_enabled!==true)throw Error('Автосохранение не разрешено владельцем в настройках этого мира.');
+    await verifyScenePreflight(env,identity,id,args.preflight_token,confirmed,branchKey,head);
     if(live)await verifySceneBeforeCommit(env,identity,id,stamp,packet.changes,confirmed);
     if(!live)return dryRun({id:requestId,parent_scene_id:head,body:packet.scene,world_time:stamp,prompt_note:note});
     const saved=await appendSceneWithReceipt(env,identity,body,expectedScene);
@@ -862,7 +1028,7 @@ async function call(name,args,env,identity) {
       confirmed.world?.genesis_choices?.current_period||confirmed.world?.clock_start;
     try{year_archive=await archiveElapsedYears(env,identity,id,past,stamp);}
     catch(error){year_archive={status:'needs_review',reason:String(error?.message||error)};}
-    return {mode,...saved,year_archive};
+    return {mode,...saved,preflight_checked:true,year_archive};
   }
   const digest=await fingerprint(JSON.stringify(body));
   if(args.approval_code===undefined) {
@@ -996,9 +1162,12 @@ async function runSaveDiagnostic(env,identity){
   stage='first_scene';
   const sceneId=crypto.randomUUID(),itemId='test-token-'+sceneId.slice(0,8);
   const scene='Технический тест LIVING WORLD: персонаж получил 100 условных галеонов и тестовый жетон. Это не часть истории Гарри.';
+  const preflightState=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_state',{
+   token:identity.token,body:{p_world:worldId}});
+  const preflight_token=await issueScenePreflight(env,identity,worldId,branchState(preflightState,'live'));
   const args={
    world_id:worldId,branch_id:branchId,expected_head:null,request_id:sceneId,
-   scene,world_time:'1995-07-01T12:01:00',
+   preflight_token,scene,world_time:'1995-07-01T12:01:00',
    changes:{
     facts:['В техническом мире персонаж получил 100 галеонов и жетон.'],
     economy:[{id:'test-income',action:'opening',account:'Тестовый персонаж',currency:'GALLEON',
@@ -1079,7 +1248,7 @@ export default {async fetch(request,env={}){
       world_time:time,prompt_note:packSceneNote({facts:['Координаты маяка расшифрованы.']})}));
   }
   if(request.method==='GET' && path==='/health') return json({
-    service:'living-world-bridge',version:'2.2.4',
+    service:'living-world-bridge',version:'2.3.0',
     mode:env.BRIDGE_MODE==='live'?'live':'not-live',
     missing_configuration:['BRIDGE_PUBLIC_URL','SUPABASE_URL','SUPABASE_OAUTH_CLIENT_ID','BRIDGE_SUPABASE_USER_ID','SUPABASE_PUBLISHABLE_KEY','BRIDGE_SEAL_KEY'].filter(name=>!env[name]),
     writes_enabled:writesEnabled(env)
@@ -1106,7 +1275,7 @@ export default {async fetch(request,env={}){
   }
   if(message.method==='initialize') return ok({protocolVersion:message.params?.protocolVersion==='2026-07-28'?'2026-07-28':'2025-11-25',capabilities:{tools:{}},serverInfo:{name:'living-world-bridge',version:'2.2.0'}});
   if(message.method==='tools/list') return ok({resultType:'complete',ttlMs:0,cacheScope:'public',tools:live&&!writesEnabled(env)
-    ?tools.filter(tool=>!['save_scene_package','save_scene_auto'].includes(tool.name)):tools});
+    ?tools.filter(tool=>!['save_scene_package','save_scene_auto','commit_scene_revision'].includes(tool.name)):tools});
   if(message.method==='ping') return ok({});
   if(message.method==='tools/call') {
     try {

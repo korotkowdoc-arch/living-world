@@ -161,3 +161,12 @@ body.ai-running::after{content:"ИИ создаёт сцену и фиксиру
 .gpt-exchange .row{gap:10px;margin-top:12px;margin-bottom:12px}
 .gpt-exchange .btn{touch-action:manipulation}
 @media(max-width:650px){.gpt-field .row .btn{width:auto;max-width:100%}.gpt-exchange .row .btn{width:100%}.gpt-exchange textarea{min-height:190px}}
+
+/* Scene verification is a factual audit, not a second storyteller. */
+.sync-health{min-width:0}
+.sync-health .readiness-grid{margin:12px 0}
+.sync-health details{border-top:1px solid var(--line);padding-top:12px}
+.sync-journal .listrow{align-items:start;gap:12px;overflow-wrap:anywhere}
+.sync-journal .hint{overflow-wrap:anywhere}
+.sync-health .tag{white-space:nowrap}
+@media(max-width:650px){.sync-journal .listrow{flex-wrap:wrap}.sync-health .row{flex-wrap:wrap}}
