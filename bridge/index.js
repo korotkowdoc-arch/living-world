@@ -681,6 +681,71 @@ async function companionState(env,identity,id){
   character_memory:people.characters.map(c=>({name:c.name,origin:c.origin,state:c.state,knowledge_count:c.knowledge.length,belief_count:c.beliefs.length})),
   character_warnings:people.warnings,causal_memory:causalSummary(causal)};
 }
+async function getRevisionSource(env,identity,id,targetId){
+ const full=await loadFullWorldLineage(env,identity,id);
+ if(!full.complete)throw Error('Не удалось проверить полную действующую ветку: '+full.reason);
+ if(!full.lineage.some(row=>row.id===targetId))
+  throw Error('Целевая сцена не находится в действующей ветке. Отменённый хвост нельзя переписывать.');
+ const url='/rest/v1/lw_scenes?world_id=eq.'+encodeURIComponent(id)+'&id=eq.'+
+  encodeURIComponent(targetId)+'&select=id,body,world_time,prompt_note,parent_scene_id&limit=1';
+ const rows=await supabase(env,url,{token:identity.token});
+ if(!Array.isArray(rows)||rows.length!==1)throw Error('Целевая сцена не найдена.');
+ return {full,scene:rows[0]};
+}
+async function prepareSceneRevision(env,identity,id,targetId){
+ const {full,scene}=await getRevisionSource(env,identity,id,targetId);
+ const source=full.state.branch;
+ const token=await seal(env,'revision-v1',{v:1,user:identity.user,world:id,source:source.id,
+  head:source.head_scene_id,target:targetId,digest:await fingerprint(scene.body),
+  context:await sceneContextFingerprint(full.state.world),expires:Date.now()+7200000});
+ return {world_id:id,source_branch_id:source.id,expected_head:source.head_scene_id,
+  target_scene_id:targetId,revision_token:token,original_body:scene.body,
+  original_world_time:scene.world_time,previous_scene_id:scene.parent_scene_id,
+  old_consequences:readSceneNote(scene.prompt_note)?.delta??null,
+  instructions:'Скопируй только неизменённый префикс от НАЧАЛА оригинальной сцены до места «На это:». Новый текст должен продолжаться непосредственно от него. В changes опиши последствия только сохранённого префикса и нового продолжения; старый хвост полностью отменён.'};
+}
+async function saveSceneRevision(env,identity,id,args){
+ const source=checkId(args.source_branch_id),target=checkId(args.target_scene_id);
+ const head=args.expected_head===null?null:checkId(args.expected_head);
+ if(!args.revision_token)throw Error('Сначала вызови get_revision_context.');
+ const proof=await unseal(env,'revision-v1',args.revision_token);
+ if(proof?.v!==1||proof.user!==identity.user||proof.world!==id||
+  proof.source!==source||proof.head!==head||proof.target!==target||proof.expires<Date.now())
+  throw Error('Подтверждение правки устарело или относится к другой ветке. Подготовь его заново.');
+ const {full,scene}=await getRevisionSource(env,identity,id,target);
+ if(full.state.branch.id!==source||full.state.branch.head_scene_id!==head)
+  throw Error('Действующая ветка изменилась с момента «На это:». Нельзя повторять устаревшую правку.');
+ if(proof.context!==await sceneContextFingerprint(full.state.world)||
+  proof.digest!==await fingerprint(scene.body))
+  throw Error('Исходная сцена или правила изменились. Подготовь правку заново.');
+ const prefix=String(args.prefix??''),continuation=String(args.continuation??'');
+ if(!scene.body.startsWith(prefix))throw Error('Префикс не совпадает с буквальным началом сцены.');
+ if(!prefix&&!args.replace_from_start)
+  throw Error('Пустой префикс требует явного replace_from_start=true.');
+ if(!continuation.trim())throw Error('Новое продолжение отсутствует.');
+ const stamp=String(args.world_time||scene.world_time);
+ const packet=parseScenePackage(JSON.stringify({scene:prefix+continuation,world_time:stamp,
+  changes:args.changes}));
+ if(!validStoryClock(stamp))throw Error('Некорректное игровое время исправления.');
+ const note=packSceneNote(packet.changes,String(args.director_note||'').slice(0,1200));
+ // Current owner-only SQL RPC creates a new branch and validates the entire original prefix.
+ // It leaves every old scene intact. A short window between read and SQL remains possible:
+ // the RPC does NOT itself accept expected_head; never claim strict atomic CAS here.
+ const newBranch=await supabase(env,'/rest/v1/rpc/lw_fork_scene',{token:identity.token,
+  body:{p_world_id:id,p_source_branch_id:source,p_target_scene_id:target,
+   p_prefix:prefix,p_continuation:continuation,p_note:note,p_world_time:stamp}});
+ const confirmed=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_state',
+  {token:identity.token,body:{p_world:id}});
+ const last=confirmed.scenes?.at(-1)||null;
+ if(confirmed.branch?.id!==newBranch||last?.body!==packet.scene||
+  last?.world_time!==stamp||last?.prompt_note!==note)
+  return {persisted:'unverified',new_branch_id:newBranch,
+   warning:'RPC могла создать ветку, но полное чтение не подтвердило результат. НЕ повторяй запись. Вызови get_world_state.'};
+ return {persisted:true,new_branch_id:newBranch,new_scene_id:last.id,
+  active_head:confirmed.branch.head_scene_id,source_head_before:head,
+  invalidated_old_tail:true,world_time:stamp,body_length:last.body.length,
+  notice:'Это новая ветка; старая сохранена в архиве. Из-за ограничений прежнего SQL RPC строгий атомарный expected_head пока не гарантирован.'};
+}
 async function findSavedScene(env,identity,worldId,requestId){
  const url='/rest/v1/lw_scenes?id=eq.'+encodeURIComponent(requestId)+'&world_id=eq.'+encodeURIComponent(worldId)+
   '&select=id,world_id,branch_id,parent_scene_id,body,world_time,prompt_note&limit=1';
