@@ -74,6 +74,13 @@ ID мира для чтения правил, если доступен OAuth-м
 
 ${strictPrompt(schema)}`;
 }
+/** Detect the exact one-field vs full-schema response from the pasted JSON itself.
+ * This survives iPhone PWA reloads while ChatGPT was generating the answer.
+ */
+export function worldDraftFieldFromJSON(raw){
+ const keys=Object.keys(decode(raw));
+ return keys.length===1&&WORLD_TEXT_FIELDS.includes(keys[0])?keys[0]:null;
+}
 export function parseWorldDraft(raw,{field=null,source=null}={}){
  if(field!==null&&!WORLD_TEXT_FIELDS.includes(field))throw Error('Недопустимое поле мира.');
  const fields=field?[field]:WORLD_DRAFT_FIELDS;
@@ -129,6 +136,10 @@ ${world?.id?'При наличии OAuth-моста прочитай приме�
 - ${isField?'Верни только ключ '+field+' и один текстовый ответ. Остальные поля анкеты не изменяй.':'Верни role и ВСЕ 12 текстовых полей персонажа, даже если некоторые значения должны остаться пустыми из-за отсутствия доказательств.'}
 
 ${strictPrompt(skeleton)}`;
+}
+export function characterDraftFieldFromJSON(raw){
+ const keys=Object.keys(decode(raw));
+ return keys.length===1&&CHARACTER_TEXT_FIELDS.includes(keys[0])?keys[0]:null;
 }
 export function parseCharacterDraft(raw,{field=null,expectedRole=null,expectedName=null}={}){
  if(field!==null&&!CHARACTER_TEXT_FIELDS.includes(field))throw Error('Недопустимое поле персонажа.');
