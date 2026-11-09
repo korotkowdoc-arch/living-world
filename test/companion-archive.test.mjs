@@ -28,17 +28,17 @@ test('a completed year is preserved while future events do not enter the annual 
 });
 
 test('OAuth archives only after explicit stage close and preserves save receipt',()=>{
- assert.doesNotMatch(bridge,/archiveElapsedYears\\(/);
- assert.match(bridge,/if\\(name==='close_story_stage'\\)/);
- assert.match(bridge,/buildStoryYear\\(/);
- assert.match(bridge,/if\\(name==='create_chat_checkpoint'\\)/);
- assert.match(bridge,/buildChatCheckpoint\\(/);
+ assert.doesNotMatch(bridge,/archiveElapsedYears\(/);
+ assert.match(bridge,/if\(name==='close_story_stage'\)/);
+ assert.match(bridge,/buildStoryYear\(/);
+ assert.match(bridge,/if\(name==='create_chat_checkpoint'\)/);
+ assert.match(bridge,/buildChatCheckpoint\(/);
  assert.match(bridge,/category:'year_document'/);
  assert.match(bridge,/category:'checkpoint'/);
- assert.match(bridge,/const saved=await appendSceneWithReceipt\\(env,identity,body,expectedScene\\)/);
- assert.match(bridge,/year_archive:\\{status:'manual_only'\\}/);
- assert.match(bridge,/function activeCheckpoint\\(doc,ancestorIds\\)/);
- assert.match(bridge,/validStageYearDocs\\(/);
+ assert.match(bridge,/const saved=await appendSceneWithReceipt\(env,identity,body,expectedScene\)/);
+ assert.match(bridge,/year_archive:\{status:'manual_only'\}/);
+ assert.match(bridge,/function activeCheckpoint\(doc,ancestorIds\)/);
+ assert.match(bridge,/validStageYearDocs\(/);
 });
 
 test('full lineage replay no longer stops after exactly 3000 rows',()=>{
