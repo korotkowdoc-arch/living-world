@@ -457,3 +457,91 @@ test('missing Supabase save RPC is classified, never silently passed, and cleans
   assert.equal(deletion,true);
  }finally{globalThis.fetch=original;}
 });
+
+test('OAuth sync health reads Supabase and exact-prefix revision creates a separate valid branch',async()=>{
+ const target='10000000-0000-4000-8000-000000000401';
+ const fork='10000000-0000-4000-8000-000000000402';
+ const rewritten='10000000-0000-4000-8000-000000000403';
+ const oldScene={id:target,world_id:worldId,branch_id:branchId,parent_scene_id:null,
+  body:'Начало. Старый хвост.',world_time:'2010-08-01T08:00:00',model:'mcp',
+  prompt_note:packSceneNote({facts:['Старый хвост существует только в старой ветке']})};
+ const state={
+  world:{id:worldId,name:'AU',genre:'Фэнтези',world_rules:'Не терять факты',
+   genesis_choices:{auto_save_enabled:true}},
+  branch:{id:branchId,name:'Основная',head_scene_id:target},
+  characters:[],scenes:[oldScene],has_older_scenes:false
+ };
+ const previous=globalThis.fetch;
+ let forkCalls=0,deleted=false,inserted=null;
+ globalThis.fetch=async (url,opts={})=>{
+  const u=String(url),method=opts.method||'GET';
+  if(u.endsWith('/auth/v1/user'))return Response.json({id:env.BRIDGE_SUPABASE_USER_ID});
+  if(u.endsWith('/rest/v1/rpc/lw_bridge_v2_state'))return Response.json(state);
+  if(u.includes('/rest/v1/lw_reference_docs?'))return Response.json([{
+   id:'10000000-0000-4000-8000-000000000405',category:'core_rules',
+   doc_key:'core',revision:1,title:'Правила',sha256:'a'.repeat(64)
+  }]);
+  if(u.includes('/rest/v1/lw_scenes?world_id=eq.')&&u.includes('id=eq.'))
+   return Response.json([oldScene]);
+  if(u.includes('/rest/v1/lw_scenes?world_id=eq.'))return Response.json([oldScene]);
+  if(u.endsWith('/rest/v1/rpc/lw_bridge_v2_fork')){
+   forkCalls++;
+   const p=JSON.parse(opts.body);
+   assert.equal(p.p_world,worldId);
+   assert.equal(p.p_source_branch,branchId);
+   assert.equal(p.p_expected_head,target);
+   assert.equal(p.p_target,target);
+   assert.equal(p.p_prefix,'Начало. ');
+   assert.equal(method,'POST');
+   inserted={id:rewritten,world_id:worldId,branch_id:fork,parent_scene_id:null,
+    body:p.p_prefix+p.p_continuation,world_time:p.p_time,
+    model:'revision-mcp',prompt_note:p.p_note};
+   state.branch={id:fork,name:'Исправленная',head_scene_id:rewritten};
+   state.scenes=[inserted];
+   return Response.json({branch_id:fork,scene_id:rewritten});
+  }
+  if(method==='DELETE'){deleted=true;throw Error('No delete allowed');}
+  throw Error('Unexpected revision endpoint '+method+' '+u);
+ };
+ try{
+  const headers={authorization:'Bearer '+testJwt('authenticated')},live={...env,BRIDGE_WRITES_ENABLED:'true'};
+  const health=await call('tools/call',{name:'get_sync_health',arguments:{world_id:worldId}},headers,live);
+  const report=(await health.json()).result.structuredContent;
+  assert.equal(report.oauth_authenticated,true);
+  assert.equal(report.auto_save_enabled,true);
+  assert.equal(report.core_rules_loaded,true);
+  assert.equal(report.latest_scene.structured_consequences,true);
+  assert.ok(report.latest_scene.body_sha256);
+  const prepare=await call('tools/call',{
+   name:'get_revision_context',arguments:{world_id:worldId,target_scene_id:target}
+  },headers,live);
+  const context=(await prepare.json()).result.structuredContent;
+  assert.equal(context.original_body,oldScene.body);
+  assert.equal(context.expected_head,target);
+  assert.ok(context.revision_token);
+  const args={world_id:worldId,source_branch_id:branchId,expected_head:target,
+   target_scene_id:target,revision_token:context.revision_token,
+   prefix:'Не было такого начала',continuation:'Новое развитие.',
+   changes:{facts:['Новая версия']},world_time:'2010-08-01T08:00:00'};
+  const bad=await call('tools/call',{name:'commit_scene_revision',arguments:args},headers,live);
+  assert.equal((await bad.json()).result.isError,true);
+  assert.equal(forkCalls,0);
+  const valid=await call('tools/call',{name:'commit_scene_revision',arguments:{
+   ...args,prefix:'Начало. ',continuation:'Новый ход событий.'
+  }},headers,live);
+  const result=(await valid.json()).result.structuredContent;
+  assert.equal(result.persisted,true);
+  assert.equal(result.atomic_head_check,true);
+  assert.equal(result.new_branch_id,fork);
+  assert.equal(result.new_scene_id,rewritten);
+  assert.equal(state.scenes[0].body,'Начало. Новый ход событий.');
+  assert.equal(forkCalls,1);
+  assert.equal(deleted,false);
+  assert.equal(oldScene.body,'Начало. Старый хвост.');
+  const again=await call('tools/call',{name:'commit_scene_revision',arguments:{
+   ...args,prefix:'Начало. ',continuation:'Новый ход событий.'
+  }},headers,live);
+  assert.equal((await again.json()).result.isError,true);
+  assert.equal(forkCalls,1);
+ }finally{globalThis.fetch=previous;}
+});
