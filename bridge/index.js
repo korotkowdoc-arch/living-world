@@ -606,14 +606,18 @@ async function loadFullWorldLineage(env,identity,id){
  const state=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_state',{token:identity.token,body:{p_world:id}});
  if(!state?.branch||state.world?.id!==id)throw Error('Действующий мир недоступен.');
  const rows=[],head=state.branch.head_scene_id;
- for(let offset=0;offset<=3000;offset+=500){
+ // The historical 3000-row hard stop was not a retention limit. Read all available
+ // pages, with an explicit 30000-row safety bound. Do not label incomplete as complete.
+ const maxRows=30000,pageSize=500;
+ for(let offset=0;offset<=maxRows;offset+=pageSize){
   const page=await supabase(env,'/rest/v1/lw_scenes?world_id=eq.'+encodeURIComponent(id)+
-   '&select=id,parent_scene_id,world_time,prompt_note&order=created_at.asc&limit=500&offset='+offset,{token:identity.token});
+   '&select=id,parent_scene_id,world_time,prompt_note&order=created_at.asc&limit='+pageSize+'&offset='+offset,
+   {token:identity.token});
   if(!Array.isArray(page))throw Error('Журнал сцен недоступен.');
-  if((offset===3000&&page.length>0)||rows.length+page.length>3000)
-   return {complete:false,state,reason:'В архиве больше 3000 записей. Требуется долговременный checkpoint для полного восстановления.'};
+  if(rows.length+page.length>maxRows)
+   return {complete:false,state,reason:'В мире более 30000 записей, все сцены сохранены. Пересчёт состояния ограничен; необходима проверка checkpoint или специальная выгрузка.'};
   rows.push(...page);
-  if(page.length<500||offset===3000)break;
+  if(page.length<pageSize)break;
  }
  try{return {complete:true,state,lineage:activeLineage(rows,head)};}
  catch(error){return {complete:false,state,reason:error.message};}
