@@ -11,7 +11,7 @@ import {projectCausalMemory,searchCausalMemory} from './world-causality.mjs';
 import {persistWorldAutosave} from './world-autosave.mjs';
 import {projectCharacterMemory} from './world-character-memory.mjs';
 import {buildYearArchive} from './year-archive.mjs';
-import {WORLD_TEXT_FIELDS,CHARACTER_TEXT_FIELDS,worldDraftPrompt,parseWorldDraft,characterDraftPrompt,parseCharacterDraft} from './gpt-prompts.mjs';
+import {WORLD_TEXT_FIELDS,CHARACTER_TEXT_FIELDS,worldDraftPrompt,parseWorldDraft,worldDraftFieldFromJSON,characterDraftPrompt,parseCharacterDraft,characterDraftFieldFromJSON} from './gpt-prompts.mjs';
 import {companionSettings,mergeCompanionPreferences} from './companion-settings.mjs';
 
 const app=document.getElementById('app');
@@ -1052,7 +1052,8 @@ case 'world-gpt-apply':{
  const input=document.getElementById('world-gpt-json');
  if(!input?.value?.trim())throw Error('Вставь полный JSON-ответ ChatGPT.');
  const current=getForm('world-form');
- const data=parseWorldDraft(input.value,{field:state.gptWorldField,source:current});
+ const field=worldDraftFieldFromJSON(input.value);
+ const data=parseWorldDraft(input.value,{field,source:current});
  await saveWorld({...current,...data});
  state.gptWorldField=null;
  render();
@@ -1079,8 +1080,9 @@ case 'character-gpt-apply':{
  if(!raw.trim())throw Error('Вставь JSON персонажа из ChatGPT.');
  const form=document.getElementById('character-form');
  const values=getForm('character-form');
+ const field=characterDraftFieldFromJSON(raw);
  const parsed=parseCharacterDraft(raw,{
-  field:state.gptCharacterField,expectedRole:values.role,
+  field,expectedRole:values.role,
   expectedName:values.name?.trim()||null
  });
  for(const [key,value] of Object.entries(parsed)){
