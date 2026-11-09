@@ -107,3 +107,18 @@ test('only one Genesis prompt button renders and its handler saves selections be
  assert.match(modal,/character-gpt-field/);
  assert.match(modal,/btn\('character-gpt-apply'/);
 });
+
+test('phone workflow preserves request parameters and character drafts while switching to ChatGPT',()=>{
+ const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const worldHandler=app.slice(app.indexOf("case 'world-gpt-all':"),app.indexOf("case 'world-gpt-apply':"));
+ assert.ok(worldHandler.indexOf("await saveWorld(values)")<worldHandler.indexOf('await clipboard(prompt)'),
+  'World form must persist in Supabase before GPT handoff.');
+ const charHandler=app.slice(app.indexOf("case 'character-gpt-all':"),app.indexOf("case 'character-gpt-apply':"));
+ assert.ok(charHandler.indexOf('rememberCharacterDraft(values)')<charHandler.indexOf('await clipboard(prompt)'),
+  'Character draft must survive app reload.');
+ assert.match(app,/function characterDraftKey\(\)/);
+ assert.match(app,/function restoreCharacterDraft\(\)/);
+ assert.match(app,/if\(draftKey\)localStorage\.removeItem\(draftKey\)/);
+ assert.match(app,/worldDraftFieldFromJSON\(input\.value\)/);
+ assert.match(app,/characterDraftFieldFromJSON\(raw\)/);
+});
