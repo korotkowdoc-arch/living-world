@@ -69,7 +69,7 @@ test('PWA syncs to Supabase; OAuth preflight and world state return those settin
  const bridge=readFileSync(new URL('../bridge/index.js',import.meta.url),'utf8');
  assert.match(app,/async function persistCompanionSettings|function persistCompanionSettings/);
  assert.match(app,/\.from\('lw_worlds'\)\.select\('\*'\)/);
- assert.match(app,/companion_preferences/); // stored contract is part of the merge helper import
+ assert.match(app,/mergeCompanionPreferences/); // serialized cloud merge rather than local-only mode
  assert.match(app,/await persistCompanionSettings\(\{scene_mode:mode\}\)/);
  assert.match(app,/await persistCompanionSettings\(\{pending_decision:/);
  assert.match(app,/await persistCompanionSettings\(\{simulation_mode:mode\}\)/);
