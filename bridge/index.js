@@ -552,7 +552,7 @@ function activeCheckpoint(doc,ancestorIds){
  if(doc.category!=='checkpoint')return true;
  let body;
  try{body=JSON.parse(doc.content||'');}catch{return false;}
- return body?.format==='LW_STATE_CHECKPOINT_V1'&&
+ return ['LW_STATE_CHECKPOINT_V1',CHAT_CHECKPOINT_FORMAT].includes(body?.format)&&
   ancestorIds instanceof Set&&ancestorIds.has(String(body.source_head).toLowerCase());
 }
 async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,assets=null){
@@ -560,7 +560,7 @@ async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,ass
  if(!docStore.installed)return {installed:false,ready:false,reason:docStore.message,
   required_action:'Установить supabase/reference_docs.sql и загрузить оригинальные проектные документы в разделе «Документы».',manifest:[],selected:[]};
  let yearReconciliation={documents:docStore.docs,liveSummaries:[],warnings:[]};
- const needsReconcile=docStore.docs.some(d=>yearArchiveMetadata(d)||d.category==='checkpoint');
+ const needsReconcile=docStore.docs.some(d=>yearArchiveMetadata(d)||stageYearMetadata(d)||d.category==='checkpoint');
  if(needsReconcile){
   const full=await loadFullWorldLineage(env,identity,id);
   if(full.complete){
@@ -572,13 +572,16 @@ async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,ass
    });
    const ancestors=new Set(full.lineage.map(scene=>String(scene.id).toLowerCase()));
    const before=yearReconciliation.documents.length;
-   yearReconciliation.documents=yearReconciliation.documents.filter(doc=>activeCheckpoint(doc,ancestors));
+   const stageState=await loadStageState(env,identity,id,full.lineage);
+   yearReconciliation.documents=validStageYearDocs(
+    yearReconciliation.documents,stageState.state,full.lineage,id)
+    .filter(doc=>activeCheckpoint(doc,ancestors)&&doc.doc_key!==STAGE_CONTROL_KEY);
    const invalid=before-yearReconciliation.documents.length;
-   if(invalid)yearReconciliation.warnings.push({code:'STALE_CHECKPOINTS_IGNORED',
-    reason:'Непроверенные или отменённые snapshots исключены: '+invalid});
+   if(invalid)yearReconciliation.warnings.push({code:'STALE_MEMORY_DOCUMENTS_IGNORED',
+    reason:'Checkpoint или Year Document аннулирован другой веткой, исключён: '+invalid});
   }else{
    yearReconciliation.warnings.push({code:'YEAR_RECONCILIATION_BLOCKED',reason:full.reason});
-   yearReconciliation.documents=docStore.docs.filter(doc=>doc.category!=='checkpoint'&&!yearArchiveMetadata(doc));
+   yearReconciliation.documents=docStore.docs.filter(doc=>doc.category!=='checkpoint'&&!yearArchiveMetadata(doc)&&!stageYearMetadata(doc)&&doc.doc_key!==STAGE_CONTROL_KEY);
   }
  }
  const ref=buildSourcePreflight(yearReconciliation.documents,{intent,actors,maxExcerptChars:34000});
