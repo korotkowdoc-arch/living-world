@@ -1,11 +1,11 @@
 {
   "name": "living-world",
   "private": true,
-  "version": "1.7.0",
+  "version": "1.8.0",
   "type": "module",
   "description": "Open-source, mobile-first interactive fiction world simulator",
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "check": "node --check public/app.js && node --check public/continuity.mjs && node --check public/logic.mjs && node --check public/ai-client.mjs && node --check public/simulation.mjs && node --check public/year-archive.mjs && node --check public/companion-settings.mjs && node --check bridge/index.js && node --check bridge/ai.js && node --check public/world-ledger.mjs && node --check public/reference-documents.mjs && node --check public/world-character-memory.mjs && node --check public/world-setup.mjs && node --check public/world-context.mjs && node --check public/world-backup.mjs && node --check public/save-receipt.mjs && node --check public/world-causality.mjs && node --check public/world-autosave.mjs"
+    "check": "node --check public/app.js && node --check public/continuity.mjs && node --check public/logic.mjs && node --check public/ai-client.mjs && node --check public/simulation.mjs && node --check public/year-archive.mjs && node --check public/companion-settings.mjs && node --check public/gpt-prompts.mjs && node --check bridge/index.js && node --check bridge/ai.js && node --check public/world-ledger.mjs && node --check public/reference-documents.mjs && node --check public/world-character-memory.mjs && node --check public/world-setup.mjs && node --check public/world-context.mjs && node --check public/world-backup.mjs && node --check public/save-receipt.mjs && node --check public/world-causality.mjs && node --check public/world-autosave.mjs"
   }
 }

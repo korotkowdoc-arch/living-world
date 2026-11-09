@@ -149,3 +149,15 @@ body.ai-running::after{content:"ИИ создаёт сцену и фиксиру
  #toast{bottom:calc(92px + env(safe-area-inset-bottom));}
  #activity{top:calc(67px + env(safe-area-inset-top));}
 }
+
+/* ChatGPT-first world and character JSON request/response UI */
+.gpt-exchange{min-width:0}
+.gpt-exchange h2,.gpt-exchange h3{margin-top:0}
+.gpt-exchange textarea{min-height:145px;width:100%;max-width:100%;resize:vertical;overflow-wrap:anywhere}
+.gpt-field{min-width:0}
+.gpt-field .field{min-width:0}
+.gpt-field .row{margin-top:4px;margin-bottom:8px}
+.gpt-field .btn{min-height:39px;touch-action:manipulation}
+.gpt-exchange .row{gap:10px;margin-top:12px;margin-bottom:12px}
+.gpt-exchange .btn{touch-action:manipulation}
+@media(max-width:650px){.gpt-field .row .btn{width:auto;max-width:100%}.gpt-exchange .row .btn{width:100%}.gpt-exchange textarea{min-height:190px}}
