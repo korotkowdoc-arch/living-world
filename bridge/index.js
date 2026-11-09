@@ -738,23 +738,31 @@ async function saveSceneRevision(env,identity,id,args){
   changes:args.changes}));
  if(!validStoryClock(stamp))throw Error('Некорректное игровое время исправления.');
  const note=packSceneNote(packet.changes,String(args.director_note||'').slice(0,1200));
- // Current owner-only SQL RPC creates a new branch and validates the entire original prefix.
- // It leaves every old scene intact. A short window between read and SQL remains possible:
- // the RPC does NOT itself accept expected_head; never claim strict atomic CAS here.
- const newBranch=await supabase(env,'/rest/v1/rpc/lw_fork_scene',{token:identity.token,
-  body:{p_world_id:id,p_source_branch_id:source,p_target_scene_id:target,
-   p_prefix:prefix,p_continuation:continuation,p_note:note,p_world_time:stamp}});
+ // New owner-only SQL function locks the world and active branch and rechecks
+ // expected_head + exact prefix inside a single transaction, never deleting old scenes.
+ let newBranch,newScene;
+ try{
+  const written=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_fork',{token:identity.token,
+   body:{p_world:id,p_source_branch:source,p_expected_head:head,p_target:target,
+    p_prefix:prefix,p_continuation:continuation,p_note:note,p_time:stamp}});
+  newBranch=checkId(written.branch_id);
+  newScene=checkId(written.scene_id);
+ }catch(error){
+  if(/PGRST202|42883|could not find|not found|does not exist/i.test(String(error?.message||'')))
+   throw Error('Безопасное ветвление ещё не установлено в Supabase. Один раз выполни supabase/bridge_revision.sql в SQL Editor. Старые сцены не изменены.');
+  throw error;
+ }
  const confirmed=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_state',
   {token:identity.token,body:{p_world:id}});
  const last=confirmed.scenes?.at(-1)||null;
- if(confirmed.branch?.id!==newBranch||last?.body!==packet.scene||
+ if(confirmed.branch?.id!==newBranch||last?.id!==newScene||last?.body!==packet.scene||
   last?.world_time!==stamp||last?.prompt_note!==note)
   return {persisted:'unverified',new_branch_id:newBranch,
    warning:'RPC могла создать ветку, но полное чтение не подтвердило результат. НЕ повторяй запись. Вызови get_world_state.'};
  return {persisted:true,new_branch_id:newBranch,new_scene_id:last.id,
   active_head:confirmed.branch.head_scene_id,source_head_before:head,
   invalidated_old_tail:true,world_time:stamp,body_length:last.body.length,
-  notice:'Это новая ветка; старая сохранена в архиве. Из-за ограничений прежнего SQL RPC строгий атомарный expected_head пока не гарантирован.'};
+  atomic_head_check:true,notice:'Сохранена новая ветка. Старые сцены не удалены; SQL транзакционно проверил действующий head и буквальный префикс.'};
 }
 async function findSavedScene(env,identity,worldId,requestId){
  const url='/rest/v1/lw_scenes?id=eq.'+encodeURIComponent(requestId)+'&world_id=eq.'+encodeURIComponent(worldId)+
