@@ -393,6 +393,16 @@ const tools = [
   { name:'get_current_year_archive',description:'Читать годовую сводку, пересчитанную из актуальных сцен до и после режиссёрской правки. Отменённые события исключаются; незавершённый год помечается. Полный текст доступен порциями.',inputSchema:object({world_id:uuid,from:{type:'string'},to:{type:'string'},offset:{type:'integer',minimum:0,maximum:250000},limit:{type:'integer',minimum:1,maximum:25000}},['world_id','from','to']),annotations:{readOnlyHint:true,openWorldHint:false} },
  { name:'get_companion_state',description:'Полный журнал денег и предметов активной ветки, владельцы и держатели вещей, а также новые NPC, созданные в сценах. Не выдумывает неизвестный баланс, проверяет происхождение операций и исключает отменённые ветки. Если не удаётся восстановить полную историю, возвращает incomplete вместо неверного остатка.', inputSchema:object({world_id:uuid}),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_branch_history', description:'История действующей ветки от новых сцен к старым. Для следующей страницы передай next_offset, branch.id и branch.head_scene_id. body_truncated показывает обрезку. Для полного текста одной сцены передай full_text=true и limit=1.', inputSchema:object({world_id:uuid,offset:{type:'integer',minimum:0,maximum:2000},limit:{type:'integer',minimum:1,maximum:20},branch_id:uuid,expected_head:{type:['string','null'],format:'uuid'},full_text:{type:'boolean'}},['world_id']), annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_sync_health',description:'OAuth-проверка компаньона: активная ветка, автосейв, полнота последней сцены, структурированные последствия, документы и источники. Только чтение, без технической записи.',inputSchema:object({world_id:uuid},['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_revision_context',description:'До исправления «На это:» прочитай полный исходный текст валидной сцены и получи защищённый токен актуальной ветки. Ничего не изменяет.',inputSchema:object({world_id:uuid,target_scene_id:uuid},['world_id','target_scene_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'commit_scene_revision',description:'Только по запросу «На это:»: сохраняет исходный валидный префикс плюс новое продолжение в НОВУЮ ветку, без удаления старых сцен. Требует get_revision_context и реальные последствия изменения.',inputSchema:object({
+    world_id:uuid,source_branch_id:uuid,expected_head:{type:['string','null'],format:'uuid'},
+    target_scene_id:uuid,revision_token:{type:'string',minLength:20,maxLength:5000},
+    prefix:{type:'string',maxLength:150000},continuation:{type:'string',minLength:1,maxLength:150000},
+    world_time:{type:'string'},director_note:{type:'string',maxLength:1200},
+    replace_from_start:{type:'boolean'},changes
+  },['world_id','source_branch_id','expected_head','target_scene_id','revision_token','prefix','continuation','changes']),
+   annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false} },
   { name:'save_scene_auto', description:'Сохраняй только реально сыгранную и согласованную сцену, если владелец включил auto_save_enabled в LIVING WORLD. Без ручного копирования: атомарная запись в действующую ветку с защитой от повторов по request_id и expected_head. Не используй для планов, отменённых сцен или неподтверждённых сумм. В мире без согласия на автосохранение инструмент отказывает.',inputSchema:object({
     world_id:uuid, branch_id:uuid, expected_head:{type:['string','null'],format:'uuid'}, request_id:uuid,
     preflight_token:{type:'string',minLength:20,maxLength:5000,description:'Токен, полученный непосредственно из get_scene_preflight'},
@@ -855,6 +865,41 @@ async function call(name,args,env,identity) {
       scanned_scenes:full.lineage.length,counts:memory.counts,
       ...searchCausalMemory(memory,{kind:args.kind??'fact',query:args.query??'',offset:args.offset??0,limit:args.limit??40})};
   }
+  if(name==='get_sync_health'){
+    const state=live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState();
+    const base=branchState(state,mode);
+    const docs=live?await sourceDocList(env,identity,id,{full:false}):{installed:false,docs:[]};
+    const types=new Set((docs.docs||[]).map(d=>d.category));
+    const last=state.scenes?.at(-1)||null;
+    const delta=readSceneNote(last?.prompt_note)?.delta||null;
+    const aligned=!state.branch?.head_scene_id||last?.id===state.branch.head_scene_id;
+    const warnings=[];
+    if(!aligned)warnings.push('Голова ветки и последняя сцена не совпадают.');
+    if(state.world?.genesis_choices?.auto_save_enabled!==true)warnings.push('Автосохранение не включено.');
+    if(!docs.installed||!types.has('core_rules'))warnings.push('Библиотека правил недоступна или core_rules отсутствует.');
+    if(last&&!delta)warnings.push('У последней сцены нет структурированных последствий.');
+    return {mode,world_id:id,oauth_authenticated:!!identity?.token,
+      auto_save_enabled:state.world?.genesis_choices?.auto_save_enabled===true,
+      branch_id:state.branch?.id||null,head_scene_id:state.branch?.head_scene_id||null,
+      head_matches_last_scene:aligned,memory_preview_complete:base.memory_coverage.complete,
+      documents_installed:!!docs.installed,core_rules_loaded:types.has('core_rules'),
+      glossary_loaded:types.has('glossary'),documents_count:docs.docs?.length||0,
+      latest_scene:last?{scene_id:last.id,world_time:last.world_time,model:last.model||'unknown',
+       body_length:last.body?.length||0,body_sha256:await fingerprint(last.body||''),
+       structured_consequences:!!delta,facts:delta?.facts?.length||0,
+       character_updates:delta?.characters?.length||0,
+       resource_operations:(delta?.items?.length||0)+(delta?.economy?.length||0)}:null,
+      ready:warnings.length===0,warnings,
+      note:'OAuth и сохранение проверяются только для этого вызова. Само по себе здоровье компаньона не заставляет GPT записывать будущие сцены.'};
+  }
+  if(name==='get_revision_context'){
+    if(!live)throw Error('Режиссёрская правка недоступна в демо.');
+    return {mode,...await prepareSceneRevision(env,identity,id,checkId(args.target_scene_id))};
+  }
+  if(name==='commit_scene_revision'){
+    if(!live||!writesEnabled(env))throw Error('Запись исправлений отключена.');
+    return {mode,...await saveSceneRevision(env,identity,id,args)};
+  }
   if(name==='get_scene_receipt'){
     if(!live)return {mode,world_id:id,saved:false,reason:'В демонстрационном режиме ничего не сохраняется.'};
     const req=checkId(args.request_id);
@@ -864,6 +909,8 @@ async function call(name,args,env,identity) {
     return {mode,world_id:id,request_id:req,saved:true,scene_id:record.id,
       branch_id:record.branch_id,parent_scene_id:record.parent_scene_id,
       world_time:record.world_time,body_length:record.body?.length??0,
+      body_sha256:await fingerprint(record.body||''),
+      structured_consequences:!!readSceneNote(record.prompt_note)?.delta,
       active_branch:state.branch?.id===record.branch_id};
   }
   if(name==='get_character_memory'){
