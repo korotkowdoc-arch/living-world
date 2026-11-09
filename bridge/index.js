@@ -406,6 +406,31 @@ const tools = [
   { name:'get_current_year_archive',description:'Читать годовую сводку, пересчитанную из актуальных сцен до и после режиссёрской правки. Отменённые события исключаются; незавершённый год помечается. Полный текст доступен порциями.',inputSchema:object({world_id:uuid,from:{type:'string'},to:{type:'string'},offset:{type:'integer',minimum:0,maximum:250000},limit:{type:'integer',minimum:1,maximum:25000}},['world_id','from','to']),annotations:{readOnlyHint:true,openWorldHint:false} },
  { name:'get_companion_state',description:'Полный журнал денег и предметов активной ветки, владельцы и держатели вещей, а также новые NPC, созданные в сценах. Не выдумывает неизвестный баланс, проверяет происхождение операций и исключает отменённые ветки. Если не удаётся восстановить полную историю, возвращает incomplete вместо неверного остатка.', inputSchema:object({world_id:uuid}),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_branch_history', description:'История действующей ветки от новых сцен к старым. Для следующей страницы передай next_offset, branch.id и branch.head_scene_id. body_truncated показывает обрезку. Для полного текста одной сцены передай full_text=true и limit=1.', inputSchema:object({world_id:uuid,offset:{type:'integer',minimum:0,maximum:2000},limit:{type:'integer',minimum:1,maximum:20},branch_id:uuid,expected_head:{type:['string','null'],format:'uuid'},full_text:{type:'boolean'}},['world_id']), annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_story_stage_state',description:'Чтение именованного игрового этапа: начало/закрытие только по команде, без автоматического календарного закрытия. Прочитай перед checkpoint или Year Document.',inputSchema:object({world_id:uuid},['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'open_story_stage',description:'По явной команде владельца открыть именованный сюжетный этап (например «До Хогвартса» или «Первый курс»). Этап НЕ закрывается по смене календарного года. Запись в Supabase.',inputSchema:object({
+    world_id:uuid,title:{type:'string',minLength:1,maxLength:120},expected_head:{type:['string','null'],format:'uuid'}
+  },['world_id','title','expected_head']),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false} },
+  { name:'create_chat_checkpoint',description:'По команде пользователя «Создай checkpoint для следующего чата». Сохраняет всю накопленную память текущего этапа, точные ID событий, состояния людей, отношения, вещи, долги, последние полные сцены и проверяемые заметки перехода. Этап НЕ закрывает.',inputSchema:object({
+    world_id:uuid,expected_head:uuid,handoff_note:{type:'string',maxLength:20000},
+    evidence_scene_ids:{type:'array',maxItems:50,items:uuid}
+  },['world_id','expected_head']),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false} },
+  { name:'close_story_stage',description:'ТОЛЬКО по явной команде «Закрой год/этап» сформировать полный Year Document за именованный этап, закрепить его окончание; никогда не закрывай год автоматически по 1 января или школьному календарю.',inputSchema:object({
+    world_id:uuid,expected_head:uuid
+  },['world_id','expected_head']),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false} },
+  { name:'get_resume_context',description:'Для нового чата: восстановить последний валидный checkpoint, действующий этап, завершённые Year Documents, события после checkpoint и инструкцию дочитывать полные сцены. Поддерживает чтение частями.',inputSchema:object({
+    world_id:uuid,offset:{type:'integer',minimum:0,maximum:700000},
+    limit:{type:'integer',minimum:1,maximum:25000}
+  },['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'search_story_memories',description:'Поиск старых отсылок, шуток, обещаний, реплик, подарков и конфликтов по ВСЕЙ валидной ветке, включая предыдущие этапы. Возвращает источник и точно знающих; неизвестное знание не приписывает.',inputSchema:object({
+    world_id:uuid,query:{type:'string',minLength:1,maxLength:200},
+    actor_names:{type:'array',maxItems:8,items:{type:'string',maxLength:120}},
+    kind:{type:'string',enum:['joke','quote','promise','gift','secret','shared_memory','conflict','relationship','event','other']},
+    limit:{type:'integer',minimum:1,maximum:30}
+  },['world_id','query']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_story_scene',description:'Прочитать точный ПОЛНЫЙ ТЕКСТ исторической сцены по ID из действующей ветки, в том числе намного старше 200 сообщений, порциями 25 000 символов. Аннулированные сцены не возвращает.',inputSchema:object({
+    world_id:uuid,scene_id:uuid,offset:{type:'integer',minimum:0,maximum:150000},
+    limit:{type:'integer',minimum:1,maximum:25000}
+  },['world_id','scene_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_sync_health',description:'OAuth-проверка компаньона: активная ветка, автосейв, полнота последней сцены, структурированные последствия, документы и источники. Только чтение, без технической записи.',inputSchema:object({world_id:uuid},['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_revision_context',description:'До исправления «На это:» прочитай полный исходный текст валидной сцены и получи защищённый токен актуальной ветки. Ничего не изменяет.',inputSchema:object({world_id:uuid,target_scene_id:uuid},['world_id','target_scene_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'commit_scene_revision',description:'Только по запросу «На это:»: сохраняет исходный валидный префикс плюс новое продолжение в НОВУЮ ветку, без удаления старых сцен. Требует get_revision_context и реальные последствия изменения.',inputSchema:object({
@@ -1277,7 +1302,7 @@ export default {async fetch(request,env={}){
   }
   if(message.method==='initialize') return ok({protocolVersion:message.params?.protocolVersion==='2026-07-28'?'2026-07-28':'2025-11-25',capabilities:{tools:{}},serverInfo:{name:'living-world-bridge',version:'2.2.0'}});
   if(message.method==='tools/list') return ok({resultType:'complete',ttlMs:0,cacheScope:'public',tools:live&&!writesEnabled(env)
-    ?tools.filter(tool=>!['save_scene_package','save_scene_auto','commit_scene_revision'].includes(tool.name)):tools});
+    ?tools.filter(tool=>!['save_scene_package','save_scene_auto','commit_scene_revision','open_story_stage','create_chat_checkpoint','close_story_stage'].includes(tool.name)):tools});
   if(message.method==='ping') return ok({});
   if(message.method==='tools/call') {
     try {
