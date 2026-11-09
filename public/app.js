@@ -714,7 +714,7 @@ async function deleteWorld(worldId){
 }
 async function saveGenesisChoices(draft=false,kind='save'){const w=state.world;if(!w||w.genesis_approved)throw Error('Генезис уже утверждён. Создай новый мир для другого старта.');const c=kind==='import'?w.genesis_choices:getForm('genesis-form');if(!c.hero_name?.trim())throw Error('Задай имя героя.');const data={genesis_choices:c,updated_at:new Date().toISOString()};if(kind==='demo')data.genesis_draft=demoGenesis(w,c);if(kind==='import')data.genesis_draft=parseGenesis(document.getElementById('genesis-json').value,Number(c.npc_count),c.hero_name);state.world=dataOrThrow(await state.client.from('lw_worlds').update(data).eq('id',w.id).select().single());return c;}
 async function approveGenesis(){const w=state.world;const d=w?.genesis_draft;if(!d||w.genesis_approved)throw Error('Нет неутверждённого Генезиса');if(state.characters.length||state.scenes.length)throw Error('Старт можно утвердить только в пустом мире');const rows=d.characters.map(c=>({owner_id:state.user.id,world_id:w.id,...Object.fromEntries(['role',...CHARACTER_FIELDS].map(k=>[k,c[k]||'']))}));dataOrThrow(await state.client.from('lw_characters').insert(rows));const extra=`\n\nГЕНЕЗИС (утверждённое прошлое):\n${d.summary}\n${d.past_changes.map(s=>'- '+s).join('\n')}`;state.world=dataOrThrow(await state.client.from('lw_worlds').update({genesis_approved:true,history:(w.history||'')+extra}).eq('id',w.id).select().single());await openWorld(w.id);state.view='people';render();notify('Персонажи и стартовое прошлое закреплены в облаке.');}
-async function saveCharacter(fields){const rec=Object.fromEntries(['role',...CHARACTER_FIELDS].map(k=>[k,cleanText(fields[k],20000)]));if(!rec.name)throw Error('Имя обязательно');const id=state.modal?.character?.id;if(id)dataOrThrow(await state.client.from('lw_characters').update(rec).eq('id',id));else dataOrThrow(await state.client.from('lw_characters').insert({...rec,owner_id:state.user.id,world_id:state.world.id}));state.modal=null;await openWorld(state.world.id);render();notify('Персонаж сохранён.');}
+async function saveCharacter(fields){const rec=Object.fromEntries(['role',...CHARACTER_FIELDS].map(k=>[k,cleanText(fields[k],20000)]));if(!rec.name)throw Error('Имя обязательно');const id=state.modal?.character?.id;const draftKey=characterDraftKey();if(id)dataOrThrow(await state.client.from('lw_characters').update(rec).eq('id',id));else dataOrThrow(await state.client.from('lw_characters').insert({...rec,owner_id:state.user.id,world_id:state.world.id}));if(draftKey)localStorage.removeItem(draftKey);state.modal=null;await openWorld(state.world.id);render();notify('Персонаж сохранён.');}
 async function appendScene(body,model='manual',extra={}){await loadScenes();const w=state.world;const branch=state.branches.find(b=>b.id===w.active_branch_id);if(!branch)throw Error('Нет действующей ветки');const t=cleanText(extra.world_time||document.getElementById('story-clock')?.value||storyClock(w),80);if(!validStoryClock(t))throw Error('Перед записью сцены задай текущий период в разделе «Мир» (например, 1999-06), затем открой «Историю» заново.');const previous=state.memoryScenes.at(-1)?.world_time;if(previous&&!isNondecreasingStoryTime(previous,t))throw Error('Новая сцена не может оказаться раньше последней подтверждённой точки времени. Для изменения прошлого используй «На это» или новую ветку.');const rawNote=extra.note!==undefined?extra.note:document.getElementById('story-note')?.value||'';dataOrThrow(await state.client.rpc('lw_append_scene',{p_world_id:w.id,p_branch_id:branch.id,p_expected_head:branch.head_scene_id||null,p_body:cleanText(body,150000),p_world_time:t,p_model:model,p_note:(()=>{const note=String(rawNote||'');if(note.length>60000)throw Error('Пакет изменений слишком велик для сохранения.');return note;})()}));await openWorld(w.id);render();notify('Сцена и её последствия сохранены в действующей ветке.');}
 
 async function switchBranch(id){const w=state.world;dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:id}).eq('id',w.id));await openWorld(w.id);state.view='story';render();notify('Переключено на выбранную временную линию.');}
@@ -860,6 +860,33 @@ async function runSaveDiagnosticFromCompanion(){
   'Проверка не прошла: '+(result.reason||'неизвестная причина')+'. Этап: '+(result.stage||'авторизация'),!result.ok);
 }
 
+/** Temporary per-device form draft: never canon until character Save succeeds.
+ * Key is scoped to signed-in owner, world and character; expires after one week.
+ */
+function characterDraftKey(){
+ if(!state.world?.id||!state.user?.id||state.modal?.type!=='character')return null;
+ return 'lw_character_gpt_draft_'+state.user.id+'_'+state.world.id+'_'+(state.modal.character?.id||'new');
+}
+function rememberCharacterDraft(values){
+ const key=characterDraftKey();
+ if(key)localStorage.setItem(key,JSON.stringify({timestamp:Date.now(),values}));
+}
+function restoreCharacterDraft(){
+ const key=characterDraftKey(),form=document.getElementById('character-form');
+ if(!key||!form)return;
+ let draft;
+ try{draft=JSON.parse(localStorage.getItem(key)||'null');}catch{return;}
+ if(!draft?.values||!Number.isFinite(draft.timestamp)||Date.now()-draft.timestamp>7*86400000){
+  localStorage.removeItem(key);return;
+ }
+ // An edited character must never be silently renamed by an unrelated saved draft.
+ if(state.modal.character?.name&&draft.values.name!==state.modal.character.name)return;
+ for(const field of ['role',...CHARACTER_FIELDS]){
+  if(typeof draft.values[field]!=='string')continue;
+  const control=form.elements.namedItem(field);
+  if(control)control.value=draft.values[field];
+ }
+}
 /** All Genesis variants generate through exactly one UI action.
  * Preserve autosave, loaded source permissions and companion settings.
  * Save the exact selections BEFORE copying, so imported JSON has the same schema.
@@ -1042,6 +1069,8 @@ case 'world-gpt-field':{
  if(target!==null&&!WORLD_TEXT_FIELDS.includes(target))throw Error('Неизвестное поле мира.');
  const values=getForm('world-form');
  const prompt=worldDraftPrompt(state.world,values,{field:target});
+ // Ensure selected world parameters survive an iPhone PWA reload while GPT responds.
+ await saveWorld(values);
  state.gptWorldField=target;
  await clipboard(prompt);
  notify(target?'Скопирован JSON-запрос только для поля '+target+'.':'Скопирован JSON-запрос для описания всего мира.');
@@ -1069,6 +1098,7 @@ case 'character-gpt-field':{
  const prompt=characterDraftPrompt(state.world,state.characters,values,{
   field:target,editing:!!state.modal.character?.id
  });
+ rememberCharacterDraft(values);
  state.gptCharacterField=target;
  await clipboard(prompt);
  notify(target?'Скопирован запрос для поля '+target+'.':'Скопирован полный JSON-запрос для персонажа.');
@@ -1090,6 +1120,7 @@ case 'character-gpt-apply':{
   if(!control)throw Error('В форме отсутствует поле '+key);
   control.value=value;
  }
+ rememberCharacterDraft(getForm('character-form'));
  state.gptCharacterField=null;
  notify('JSON проверен. Поля заполнены — проверь их и нажми «Сохранить персонажа».');
  return;
@@ -1153,8 +1184,8 @@ case 'genesis-paste':{
 }
 case 'genesis-parse':await saveGenesisChoices(false,'import');render();notify('JSON корректный. Проверь персонажей и утверди.');return;
 case 'genesis-approve':await approveGenesis();return;
-case 'add-character':state.gptCharacterField=null;state.modal={type:'character',character:null};render();return;
-case 'edit-character':state.gptCharacterField=null;state.modal={type:'character',character:state.characters.find(c=>c.id===el.dataset.id)};render();return;
+case 'add-character':state.gptCharacterField=null;state.modal={type:'character',character:null};render();restoreCharacterDraft();return;
+case 'edit-character':state.gptCharacterField=null;state.modal={type:'character',character:state.characters.find(c=>c.id===el.dataset.id)};render();restoreCharacterDraft();return;
 case 'close-modal':state.gptCharacterField=null;state.modal=null;state.revision=null;render();return;
 
 case 'set-story-mode':{
