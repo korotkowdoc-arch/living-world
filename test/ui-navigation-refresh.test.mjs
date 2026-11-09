@@ -21,7 +21,7 @@ test('mobile bottom navigation fits exactly six actions in six columns',()=>{
  assert.match(css,/\.mobilebar button\{[^}]*min-height:58px/);
  assert.match(css,/#toast\{pointer-events:none;/);
  assert.match(html,/id="activity" role="status"/);
- assert.match(sw,/living-world-v1\.8\.0-shell/);
+ assert.match(sw,/living-world-v1\.9\.0-shell/);
 });
 
 test('Story, Assets and Memory expose live scene reload, without navigating away',()=>{
