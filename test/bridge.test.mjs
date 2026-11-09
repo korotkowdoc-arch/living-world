@@ -34,7 +34,7 @@ test('initialize and tools/list work without a Bearer token',async()=>{
  assert.equal(r.status,200);
  const d=(await r.json()).result;
  assert.equal(d.resultType,'complete');
- assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_causal_memory','get_scene_receipt','get_story_context','save_reference_document','get_character_memory','get_reference_catalog','get_reference_document','get_scene_preflight','get_current_year_archive','get_companion_state','get_branch_history']);
+ assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_causal_memory','get_scene_receipt','get_story_context','save_reference_document','get_character_memory','get_reference_catalog','get_reference_document','get_scene_preflight','get_current_year_archive','get_companion_state','get_branch_history','get_sync_health','get_revision_context']);
  assert.ok(d.tools.every(t=>t._meta.securitySchemes[0].type==='oauth2'));
 });
 test('real data calls are forbidden without a validated OAuth token',async()=>{
@@ -233,9 +233,10 @@ test('one-call autosave is forbidden unless owner opted in for this world',async
   if(u.endsWith('/auth/v1/user'))return Response.json({id:env.BRIDGE_SUPABASE_USER_ID});
   if(u.endsWith('/rest/v1/rpc/lw_bridge_v2_state'))return Response.json({
    world:{id:worldId,name:'Сцена в мире',genesis_choices:{auto_save_enabled:allow}},
-   branch:{id:branchId,head_scene_id:head}
+   branch:{id:branchId,head_scene_id:head},characters:[],scenes:[],has_older_scenes:false
   });
   if(u.includes('/rest/v1/lw_scenes?'))return Response.json(u.includes('id=eq.')&&savedRow?[savedRow]:[]);
+  if(u.includes('/rest/v1/lw_reference_docs?'))return Response.json([]);
   if(u.endsWith('/rest/v1/rpc/lw_bridge_v2_append')){
    writeCount++;lastBody=JSON.parse(opts.body);
    savedRow={id:lastBody.p_id,world_id:lastBody.p_world,branch_id:lastBody.p_branch,
@@ -251,9 +252,19 @@ test('one-call autosave is forbidden unless owner opted in for this world',async
   assert.equal((await denied.json()).result.isError,true);
   assert.equal(writeCount,0);
   allow=true;
+  const withoutPreflight=await call('tools/call',{name:'save_scene_auto',arguments:args},{authorization:'Bearer '+testJwt('authenticated')},live);
+  assert.equal((await withoutPreflight.json()).result.isError,true);
+  assert.equal(writeCount,0);
+  const pre=await call('tools/call',{name:'get_scene_preflight',arguments:{
+   world_id:worldId,scene_intent:'Гарри получил деньги',actor_names:['Гарри']
+  }},{authorization:'Bearer '+testJwt('authenticated')},live);
+  const proof=(await pre.json()).result.structuredContent;
+  assert.ok(proof.preflight_token);
+  args.preflight_token=proof.preflight_token;
   const allowed=await call('tools/call',{name:'save_scene_auto',arguments:args},{authorization:'Bearer '+testJwt('authenticated')},live);
   const data=(await allowed.json()).result.structuredContent;
   assert.equal(data.persisted,true);
+  assert.equal(data.preflight_checked,true);
   assert.equal(data.scene_id,requestId);
   assert.equal(lastBody.p_id,requestId);
   assert.equal(lastBody.p_time,'1999-06');
@@ -262,6 +273,8 @@ test('one-call autosave is forbidden unless owner opted in for this world',async
   const saved=await call('tools/call',{name:'get_scene_receipt',arguments:{world_id:worldId,request_id:requestId}},{authorization:'Bearer '+testJwt('authenticated')},live);
   const receipt=(await saved.json()).result.structuredContent;
   assert.equal(receipt.saved,true);
+  assert.ok(receipt.body_sha256);
+  assert.equal(receipt.structured_consequences,true);
   assert.equal(receipt.scene_id,requestId);
   const repeated=await call('tools/call',{name:'save_scene_auto',arguments:args},{authorization:'Bearer '+testJwt('authenticated')},live);
   assert.equal((await repeated.json()).result.structuredContent.already_saved,true);
@@ -303,6 +316,8 @@ test('source-document MCP retrieves full immutable revision in chunks and checks
   assert.equal(result.documents.ready,true);
   assert.match(result.documents.selected.map(x=>x.full_text||x.excerpts).join(' '),/восемнадцать/);
   assert.equal(result.memory_coverage.complete,true);
+  assert.ok(result.preflight_token);
+  assert.ok(result.preflight_expires_at);
  }finally{globalThis.fetch=prev;}
 });
 
@@ -366,6 +381,7 @@ test('website diagnostic writes, retries, reads back, then deletes only its disp
     branch:{id:branch,head_scene_id:head},characters:[],scenes:[]});
   if(url.includes('/rest/v1/lw_scenes?id=eq.'))return Response.json(scene?[scene]:[]);
   if(url.includes('/rest/v1/lw_scenes?world_id=eq.'))return Response.json(scene?[scene]:[]);
+  if(url.includes('/rest/v1/lw_reference_docs?'))return Response.json([]);
   if(url.endsWith('/rest/v1/rpc/lw_bridge_v2_append')){
    const payload=JSON.parse(options.body);
    writes++;
@@ -417,6 +433,7 @@ test('missing Supabase save RPC is classified, never silently passed, and cleans
     branch:{id:branch,head_scene_id:null},scenes:[],characters:[]
   });
   if(value.includes('/rest/v1/lw_scenes?'))return Response.json([]);
+  if(value.includes('/rest/v1/lw_reference_docs?'))return Response.json([]);
   if(value.endsWith('/rest/v1/rpc/lw_bridge_v2_append')){
     attempts++;
     return Response.json({code:'PGRST202',message:'Could not find public.lw_bridge_v2_append function'}, {status:404});
