@@ -47,7 +47,7 @@ export function worldDraftPrompt(world,form,{field=null}={}){
  if(!source.name)throw Error('Для запроса назови мир.');
  if(!validStoryClock(source.clock_start))throw Error('Сначала укажи правильную дату начала мира.');
  if(source.current_period&&!validStoryClock(source.current_period))throw Error('Некорректен текущий период.');
- if(world?.genesis_approved)throw Error('Генерация описания всего мира доступна до утверждения Генезиса. Сыгранную историю не переписывай запросом; редактируй поля вручную.');
+ if(world?.genesis_approved&&(!field||field==='history'))throw Error('После утверждения Генезиса нельзя генерировать всю исходную биографию мира или переписывать подтверждённое прошлое. Для других полей используй запрос по отдельному полю.');
  const isField=!!field;
  const schema=isField?{[field]:'<заполни '+field+'>'}:{
   ...source,
