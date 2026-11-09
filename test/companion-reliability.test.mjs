@@ -35,7 +35,7 @@ test('health warns on missing head, rules or autosave; does not invent zero bala
   recentScenes:scenes,documentsReady:true,documents:[],assets:null,assetIssue:'История не полная'});
  assert.equal(h.ready,false);
  assert.ok(h.warnings.some(x=>x.includes('Последняя сцена')));
- assert.ok(h.warnings.some(x=>x.includes('Автосохранение')));
+ assert.ok(h.warnings.some(x=>x.toLowerCase().includes('автосохранения')));
  assert.ok(h.warnings.some(x=>x.includes('Правила')));
  assert.equal(h.recent[0].active_head,false);
 });
