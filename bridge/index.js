@@ -1,12 +1,15 @@
 import {handleAiRequest} from './ai.js';
 import {extractCompanionChanges,activeLineage,projectCompanion,validateNextEvents} from '../public/world-ledger.mjs';
-import {latestDocumentVersions,buildSourcePreflight} from '../public/reference-documents.mjs';
+import {latestDocumentVersions,buildSourcePreflight,findDocExcerpts} from '../public/reference-documents.mjs';
 import {projectCharacterMemory,actorMemory} from '../public/world-character-memory.mjs';
 import {savedSceneStatus} from '../public/save-receipt.mjs';
 import {projectCausalMemory,causalSummary,searchCausalMemory} from '../public/world-causality.mjs';
 import {validStoryClock,isNondecreasingStoryTime} from '../public/continuity.mjs';
 import {yearArchiveMetadata,reconcileYearDocuments,buildYearArchive} from '../public/year-archive.mjs';
 import {companionSettings,companionGuidance} from '../public/companion-settings.mjs';
+import {STAGE_CONTROL_KEY,STAGE_CONTROL_FORMAT,CHAT_CHECKPOINT_FORMAT,chooseStageControl,
+ buildChatCheckpoint,buildStoryYear,chooseCheckpoint,stageYearMetadata,validStageYearDocs,
+ indexStoryMemories,searchStoryMemories,validateSceneMemories} from '../public/story-memory.mjs';
 /** LIVING WORLD Bridge v8 — Git-connected production deployment 2026-11-08.
  * Continuity engine originally built for LIVING WORLD v0.5.
  *
@@ -83,6 +86,7 @@ function parseScenePackage(raw) {
    found.add(d.id);
   }
   Object.assign(changes,extractCompanionChanges(c));
+  changes.memories=validateSceneMemories(c.memories,result.scene);
   return {scene:result.scene.trim(),world_time:result.world_time||null,changes,decisions};
 }
 function packSceneNote(changes, directorNote='',decisions=[]) {
@@ -359,8 +363,17 @@ const emergingCharacter=object({
  location:{type:'string',maxLength:1800},health:{type:'string',maxLength:1800},mood:{type:'string',maxLength:1800},
  status:{type:'string',maxLength:1800},inventory:{type:'string',maxLength:1800}
 },['name','description','causal_link','goals','knowledge']);
+const storyMemoryEntry=object({
+ id:{type:'string',maxLength:80},kind:{type:'string',enum:['joke','quote','promise','gift','secret','shared_memory','conflict','relationship','event','other']},
+ title:{type:'string',maxLength:180},detail:{type:'string',maxLength:1800},
+ quote:{type:'string',maxLength:600},emotional_context:{type:'string',maxLength:700},
+ participants:{type:'array',items:{type:'string',maxLength:100},maxItems:20},
+ known_by:{type:'array',items:{type:'string',maxLength:100},maxItems:20},
+ tags:{type:'array',items:{type:'string',maxLength:100},maxItems:20},related_to:{type:'string',maxLength:80}
+},['id','kind','title','detail']);
 const changes = object({
   facts:strings, open_threads:strings, resolved_threads:strings, offscreen_events:strings,
+  memories:{type:'array',maxItems:16,items:storyMemoryEntry},
   economy:{type:'array',items:economic,maxItems:35},items:{type:'array',items:itemChange,maxItems:40},new_characters:{type:'array',items:emergingCharacter,maxItems:15},
   characters:{type:'array', maxItems:30, items:object({
     name:{type:'string'}, ...fields, beliefs:strings,
@@ -393,6 +406,31 @@ const tools = [
   { name:'get_current_year_archive',description:'Читать годовую сводку, пересчитанную из актуальных сцен до и после режиссёрской правки. Отменённые события исключаются; незавершённый год помечается. Полный текст доступен порциями.',inputSchema:object({world_id:uuid,from:{type:'string'},to:{type:'string'},offset:{type:'integer',minimum:0,maximum:250000},limit:{type:'integer',minimum:1,maximum:25000}},['world_id','from','to']),annotations:{readOnlyHint:true,openWorldHint:false} },
  { name:'get_companion_state',description:'Полный журнал денег и предметов активной ветки, владельцы и держатели вещей, а также новые NPC, созданные в сценах. Не выдумывает неизвестный баланс, проверяет происхождение операций и исключает отменённые ветки. Если не удаётся восстановить полную историю, возвращает incomplete вместо неверного остатка.', inputSchema:object({world_id:uuid}),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_branch_history', description:'История действующей ветки от новых сцен к старым. Для следующей страницы передай next_offset, branch.id и branch.head_scene_id. body_truncated показывает обрезку. Для полного текста одной сцены передай full_text=true и limit=1.', inputSchema:object({world_id:uuid,offset:{type:'integer',minimum:0,maximum:2000},limit:{type:'integer',minimum:1,maximum:20},branch_id:uuid,expected_head:{type:['string','null'],format:'uuid'},full_text:{type:'boolean'}},['world_id']), annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_story_stage_state',description:'Чтение именованного игрового этапа: начало/закрытие только по команде, без автоматического календарного закрытия. Прочитай перед checkpoint или Year Document.',inputSchema:object({world_id:uuid},['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'open_story_stage',description:'По явной команде владельца открыть именованный сюжетный этап (например «До Хогвартса» или «Первый курс»). Этап НЕ закрывается по смене календарного года. Запись в Supabase.',inputSchema:object({
+    world_id:uuid,title:{type:'string',minLength:1,maxLength:120},expected_head:{type:['string','null'],format:'uuid'}
+  },['world_id','title','expected_head']),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false} },
+  { name:'create_chat_checkpoint',description:'По команде пользователя «Создай checkpoint для следующего чата». Сохраняет всю накопленную память текущего этапа, точные ID событий, состояния людей, отношения, вещи, долги, последние полные сцены и проверяемые заметки перехода. Этап НЕ закрывает.',inputSchema:object({
+    world_id:uuid,expected_head:uuid,handoff_note:{type:'string',maxLength:20000},
+    evidence_scene_ids:{type:'array',maxItems:50,items:uuid}
+  },['world_id','expected_head']),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false} },
+  { name:'close_story_stage',description:'ТОЛЬКО по явной команде «Закрой год/этап» сформировать полный Year Document за именованный этап, закрепить его окончание; никогда не закрывай год автоматически по 1 января или школьному календарю.',inputSchema:object({
+    world_id:uuid,expected_head:uuid
+  },['world_id','expected_head']),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false} },
+  { name:'get_resume_context',description:'Для нового чата: восстановить последний валидный checkpoint, действующий этап, завершённые Year Documents, события после checkpoint и инструкцию дочитывать полные сцены. Поддерживает чтение частями.',inputSchema:object({
+    world_id:uuid,offset:{type:'integer',minimum:0,maximum:700000},
+    limit:{type:'integer',minimum:1,maximum:25000}
+  },['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'search_story_memories',description:'Поиск старых отсылок, шуток, обещаний, реплик, подарков и конфликтов по ВСЕЙ валидной ветке, включая предыдущие этапы. Возвращает источник и точно знающих; неизвестное знание не приписывает.',inputSchema:object({
+    world_id:uuid,query:{type:'string',minLength:1,maxLength:200},
+    actor_names:{type:'array',maxItems:8,items:{type:'string',maxLength:120}},
+    kind:{type:'string',enum:['joke','quote','promise','gift','secret','shared_memory','conflict','relationship','event','other']},
+    limit:{type:'integer',minimum:1,maximum:30}
+  },['world_id','query']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_story_scene',description:'Прочитать точный ПОЛНЫЙ ТЕКСТ исторической сцены по ID из действующей ветки, в том числе намного старше 200 сообщений, порциями 25 000 символов. Аннулированные сцены не возвращает.',inputSchema:object({
+    world_id:uuid,scene_id:uuid,offset:{type:'integer',minimum:0,maximum:150000},
+    limit:{type:'integer',minimum:1,maximum:25000}
+  },['world_id','scene_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_sync_health',description:'OAuth-проверка компаньона: активная ветка, автосейв, полнота последней сцены, структурированные последствия, документы и источники. Только чтение, без технической записи.',inputSchema:object({world_id:uuid},['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_revision_context',description:'До исправления «На это:» прочитай полный исходный текст валидной сцены и получи защищённый токен актуальной ветки. Ничего не изменяет.',inputSchema:object({world_id:uuid,target_scene_id:uuid},['world_id','target_scene_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'commit_scene_revision',description:'Только по запросу «На это:»: сохраняет исходный валидный префикс плюс новое продолжение в НОВУЮ ветку, без удаления старых сцен. Требует get_revision_context и реальные последствия изменения.',inputSchema:object({
@@ -514,7 +552,7 @@ function activeCheckpoint(doc,ancestorIds){
  if(doc.category!=='checkpoint')return true;
  let body;
  try{body=JSON.parse(doc.content||'');}catch{return false;}
- return body?.format==='LW_STATE_CHECKPOINT_V1'&&
+ return ['LW_STATE_CHECKPOINT_V1',CHAT_CHECKPOINT_FORMAT].includes(body?.format)&&
   ancestorIds instanceof Set&&ancestorIds.has(String(body.source_head).toLowerCase());
 }
 async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,assets=null){
@@ -522,7 +560,7 @@ async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,ass
  if(!docStore.installed)return {installed:false,ready:false,reason:docStore.message,
   required_action:'Установить supabase/reference_docs.sql и загрузить оригинальные проектные документы в разделе «Документы».',manifest:[],selected:[]};
  let yearReconciliation={documents:docStore.docs,liveSummaries:[],warnings:[]};
- const needsReconcile=docStore.docs.some(d=>yearArchiveMetadata(d)||d.category==='checkpoint');
+ const needsReconcile=docStore.docs.some(d=>yearArchiveMetadata(d)||stageYearMetadata(d)||d.category==='checkpoint');
  if(needsReconcile){
   const full=await loadFullWorldLineage(env,identity,id);
   if(full.complete){
@@ -534,16 +572,19 @@ async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,ass
    });
    const ancestors=new Set(full.lineage.map(scene=>String(scene.id).toLowerCase()));
    const before=yearReconciliation.documents.length;
-   yearReconciliation.documents=yearReconciliation.documents.filter(doc=>activeCheckpoint(doc,ancestors));
+   const stageState=await loadStageState(env,identity,id,full.lineage);
+   yearReconciliation.documents=validStageYearDocs(
+    yearReconciliation.documents,stageState.state,full.lineage,id)
+    .filter(doc=>activeCheckpoint(doc,ancestors)&&doc.doc_key!==STAGE_CONTROL_KEY);
    const invalid=before-yearReconciliation.documents.length;
-   if(invalid)yearReconciliation.warnings.push({code:'STALE_CHECKPOINTS_IGNORED',
-    reason:'Непроверенные или отменённые snapshots исключены: '+invalid});
+   if(invalid)yearReconciliation.warnings.push({code:'STALE_MEMORY_DOCUMENTS_IGNORED',
+    reason:'Checkpoint или Year Document аннулирован другой веткой, исключён: '+invalid});
   }else{
    yearReconciliation.warnings.push({code:'YEAR_RECONCILIATION_BLOCKED',reason:full.reason});
-   yearReconciliation.documents=docStore.docs.filter(doc=>doc.category!=='checkpoint'&&!yearArchiveMetadata(doc));
+   yearReconciliation.documents=docStore.docs.filter(doc=>doc.category!=='checkpoint'&&!yearArchiveMetadata(doc)&&!stageYearMetadata(doc)&&doc.doc_key!==STAGE_CONTROL_KEY);
   }
  }
- const ref=buildSourcePreflight(yearReconciliation.documents,{intent,actors,maxExcerptChars:34000});
+ const ref=buildSourcePreflight(yearReconciliation.documents.filter(d=>d.doc_key!==STAGE_CONTROL_KEY),{intent,actors,maxExcerptChars:34000});
  const kinds=new Set(ref.manifest.map(d=>d.category));
  const findings=[];
  for(const issue of yearReconciliation.warnings){
@@ -582,8 +623,8 @@ async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,ass
 /** Internal automatic system archive. The owner already authorized yearly archival.
  * The user-facing document-import permission is separate and remains unchanged.
  */
-async function writeSystemArchive(env,identity,worldId,{key,title,category,content}){
- if(!['year_document','checkpoint'].includes(category)||
+async function writeSystemArchive(env,identity,worldId,{key,title,category,content,expectedRevision=null}){
+ if(!['year_document','checkpoint','other'].includes(category)||
   !/^[a-z0-9][a-z0-9._-]{2,127}$/.test(key)||
   !content||content.length>700000)throw Error('Некорректный или слишком большой системный архив.');
  const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(content));
@@ -592,68 +633,67 @@ async function writeSystemArchive(env,identity,worldId,{key,title,category,conte
   '&doc_key=eq.'+encodeURIComponent(key)+'&select=id,revision,sha256&order=revision.desc&limit=1';
  const existing=await supabase(env,path,{token:identity.token});
  if(!Array.isArray(existing))throw Error('Нельзя проверить системный архив.');
+ if(expectedRevision!==null&&Number(existing[0]?.revision||0)!==expectedRevision)
+  throw Error('Состояние этапов изменилось параллельно. Перечитай этап перед записью.');
  if(existing[0]?.sha256===digest)return {key,revision:existing[0].revision,unchanged:true};
  const revision=existing[0]?existing[0].revision+1:1;
  await supabase(env,'/rest/v1/lw_reference_docs',{token:identity.token,method:'POST',
   body:{world_id:worldId,doc_key:key,revision,category,title,
-   source_filename:category==='checkpoint'?'checkpoint.json':'year-document.md',
+   source_filename:category==='checkpoint'?'checkpoint.json':category==='other'?'stage-control.json':'year-document.md',
    content,sha256:digest}});
  return {key,revision,unchanged:false};
 }
 /** Archive only completed years that contain played scenes. Full valid ancestry matters:
  * after a fork the report is rebuilt and invalidated events stay excluded.
  */
-async function archiveElapsedYears(env,identity,worldId,previousTime,nowTime){
- const before=Number(String(previousTime||'').slice(0,4));
- const after=Number(String(nowTime||'').slice(0,4));
- if(!Number.isInteger(before)||!Number.isInteger(after)||after<=before)
-  return {status:'not_due'};
- if(after-before>20)return {status:'needs_review',reason:'Переход через 20 лет требует ручной проверки.'};
- const full=await loadFullWorldLineage(env,identity,worldId);
- if(!full.complete)return {status:'needs_review',reason:full.reason};
- const {world,branch,characters}=full.state;
- const records=[],warnings=[];
- for(let year=before;year<after;year++){
-  if(!full.lineage.some(s=>String(s.world_time||'').slice(0,4)===String(year)))continue;
-  const from=String(year).padStart(4,'0')+'-01',to=String(year).padStart(4,'0')+'-12';
-  try{
-   const validScenes=await hydrateActiveYearTexts(env,identity,worldId,full.lineage,[{from,to}]);
-   const doc=buildYearArchive({world,branch,scenes:validScenes,characters:characters||[],from,to});
-   const saved=await writeSystemArchive(env,identity,worldId,
-    {key:doc.key,title:doc.title,category:'year_document',content:doc.content});
-   records.push({year,document:saved,source_head:doc.year_end_head,scenes:doc.scene_count});
-   if(doc.unstructured_scenes)warnings.push('Год '+year+': есть сцены без структурированных последствий.');
-  }catch(error){warnings.push('Год '+year+': '+String(error?.message||error));}
- }
- if(records.length){
-  try{
-   const read=scene=>readSceneNote(scene.prompt_note)?.delta||{};
-   const money=projectCompanion(full.lineage,{getDelta:read});
-   const actors=projectCharacterMemory(characters||[],full.lineage,{getDelta:read});
-   const plot=projectCausalMemory(full.lineage,{getDelta:read});
-   const snapshot={
-    format:'LW_STATE_CHECKPOINT_V1',world_id:worldId,branch_id:branch.id,
-    source_head:branch.head_scene_id,world_time:nowTime,scene_count:full.lineage.length,
-    // Confirmed current state and outstanding obligations, not a replacement for past scene texts.
-    characters:actors.characters.map(a=>({name:a.name,origin:a.origin,initial:a.initial,
-      introduced_scene_id:a.introduced_scene_id,state:a.state,
-      knowledge:a.knowledge,beliefs:a.beliefs})),
-    accounts:money.accounts.map(a=>({person:a.person,currency:a.currency,scale:a.scale,
-      known:a.known,balance:a.balance,observed_delta:a.observed_delta})),
-    items:money.items.map(i=>({id:i.id,label:i.label,owner:i.owner,holder:i.holder,
-      location:i.location,condition:i.condition,exists:i.exists})),
-    new_characters:money.new_characters,
-    open_threads:plot.open_threads,resolved_threads:plot.resolved_threads,
-    counts:plot.counts,issues:[...money.issues,...actors.warnings,...plot.warnings]
-   };
-   const archived=await writeSystemArchive(env,identity,worldId,{
-    key:'state-checkpoint-'+String(after).padStart(4,'0')+'-'+branch.id,
-    title:'STATE CHECKPOINT · '+after+' · '+world.name,
-    category:'checkpoint',content:JSON.stringify(snapshot)});
-   records.push({checkpoint:archived,source_head:branch.head_scene_id});
-  }catch(error){warnings.push('Checkpoint: '+String(error?.message||error));}
- }
- return {status:warnings.length?'partial':'archived',records,warnings};
+/** Stage transitions use immutable document revisions. Nothing closes on January 1st. */
+async function loadStageState(env,identity,id,lineage){
+ const rows=await supabase(env,'/rest/v1/lw_reference_docs?world_id=eq.'+encodeURIComponent(id)+
+  '&doc_key=eq.'+STAGE_CONTROL_KEY+
+  '&select=id,revision,content,sha256&order=revision.desc&limit=500',
+  {token:identity.token});
+ if(!Array.isArray(rows))throw Error('Библиотека игровых этапов недоступна.');
+ return chooseStageControl(rows,lineage,id);
+}
+function activeStageOrDefault(control){
+ return control.state.open_stage||{
+  id:null,title:'Текущий незакрытый этап',
+  start_after_scene_id:control.state.closed_stages.at(-1)?.end_scene_id||null
+ };
+}
+async function hydrateRecentForMemory(env,identity,id,lineage,count=3){
+ const ids=lineage.slice(-count).map(s=>s.id);
+ if(!ids.length)return lineage;
+ const rows=await supabase(env,'/rest/v1/lw_scenes?world_id=eq.'+encodeURIComponent(id)+
+  '&id=in.('+ids.join(',')+')&select=id,body,world_time,prompt_note',
+  {token:identity.token});
+ if(!Array.isArray(rows))throw Error('Не удалось загрузить последние полные сцены.');
+ const bodies=new Map(rows.map(s=>[s.id,s]));
+ return lineage.map(s=>bodies.has(s.id)?{...s,...bodies.get(s.id)}:s);
+}
+async function fullMemoryState(env,identity,id){
+ const full=await loadFullWorldLineage(env,identity,id);
+ if(!full.complete)throw Error('Полная действующая история не восстановлена: '+full.reason);
+ if(!full.lineage.length||full.state.branch.head_scene_id!==full.lineage.at(-1).id)
+  throw Error('Для этой операции требуется хотя бы одна валидная сцена.');
+ const stages=await loadStageState(env,identity,id,full.lineage);
+ return {full,stages,head:full.state.branch.head_scene_id};
+}
+async function assertMemoryHead(env,identity,id,expectedHead,sourceBranch){
+ const state=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_state',
+  {token:identity.token,body:{p_world:id}});
+ if(state?.branch?.id!==sourceBranch||state.branch.head_scene_id!==expectedHead)
+  throw Error('Действующая ветка изменилась. Перечитай историю перед закрытием этапа.');
+ return state;
+}
+async function persistStageControl(env,identity,id,stages,head,branchId,patch){
+ return writeSystemArchive(env,identity,id,{
+  key:STAGE_CONTROL_KEY,title:'Управление игровыми этапами LIVING WORLD',
+  category:'other',
+  content:JSON.stringify({format:STAGE_CONTROL_FORMAT,world_id:id,
+   source_head:head,branch_id:branchId,
+   open_stage:patch.open_stage??null,closed_stages:patch.closed_stages||[]}),
+  expectedRevision:stages.latest_revision});
 }
 async function loadFullWorldLineage(env,identity,id){
  const state=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_state',{token:identity.token,body:{p_world:id}});
@@ -818,6 +858,181 @@ async function call(name,args,env,identity) {
   if(!tools.some(tool=>tool.name===name)) throw new Error('Неизвестный инструмент.');
   const id=checkId(args.world_id);
   if(!live&&id!==worldId) throw new Error('Мир недоступен в демо.');
+  if(name==='get_story_stage_state'){
+    if(!live)throw Error('Игровые этапы доступны только в рабочем мире.');
+    const full=await loadFullWorldLineage(env,identity,id);
+    if(!full.complete)throw Error('История не восстановлена: '+full.reason);
+    const stages=await loadStageState(env,identity,id,full.lineage);
+    return {mode,world_id:id,branch:full.state.branch,active_stage:stages.state.open_stage,
+     closed_stages:stages.state.closed_stages,stage_control_revision:stages.selected_revision,
+     stale_control_revision:stages.stale_revision,
+     has_unassigned_scenes:!stages.state.open_stage&&
+      full.lineage.length>0&&full.lineage.at(-1).id!==
+       (stages.state.closed_stages.at(-1)?.end_scene_id||null),
+     note:'Год — именованный этап. Никакой календарной или школьной автоматической границы.'};
+  }
+  if(name==='open_story_stage'){
+    if(!live||!writesEnabled(env))throw Error('Запись этапа недоступна.');
+    const title=String(args.title||'').trim();
+    if(!title||title.length>120)throw Error('Укажи короткое название этапа.');
+    const expectedHead=args.expected_head===null?null:checkId(args.expected_head);
+    const full=await loadFullWorldLineage(env,identity,id);
+    if(!full.complete)throw Error('История не полная: '+full.reason);
+    const branch=full.state.branch;
+    if(branch.head_scene_id!==expectedHead)throw Error('Изменилась последняя сцена. Перечитай мир.');
+    const stages=await loadStageState(env,identity,id,full.lineage);
+    if(stages.state.open_stage)throw Error('Этап «'+stages.state.open_stage.title+'» ещё открыт. Сначала закрой его.');
+    const previous=stages.state.closed_stages.at(-1)?.end_scene_id||null;
+    const stage={id:crypto.randomUUID(),title,start_after_scene_id:previous};
+    await assertMemoryHead(env,identity,id,expectedHead,branch.id);
+    const saved=await persistStageControl(env,identity,id,stages,expectedHead,branch.id,{
+     open_stage:stage,closed_stages:stages.state.closed_stages});
+    const verified=await assertMemoryHead(env,identity,id,expectedHead,branch.id).then(()=>true).catch(()=>false);
+    return {mode,persisted:true,stage,control_document:saved,head_still_current:verified,
+     warning:verified?null:'Пока выполнялась операция, история продвинулась. Перечитай текущее состояние.'};
+  }
+  if(name==='create_chat_checkpoint'){
+    if(!live||!writesEnabled(env))throw Error('Создание checkpoint недоступно.');
+    const {full,stages,head}=await fullMemoryState(env,identity,id);
+    if(checkId(args.expected_head)!==head)throw Error('Checkpoint должен совпадать с последней сценой. Перечитай мир.');
+    const proofIds=Array.isArray(args.evidence_scene_ids)?args.evidence_scene_ids:[];
+    const hydrated=await hydrateRecentForMemory(env,identity,id,full.lineage);
+    const doc=buildChatCheckpoint({world:full.state.world,branch:full.state.branch,
+     lineage:hydrated,characters:full.state.characters||[],stage:activeStageOrDefault(stages),
+     handoff_note:args.handoff_note||'',evidence_scene_ids:proofIds});
+    await assertMemoryHead(env,identity,id,head,full.state.branch.id);
+    const saved=await writeSystemArchive(env,identity,id,{
+     key:doc.key,title:doc.title,category:'checkpoint',content:doc.content});
+    const after=await assertMemoryHead(env,identity,id,head,full.state.branch.id).then(()=>true).catch(()=>false);
+    return {mode,persisted:true,doc_key:doc.key,revision:saved.revision,
+     source_head:head,stage_title:activeStageOrDefault(stages).title,
+     scene_count:doc.scene_count,missing_structured_consequences:doc.missing_structured_consequences,
+     content_length:doc.content.length,unchanged:!!saved.unchanged,
+     head_still_current:after,
+     next_chat_command:'В новом чате вызови get_resume_context, дочитай весь checkpoint через offset, затем get_scene_preflight перед сценой.',
+     warning:after?null:'История продвинулась после создания checkpoint. При загрузке нового чата дополнительно восстанови сцены после checkpoint.'};
+  }
+  if(name==='close_story_stage'){
+    if(!live||!writesEnabled(env))throw Error('Закрытие этапа недоступно.');
+    const {full,stages,head}=await fullMemoryState(env,identity,id);
+    if(checkId(args.expected_head)!==head)throw Error('Этап должен закрываться на актуальной последней сцене.');
+    const stage=stages.state.open_stage;
+    if(!stage)throw Error('Сейчас нет открытого именованного этапа. Сначала вызови open_story_stage.');
+    const year=buildStoryYear({world:full.state.world,branch:full.state.branch,
+     lineage:full.lineage,characters:full.state.characters||[],stage});
+    await assertMemoryHead(env,identity,id,head,full.state.branch.id);
+    const archived=await writeSystemArchive(env,identity,id,{
+     key:year.key,title:year.title,category:'year_document',content:year.content});
+    // Only the following control revision makes the Year Document canonical.
+    await assertMemoryHead(env,identity,id,head,full.state.branch.id);
+    const completed=[...stages.state.closed_stages,{
+     id:stage.id,title:stage.title,start_after_scene_id:stage.start_after_scene_id,
+     end_scene_id:head,doc_key:year.key,revision:archived.revision}];
+    const control=await persistStageControl(env,identity,id,stages,head,full.state.branch.id,{
+     open_stage:null,closed_stages:completed});
+    return {mode,persisted:true,stage_closed:stage.title,stage_id:stage.id,
+     year_document:{key:year.key,revision:archived.revision,length:year.content.length,
+      scenes:year.scene_count,unstructured_scenes:year.missing_structured_consequences},
+     control_revision:control.revision,next_step:'Назови следующий этап и вызови open_story_stage. Старые сцены и сохранённые воспоминания остаются доступны.'};
+  }
+  if(name==='get_resume_context'){
+    if(!live)throw Error('В демо нет персональной истории.');
+    const {full,stages,head}=await fullMemoryState(env,identity,id);
+    const docs=await sourceDocList(env,identity,id,{full:true});
+    if(!docs.installed)throw Error('Библиотека документов недоступна: '+docs.message);
+    const chosen=chooseCheckpoint(docs.docs,full.lineage,id);
+    const off=boundedInteger(args.offset??0,0,700000),max=boundedInteger(args.limit??18000,1,25000);
+    const content=chosen?.doc.content||'';
+    const afterIndex=chosen?full.lineage.findIndex(scene=>scene.id===chosen.body.source_head):-1;
+    const following=full.lineage.slice(afterIndex+1);
+    const years=validStageYearDocs(docs.docs,stages.state,full.lineage,id)
+     .filter(d=>!!stageYearMetadata(d)).map(d=>{
+      const m=stageYearMetadata(d);
+      return {doc_key:d.doc_key,revision:d.revision,title:d.title,stage_id:m.stage_id,
+       end_scene_id:m.end_scene_id,scene_count:m.scene_count,
+       read_tool:'get_reference_document'};
+     });
+    return {mode,world_id:id,branch:full.state.branch,world_time:full.state.scenes?.at(-1)?.world_time||null,
+     active_stage:stages.state.open_stage||activeStageOrDefault(stages),
+     completed_stage_documents:years,
+     checkpoint_found:!!chosen,checkpoint:chosen?{
+      doc_key:chosen.doc.doc_key,revision:chosen.doc.revision,
+      source_head:chosen.body.source_head,stage:chosen.body.stage,
+      content:content.slice(off,off+max),offset:off,total_length:content.length,
+      next_offset:off+max<content.length?off+max:null,
+      complete:off+max>=content.length}:null,
+     following_scenes:{count:following.length,source_scene_ids:following.map(s=>s.id).slice(-120),
+      listed_all:following.length<=120,
+      note:'Эти действительные сцены произошли ПОСЛЕ checkpoint. Дочитай их через get_story_scene; не используй устаревший snapshot как текущий.'},
+     ready:!!chosen&&off+max>=content.length&&following.length===0,
+     mandatory_next_actions:chosen?
+      ['Прочитай ВСЕ части checkpoint, передав next_offset до null.',
+       'При необходимости прочитай Year Documents завершённых этапов.',
+       'Если были новые сцены после checkpoint, получи их полные тексты и последствия.',
+       'Перед новой сценой всегда вызови get_scene_preflight.']:
+      ['Checkpoint ещё не создан. В старом чате вызови create_chat_checkpoint, либо восстанови валидную историю через get_story_context, get_story_scene и get_scene_preflight.'],
+     warning:stages.stale_revision?'После ветвления выбран только последний stage-control из ВАЛИДНЫХ предков; отменённые этапы не канон.':null};
+  }
+  if(name==='get_story_scene'){
+    if(!live)throw Error('Полные исторические сцены доступны в рабочем мире.');
+    const full=await loadFullWorldLineage(env,identity,id);
+    if(!full.complete)throw Error('Не удалось проверить действительную ветку: '+full.reason);
+    const target=checkId(args.scene_id);
+    if(!full.lineage.some(s=>s.id===target))
+     throw Error('Сцена не находится в действительной ветке или была отменена.');
+    const rows=await supabase(env,'/rest/v1/lw_scenes?world_id=eq.'+encodeURIComponent(id)+
+     '&id=eq.'+target+'&select=id,body,world_time,prompt_note&limit=1',{token:identity.token});
+    if(!Array.isArray(rows)||rows.length!==1)throw Error('Исходная сцена недоступна.');
+    const row=rows[0],off=boundedInteger(args.offset??0,0,150000),limit=boundedInteger(args.limit??20000,1,25000);
+    const body=String(row.body||'');
+    return {mode,world_id:id,scene_id:target,world_time:row.world_time,
+     text:body.slice(off,off+limit),offset:off,total_length:body.length,
+     complete:off+limit>=body.length,next_offset:off+limit<body.length?off+limit:null,
+     consequences:readSceneNote(row.prompt_note)?.delta||null,
+     canonical:true,warning:'Если текст показан не целиком, продолжай запрашивать next_offset. Не воспроизводи отменённый хвост.'};
+  }
+  if(name==='search_story_memories'){
+    if(!live)throw Error('Поиск реальных воспоминаний доступен только в рабочем мире.');
+    const full=await loadFullWorldLineage(env,identity,id);
+    if(!full.complete)throw Error('Не удалось восстановить всю память: '+full.reason);
+    const query=String(args.query||'').trim().slice(0,200);
+    if(!query)throw Error('Укажи слово, фразу или тему воспоминания.');
+    const structured=searchStoryMemories(full.lineage,{query,actor_names:args.actor_names||[],
+     kind:args.kind||null,limit:args.limit??20});
+    const stages=await loadStageState(env,identity,id,full.lineage);
+    const docs=await sourceDocList(env,identity,id,{full:true});
+    const years=docs.installed?validStageYearDocs(docs.docs,stages.state,full.lineage,id)
+     .filter(d=>stageYearMetadata(d)):[],tokens=[query,...(args.actor_names||[])];
+    const matching_years=years.flatMap(d=>{
+      const excerpts=findDocExcerpts(d.content,tokens,{radius:400,max:3});
+      return excerpts.length?[{doc_key:d.doc_key,revision:d.revision,title:d.title,
+       passages:excerpts.map(e=>e.text)}]:[];
+    });
+    // Legacy scenes without structured memories: targeted text lookup; filter
+    // results against ACTIVE ancestry before surfacing a quotation.
+    const safe=query.replace(/[*,%_\\]/g,' ').trim();
+    const valid=new Set(full.lineage.map(s=>s.id));
+    let raw=[],capped=false;
+    if(safe.length>=3){
+     const rows=await supabase(env,'/rest/v1/lw_scenes?world_id=eq.'+encodeURIComponent(id)+
+      '&body=ilike.'+encodeURIComponent('*'+safe+'*')+
+      '&select=id,world_time,body&order=created_at.desc&limit=121',
+      {token:identity.token});
+     if(!Array.isArray(rows))throw Error('Поиск первичных текстов недоступен.');
+     capped=rows.length>120;
+     raw=rows.filter(s=>valid.has(s.id)).slice(0,Math.min(20,args.limit??20)).map(s=>{
+      const at=String(s.body||'').toLocaleLowerCase('ru').indexOf(safe.toLocaleLowerCase('ru'));
+      const begin=Math.max(0,at-220);
+      return {scene_id:s.id,world_time:s.world_time,
+       excerpt:String(s.body).slice(begin,Math.max(begin+300,at+safe.length+230)),
+       kind:'original_scene_text',known_by:'not_established',open_full_scene_with:'get_story_scene'};
+     });
+    }
+    return {mode,world_id:id,query,structured_memories:structured,
+     matching_year_documents:matching_years,original_scene_matches:raw,
+     search_complete:!capped,warning:capped?'Поиск по исходным сценам ограничен первыми 120 совпадениями во всём мире; результат НЕ исчерпывающий. Уточни запрос.':null,
+     knowledge_rule:'Вся информация о том, кто знает фразу, должна быть подтверждена сценой/learned. Участие не равно знанию всех секретов.'};
+  }
   if(name==='save_reference_document'){
     if(!live||!writesEnabled(env))throw Error('Запись документов недоступна.');
     const world=await rpc('lw_bridge_v2_state',{p_world:id});
@@ -1023,12 +1238,7 @@ async function call(name,args,env,identity) {
     if(live)await verifySceneBeforeCommit(env,identity,id,stamp,packet.changes,confirmed);
     if(!live)return dryRun({id:requestId,parent_scene_id:head,body:packet.scene,world_time:stamp,prompt_note:note});
     const saved=await appendSceneWithReceipt(env,identity,body,expectedScene);
-    let year_archive={status:'not_due'};
-    const past=confirmed.scenes?.at(-1)?.world_time||
-      confirmed.world?.genesis_choices?.current_period||confirmed.world?.clock_start;
-    try{year_archive=await archiveElapsedYears(env,identity,id,past,stamp);}
-    catch(error){year_archive={status:'needs_review',reason:String(error?.message||error)};}
-    return {mode,...saved,preflight_checked:true,year_archive};
+    return {mode,...saved,preflight_checked:true,year_archive:{status:'manual_only'}};
   }
   const digest=await fingerprint(JSON.stringify(body));
   if(args.approval_code===undefined) {
@@ -1051,12 +1261,7 @@ async function call(name,args,env,identity) {
   if(finalState.branch?.id!==branchKey||finalState.branch.head_scene_id!==head)throw Error('Ветка изменилась после подтверждения.');
   await verifySceneBeforeCommit(env,identity,id,stamp,packet.changes,finalState);
   const saved=await appendSceneWithReceipt(env,identity,body,expectedScene);
-  let year_archive={status:'not_due'};
-  const past=finalState.scenes?.at(-1)?.world_time||
-    finalState.world?.genesis_choices?.current_period||finalState.world?.clock_start;
-  try{year_archive=await archiveElapsedYears(env,identity,id,past,stamp);}
-  catch(error){year_archive={status:'needs_review',reason:String(error?.message||error)};}
-  return {mode,...saved,year_archive};
+  return {mode,...saved,year_archive:{status:'manual_only'}};
 }
 
 const page=`<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LIVING WORLD Bridge</title>
@@ -1248,7 +1453,7 @@ export default {async fetch(request,env={}){
       world_time:time,prompt_note:packSceneNote({facts:['Координаты маяка расшифрованы.']})}));
   }
   if(request.method==='GET' && path==='/health') return json({
-    service:'living-world-bridge',version:'2.3.0',
+    service:'living-world-bridge',version:'3.0.0',
     mode:env.BRIDGE_MODE==='live'?'live':'not-live',
     missing_configuration:['BRIDGE_PUBLIC_URL','SUPABASE_URL','SUPABASE_OAUTH_CLIENT_ID','BRIDGE_SUPABASE_USER_ID','SUPABASE_PUBLISHABLE_KEY','BRIDGE_SEAL_KEY'].filter(name=>!env[name]),
     writes_enabled:writesEnabled(env)
@@ -1275,7 +1480,7 @@ export default {async fetch(request,env={}){
   }
   if(message.method==='initialize') return ok({protocolVersion:message.params?.protocolVersion==='2026-07-28'?'2026-07-28':'2025-11-25',capabilities:{tools:{}},serverInfo:{name:'living-world-bridge',version:'2.2.0'}});
   if(message.method==='tools/list') return ok({resultType:'complete',ttlMs:0,cacheScope:'public',tools:live&&!writesEnabled(env)
-    ?tools.filter(tool=>!['save_scene_package','save_scene_auto','commit_scene_revision'].includes(tool.name)):tools});
+    ?tools.filter(tool=>!['save_scene_package','save_scene_auto','commit_scene_revision','open_story_stage','create_chat_checkpoint','close_story_stage'].includes(tool.name)):tools});
   if(message.method==='ping') return ok({});
   if(message.method==='tools/call') {
     try {

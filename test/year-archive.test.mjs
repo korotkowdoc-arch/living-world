@@ -143,19 +143,20 @@ test('cannot archive a future year, empty year, wrong branch or stale head',()=>
  assert.throws(()=>buildYearArchive({...args(),to:'1997-10'}),/не длиннее/);
 });
 
-test('year UI and OAuth preflight use current valid lineage and provide full live year read',()=>{
+test('legacy calendar archives remain readable but active stage controls replace calendar-year UI',()=>{
  const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
  const bridge=readFileSync(new URL('../bridge/index.js',import.meta.url),'utf8');
- assert.match(app,/case 'year-archive-build'/);
- assert.match(app,/case 'year-archive-save'/);
- assert.match(app,/existingKey:draft\.key/);
- assert.match(app,/state\.activeLineage=lineage/);
+ assert.match(app,/case 'stage-copy-checkpoint'/);
+ assert.match(app,/case 'stage-copy-close'/);
+ assert.match(app,/case 'stage-copy-open'/);
+ assert.doesNotMatch(app,/btn\('year-archive-build'/);
  assert.match(bridge,/reconcileYearDocuments\(/);
  assert.match(bridge,/hydrateActiveYearTexts\(/);
- assert.match(app,/select\('id,body'\)/);
  assert.match(bridge,/current_year_reconstructions:/);
  assert.match(bridge,/name:'get_current_year_archive'/);
  assert.match(bridge,/if\(name==='get_current_year_archive'\)/);
+ assert.match(bridge,/if\(name==='close_story_stage'\)/);
+ assert.doesNotMatch(bridge,/archiveElapsedYears\(/);
  assert.doesNotMatch(bridge,/INVALIDATED_YEAR_ARCHIVES_EXCLUDED/);
  assert.doesNotMatch(bridge,/isYearArchiveActive/);
 });

@@ -10,7 +10,7 @@ import {WORLD_BACKUP_FORMAT,sealWorldBackup,validateWorldBackup} from './world-b
 import {projectCausalMemory,searchCausalMemory} from './world-causality.mjs';
 import {persistWorldAutosave} from './world-autosave.mjs';
 import {projectCharacterMemory} from './world-character-memory.mjs';
-import {buildYearArchive} from './year-archive.mjs';
+import {STAGE_CONTROL_KEY} from './story-memory.mjs';
 import {WORLD_TEXT_FIELDS,CHARACTER_TEXT_FIELDS,worldDraftPrompt,parseWorldDraft,worldDraftFieldFromJSON,characterDraftPrompt,parseCharacterDraft,characterDraftFieldFromJSON} from './gpt-prompts.mjs';
 import {companionSettings,mergeCompanionPreferences} from './companion-settings.mjs';
 import {companionHealth} from './companion-health.mjs';
@@ -64,7 +64,7 @@ async function clipboard(s){try{await navigator.clipboard.writeText(s);notify('�
 function render(){if(!state.config){renderSetup();return;}if(!state.session){renderLogin();return;}renderApp();}
 function renderSetup(){app.innerHTML=`<div class="auth"><div class="eyebrow">LIVING WORLD · CLOUD v1.0</div><h1>Приватный мир на iPhone</h1><p class="sub">Один раз подключи собственную облачную базу Supabase. Затем Mac больше не нужен.</p><div class="panel" style="margin-top:22px"><form id="setup-form" class="form">${f('url','Project URL','https://','text','Supabase → Project Settings → API → Project URL')}${f('key','Publishable key (не секретный)','', 'text','Можно использовать publishable / anon key. Никогда не вставляй secret или service_role key.')}<button class="btn gold full" type="submit">Подключить базу</button></form><div class="footnote">Если Supabase ещё не создан, открой инструкцию README из архива. База и сайт должны быть опубликованы один раз; потом всё управление доступно с телефона.</div></div></div>`;}
 function renderLogin(){app.innerHTML=`<div class="auth"><div class="eyebrow">✦ LIVING WORLD · v1.0</div><h1>Войти в свои вселенные</h1><p class="sub">Один пароль вместо писем и кодов. На iPhone вход сохраняется между запусками.</p><div class="panel" style="margin-top:22px"><form id="login-form" class="form">${f('email','Электронная почта',localStorage.getItem('lw_login_email')||'','email')}${f('password','Пароль','','password')}<button class="btn gold full" type="submit">Войти в LIVING WORLD</button></form><details class="login-help"><summary>Первый вход — откуда взять пароль?</summary><p>Если ты раньше пользовалась только ссылками из писем, у того аккаунта может ещё не быть пароля. Не угадывай его и не запрашивай новые письма.</p><p>Для новой личной учётной записи открой Supabase → Authentication → Users → Add user → Create new user. Введи свободный email и свой надёжный пароль; выбери Auto Confirm User. Если твой старый email уже занят, используй другой адрес или алиас, например <code>мойадрес+livingworld@gmail.com</code> (у Gmail он приходит в тот же ящик).</p><p><strong>Важно:</strong> другая учётная запись не увидит миры старой. Если уже есть сохранённые миры, не создавай новый аккаунт — сначала восстанови доступ к прежнему.</p><p>После настройки можно выключить публичную регистрацию в Authentication → Sign In / Providers.</p><a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer">Открыть Supabase (Authentication → Users)</a></details><div class="divider"></div>${btn('disconnect-db','Сменить подключение к базе','ghost full')}<div class="footnote">Пароль не сохраняется в настройках приложения. Supabase хранит защищённую сессию, поэтому повторный вход обычно не требуется.</div></div></div>`;}
-function shellNav(){const links=[['library','▦','Миры'],['builder','⚙','Мир'],['genesis','✦','Генезис'],['story','▤','История'],['memory','◈','Память'],['assets','▣','Активы'],['documents','▤','Документы'],['people','♙','Герои'],['history','⑂','Ветки'],['settings','⚑','Настройки']];return `<aside class="sidebar"><div class="brand"><span class="mark">✦</span><div>LIVING WORLD<small>PRIVATE UNIVERSES</small></div></div><div class="eyebrow">Библиотека</div><nav class="nav">${links.map(([v,i,l])=>`<button data-action="navigate" data-view="${v}" class="${state.view===v?'active':''}">${i} &nbsp;${l}</button>`).join('')}</nav><div class="sidebar-bottom">v1.9.0 · источник истины<br>Mac не требуется<br>${x(state.user?.email||'')}</div></aside>`;}
+function shellNav(){const links=[['library','▦','Миры'],['builder','⚙','Мир'],['genesis','✦','Генезис'],['story','▤','История'],['memory','◈','Память'],['assets','▣','Активы'],['documents','▤','Документы'],['people','♙','Герои'],['history','⑂','Ветки'],['settings','⚑','Настройки']];return `<aside class="sidebar"><div class="brand"><span class="mark">✦</span><div>LIVING WORLD<small>PRIVATE UNIVERSES</small></div></div><div class="eyebrow">Библиотека</div><nav class="nav">${links.map(([v,i,l])=>`<button data-action="navigate" data-view="${v}" class="${state.view===v?'active':''}">${i} &nbsp;${l}</button>`).join('')}</nav><div class="sidebar-bottom">v2.0.0 · источник истины<br>Mac не требуется<br>${x(state.user?.email||'')}</div></aside>`;}
 function mobileNav(){const l=[['library','▦','Миры'],['builder','⚙','Мир'],['genesis','✦','Генезис'],['story','▤','История'],['memory','◈','Память'],['people','♙','Люди']];return `<nav class="mobilebar" aria-label="Основные разделы">${l.map(([v,i,label])=>`<button data-action="navigate" data-view="${v}" class="${state.view===v?'active':''}"><span>${i}</span>${label}</button>`).join('')}</nav>`;}
 function renderApp(){let content='';switch(state.view){case 'world-setup':content=renderWorldSetup();break;case 'builder':content=renderBuilder();break;case 'genesis':content=renderGenesis();break;case 'people':content=renderPeople();break;case 'story':content=renderStory();break;case 'memory':content=renderMemory();break;case 'assets':content=renderAssets();break;case 'documents':content=renderDocuments();break;case 'history':content=renderHistory();break;case 'settings':content=renderSettings();break;default:content=renderLibrary();}app.innerHTML=`<div class="app">${shellNav()}<div class="mobiletop"><button data-action="navigate" data-view="library">✦ LIVING WORLD</button><div><button data-action="navigate" data-view="history" aria-label="Ветки">⑂</button><button data-action="navigate" data-view="settings" aria-label="Настройки">⚙</button></div></div><main class="main">${content}</main>${mobileNav()}</div>${renderWorldContextMenu()}${state.modal?renderModal():''}`;}
 function heading(k,title,subtitle,actions=''){return `<div class="head"><div><div class="eyebrow">${x(k)}</div><h1 class="page-title">${x(title)}</h1><p class="sub">${x(subtitle)}</p></div>${actions?`<div class="row">${actions}</div>`:''}</div>`;}
@@ -279,7 +279,7 @@ function renderDocuments(){
  const sources=(state.worlds||[]).filter(w=>w.id!==state.world.id);
  const reusable=`<div class="panel"><h2 class="section-title">Общие документы из другого мира</h2><p class="sub">Скопировать <b>правила, глоссарий, причинные ориентиры и стиль</b> из уже созданного мира. История пройденных лет, checkpoint, персонажи, их отношения и предметы не копируются. Это отдельные редакции в новом мире, старый не меняется.</p>${sources.length?`<div class="field"><label>Мир-источник</label><select id="docs-source-world">${sources.map(w=>opt(w.id,w.name,w.id===sources[0].id?sources[0].id:sources[0].id)).join('')}</select></div><div class="row" style="margin-top:12px">${btn('docs-copy-shared','Скопировать общие документы','gold')}</div>`:'<p class="hint">В библиотеке пока нет других миров-источников. После создания нового мира эта кнопка появится.</p>'}</div>`;
  const types=DOC_CATEGORIES.map(kind=>opt(kind.id,kind.label,'world_lore')).join('');
- const rows=docs.map(d=>`<div class="asset-panel doc-card">
+ const rows=docs.filter(d=>d.doc_key!==STAGE_CONTROL_KEY).map(d=>`<div class="asset-panel doc-card">
   <div class="eyebrow">${x(docCategory(d.category).label)} · редакция ${x(d.revision)}</div>
   <h3 class="section-title">${x(d.title)}</h3>
   <p class="tiny">${x(d.source_filename||'Добавлен текстом')} · ${x(Number(d.content_length||0).toLocaleString('ru-RU'))} символов</p>
@@ -287,16 +287,21 @@ function renderDocuments(){
   <div class="row"><button class="btn small" data-action="doc-open" data-id="${x(d.id)}">Прочитать</button><button class="btn small" data-action="doc-replace" data-key="${x(d.doc_key)}">Новая редакция</button></div>
  </div>`).join('');
  const selected=state.docSelected?docs.find(d=>d.id===state.docSelected):null;
- const year=state.yearDraft;
  const yearArchive=`<div class="panel" id="year-archive">
-   <h2 class="section-title">Итоговый документ года</h2>
-   <p class="sub">Сформировать проверяемый фактологический Year Document только из сыгранных сцен действующей ветки. Документ сохраняется в приватной библиотеке Supabase, откуда мост читает его в другом чате. В проект ChatGPT файлы автоматически не прикрепляются.</p>
-   <div class="form two" style="margin-top:14px"><div class="field"><label for="year-from">Начало года (YYYY-MM)</label><input class="input" id="year-from" placeholder="1998-09" value="${x(year?.from||'')}"></div>
-   <div class="field"><label for="year-to">Конец года (YYYY-MM)</label><input class="input" id="year-to" placeholder="1999-08" value="${x(year?.to||'')}"></div></div>
-   <p class="hint">Для учебного года, например, сентябрь 1998 — август 1999; для календарного — январь — декабрь. Сначала должна быть сохранена сцена с датой не раньше конца периода. Нет сцены — нет доказанного года.</p>
-   <div class="row" style="margin-top:12px">${btn('year-archive-build','Сформировать годовой отчёт','gold')}${year?btn('year-archive-cancel','Отменить черновик'):''}</div>
-   ${year?`<div class="doc-preview" style="margin-top:16px"><h3 class="section-title">Черновик: ${x(year.title)}</h3><p class="hint">Сцен: ${year.scene_count}; без структурированных последствий: ${year.unstructured_scenes}. Сверь важные события в разделе «История» перед утверждением.</p><pre class="doc-text">${x(year.content.slice(0,20000))}${year.content.length>20000?'\\n… Остальной текст будет сохранён целиком.':''}</pre><div class="row">${btn('year-archive-save','Утвердить и сохранить Year Document','gold')}${btn('year-archive-copy','Скопировать в проект ChatGPT')}</div></div>`:''}
-  </div>`;
+  <h2 class="section-title">Игровые этапы, checkpoint и память</h2>
+  <p class="sub">Год — это сюжетный этап, например «До Хогвартса» или «Первый курс». Он не закрывается автоматически при смене календаря. Команды выполняются через GPT и OAuth-мост, без отдельного платного API.</p>
+  <div class="field"><label for="story-stage-title">Название нового этапа</label><input class="input" id="story-stage-title" placeholder="Например: Первый курс"></div>
+  <div class="row mobile-full" style="margin-top:12px">
+   ${btn('stage-copy-open','✦ Открыть этап через ChatGPT')}
+   ${btn('stage-copy-checkpoint','✦ Создать checkpoint','gold')}
+   ${btn('stage-copy-close','✦ Закрыть этап')}
+   ${btn('stage-copy-resume','✦ Новый чат: восстановить память')}
+  </div>
+  <p class="hint">Checkpoint переносит накопленное состояние, эмоциональные последствия и последние полные сцены между чатами, не закрывая этап. Year Document закрывает этап только по твоей команде, сохраняя прежние события и личные воспоминания для будущих отсылок.</p>
+  <div class="field" style="margin-top:14px"><label for="story-memory-query">Найти старую шутку, фразу, обещание, подарок или событие</label><input class="input" id="story-memory-query" placeholder="Например: обещанная книга"></div>
+  <div class="row">${btn('stage-copy-search','✦ Найти воспоминание через ChatGPT')}</div>
+  <p class="footnote">Кнопки копируют команды для GPT. Они не меняют историю сами. Все данные и исходные сцены хранятся в приватной Supabase-библиотеке, отменённые ветки исключаются.</p>
+ </div>`;
  const preview=selected?`<div class="panel doc-preview"><h3 class="section-title">${x(selected.title)} · редакция ${x(selected.revision)}</h3><p class="hint">Показывается текст, извлечённый из исходного документа. Данные приватны для владельца мира.</p>${state.docContent!==null?`<pre class="doc-text">${x(state.docContent.slice(0,30000))}${state.docContent.length>30000?'\n… Отображены первые 30 000 символов. Полная версия сохранена в Supabase.':''}</pre>`:'<p>Загрузка текста…</p>'}<div class="row">${btn('doc-close','Закрыть')}${state.docContent?btn('doc-copy','Скопировать полную редакцию'):''}</div></div>`:'';
  return header+importToggle+reusable+yearArchive+`<div class="panel">
    <h2 class="section-title">Загрузить документы мира</h2>
@@ -1019,47 +1024,35 @@ case 'docs-copy-shared':{
  return;
 }
 case 'docs-refresh':await loadDocuments();render();return;
-case 'year-archive-build':{
- if(!state.world?.genesis_approved)throw Error('Сначала утверди Генезис и сохрани сцены.');
- const from=document.getElementById('year-from')?.value?.trim();
- const to=document.getElementById('year-to')?.value?.trim();
- await loadScenes();
- await loadAssets(false);
- const branch=state.branches.find(b=>b.id===state.world.active_branch_id);
- const missing=state.activeLineage.filter(scene=>{
-  const month=String(scene.world_time||'').slice(0,7);
-  return month>=from&&month<=to&&!readSceneNote(scene.prompt_note);
- });
- const bodies=new Map();
- for(let i=0;i<Math.min(missing.length,80);i+=20){
-  const ids=missing.slice(i,i+20).map(row=>row.id);
-  const rows=dataOrThrow(await state.client.from('lw_scenes').select('id,body')
-   .eq('world_id',state.world.id).in('id',ids));
-  for(const row of rows)if(typeof row.body==='string')bodies.set(row.id,row.body);
- }
- const completeLineage=state.activeLineage.map(scene=>bodies.has(scene.id)?
-  {...scene,body:bodies.get(scene.id)}:scene);
- state.yearDraft=buildYearArchive({world:state.world,branch,scenes:completeLineage,characters:state.characters,from,to});
- render();notify('Годовой архив сформирован. Проверь, затем утверди его сохранение.');return;
+case 'stage-copy-open':{
+ const title=document.getElementById('story-stage-title')?.value?.trim();
+ if(!title||title.length>120)throw Error('Введи название этапа.');
+ const branch=state.branches.find(b=>b.id===state.world?.active_branch_id);
+ if(!branch)throw Error('Выбери действующую ветку.');
+ await clipboard('LIVING WORLD Bridge OAuth. Открой сюжетный этап '+JSON.stringify(title)+' для мира '+state.world.id+'. Сначала get_story_stage_state, затем open_story_stage с title='+JSON.stringify(title)+', expected_head='+JSON.stringify(branch.head_scene_id)+'. Не создавай сцену и не закрывай год по календарю. Проверь результат.');
+ return;
 }
-case 'year-archive-cancel':state.yearDraft=null;render();return;
-case 'year-archive-copy':{
- if(!state.yearDraft)throw Error('Сначала сформируй документ.');
- await clipboard(state.yearDraft.content);return;
+case 'stage-copy-checkpoint':{
+ const branch=state.branches.find(b=>b.id===state.world?.active_branch_id);
+ if(!branch?.head_scene_id)throw Error('Сначала сохрани сцену.');
+ await clipboard('LIVING WORLD Bridge OAuth. СОЗДАЙ CHECKPOINT для перехода в новый чат, мир '+state.world.id+'. Сначала get_story_stage_state, затем create_chat_checkpoint с expected_head='+branch.head_scene_id+'. Сформируй handoff_note из реальных событий и точных evidence_scene_ids: текущий разговор, физическое состояние, эмоции, характеры, отношения, обещания и незавершённое. Не закрывай этап. Подтверди persisted:true, doc_key и revision.');
+ return;
 }
-case 'year-archive-save':{
- const draft=state.yearDraft;
- if(!draft||!state.world)throw Error('Нет годового отчёта для сохранения.');
- await refreshWorldAndBranch();
- const branch=state.branches.find(b=>b.id===state.world.active_branch_id);
- if(state.world.id!==draft.content.match(/^LW_ARCHIVE_WORLD_ID: (.+)$/m)?.[1]||
-   branch?.id!==draft.branch_id||branch?.head_scene_id!==draft.source_head)
-   throw Error('Состояние мира изменилось после создания отчёта. Пересобери годовой архив.');
- const saved=await insertDocument({title:draft.title,category:'year_document',
-   filename:'YEAR_DOCUMENT_'+draft.from+'_'+draft.to+'.md',text:draft.content,existingKey:draft.key});
- state.yearDraft=null;await loadDocuments();render();
- notify(saved.skipped?'Этот Year Document уже сохранён.':
-   'Year Document сохранён в Supabase. Его можно прочитать через OAuth-мост в другом чате.');
+case 'stage-copy-close':{
+ const branch=state.branches.find(b=>b.id===state.world?.active_branch_id);
+ if(!branch?.head_scene_id)throw Error('Нет сцен для завершения этапа.');
+ await clipboard('LIVING WORLD Bridge OAuth. Я явно прошу ЗАКРЫТЬ текущий ИМЕНОВАННЫЙ этап мира '+state.world.id+'. Сначала get_story_stage_state, затем close_story_stage с expected_head='+branch.head_scene_id+'. Сохрани Year Document со всеми действительными событиями, воспоминаниями, обещаниями, отношениями и ресурсами. Проверь persisted:true. Следующий этап не открывай, пока я не назову.');
+ return;
+}
+case 'stage-copy-resume':{
+ if(!state.world)throw Error('Выбери мир.');
+ await clipboard('LIVING WORLD Bridge OAuth. Продолжи историю в НОВОМ чате. Вызови get_resume_context для мира '+state.world.id+' и дочитай полный последний валидный checkpoint (через next_offset до null), Year Documents завершённых этапов и сцены после checkpoint. Восстанови характеры, отношения, знания, эмоциональный фон, текущее положение, вещи и обещания. По старым отсылкам search_story_memories и get_story_scene. Не выдумывай. Перед следующей сценой get_scene_preflight, а после — save_scene_auto с токеном.');
+ return;
+}
+case 'stage-copy-search':{
+ const q=document.getElementById('story-memory-query')?.value?.trim();
+ if(!q)throw Error('Введи тему воспоминания.');
+ await clipboard('LIVING WORLD Bridge OAuth. Найди старую реплику, обещание или событие в действительной истории мира '+state.world.id+' по запросу '+JSON.stringify(q)+'. Вызови search_story_memories и при необходимости get_story_scene. Проверь источники, кому событие действительно известно, как изменилась его значимость. Исключи отменённые сцены.');
  return;
 }
 case 'docs-import':{
