@@ -479,12 +479,22 @@ async function loadAssets(refreshHead=true){
  const branch=state.branches.find(b=>b.id===w.active_branch_id);
  if(!branch)throw Error('Действующая ветка не найдена.');
  const all=[];
- for(let offset=0;offset<=3000;offset+=500){
-  const res=state.client.from('lw_scenes').select('id,parent_scene_id,world_time,prompt_note').eq('world_id',w.id).order('created_at',{ascending:true}).range(offset,offset+499);
+ const maxRows=30000,pageSize=500;
+ for(let offset=0;offset<=maxRows;offset+=pageSize){
+  const res=state.client.from('lw_scenes').select('id,parent_scene_id,world_time,prompt_note').eq('world_id',w.id)
+   .order('created_at',{ascending:true}).order('id',{ascending:true}).range(offset,offset+pageSize-1);
   const page=dataOrThrow(await res);
-  if((offset===3000 && page.length>0)||all.length+page.length>3000)throw Error('Не удалось пересчитать активы: больше 3000 сцен. Требуется долговременный checkpoint.');
+  if(all.length+page.length>maxRows){
+   state.assets=null;state.characterLedger=null;state.causalLedger=null;
+   throw Error('История содержит более 30 000 записей. Они не удалены, но полный пересчёт активов в приложении ограничен. Нужна проверка checkpoint.');
+  }
   all.push(...page);
-  if(page.length<500||offset===3000)break;
+  if(page.length<pageSize)break;
+ }
+ const latestHead=dataOrThrow(await state.client.from('lw_branches').select('head_scene_id').eq('id',branch.id).single());
+ if(latestHead.head_scene_id!==branch.head_scene_id){
+  state.assets=null;state.characterLedger=null;state.causalLedger=null;
+  throw Error('Ветка изменилась во время чтения истории. Перечитай её перед продолжением.');
  }
  const lineage=activeLineage(all,branch.head_scene_id);
  state.activeLineage=lineage;
