@@ -595,8 +595,8 @@ async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,ass
 /** Internal automatic system archive. The owner already authorized yearly archival.
  * The user-facing document-import permission is separate and remains unchanged.
  */
-async function writeSystemArchive(env,identity,worldId,{key,title,category,content}){
- if(!['year_document','checkpoint'].includes(category)||
+async function writeSystemArchive(env,identity,worldId,{key,title,category,content,expectedRevision=null}){
+ if(!['year_document','checkpoint','other'].includes(category)||
   !/^[a-z0-9][a-z0-9._-]{2,127}$/.test(key)||
   !content||content.length>700000)throw Error('Некорректный или слишком большой системный архив.');
  const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(content));
@@ -605,68 +605,67 @@ async function writeSystemArchive(env,identity,worldId,{key,title,category,conte
   '&doc_key=eq.'+encodeURIComponent(key)+'&select=id,revision,sha256&order=revision.desc&limit=1';
  const existing=await supabase(env,path,{token:identity.token});
  if(!Array.isArray(existing))throw Error('Нельзя проверить системный архив.');
+ if(expectedRevision!==null&&Number(existing[0]?.revision||0)!==expectedRevision)
+  throw Error('Состояние этапов изменилось параллельно. Перечитай этап перед записью.');
  if(existing[0]?.sha256===digest)return {key,revision:existing[0].revision,unchanged:true};
  const revision=existing[0]?existing[0].revision+1:1;
  await supabase(env,'/rest/v1/lw_reference_docs',{token:identity.token,method:'POST',
   body:{world_id:worldId,doc_key:key,revision,category,title,
-   source_filename:category==='checkpoint'?'checkpoint.json':'year-document.md',
+   source_filename:category==='checkpoint'?'checkpoint.json':category==='other'?'stage-control.json':'year-document.md',
    content,sha256:digest}});
  return {key,revision,unchanged:false};
 }
 /** Archive only completed years that contain played scenes. Full valid ancestry matters:
  * after a fork the report is rebuilt and invalidated events stay excluded.
  */
-async function archiveElapsedYears(env,identity,worldId,previousTime,nowTime){
- const before=Number(String(previousTime||'').slice(0,4));
- const after=Number(String(nowTime||'').slice(0,4));
- if(!Number.isInteger(before)||!Number.isInteger(after)||after<=before)
-  return {status:'not_due'};
- if(after-before>20)return {status:'needs_review',reason:'Переход через 20 лет требует ручной проверки.'};
- const full=await loadFullWorldLineage(env,identity,worldId);
- if(!full.complete)return {status:'needs_review',reason:full.reason};
- const {world,branch,characters}=full.state;
- const records=[],warnings=[];
- for(let year=before;year<after;year++){
-  if(!full.lineage.some(s=>String(s.world_time||'').slice(0,4)===String(year)))continue;
-  const from=String(year).padStart(4,'0')+'-01',to=String(year).padStart(4,'0')+'-12';
-  try{
-   const validScenes=await hydrateActiveYearTexts(env,identity,worldId,full.lineage,[{from,to}]);
-   const doc=buildYearArchive({world,branch,scenes:validScenes,characters:characters||[],from,to});
-   const saved=await writeSystemArchive(env,identity,worldId,
-    {key:doc.key,title:doc.title,category:'year_document',content:doc.content});
-   records.push({year,document:saved,source_head:doc.year_end_head,scenes:doc.scene_count});
-   if(doc.unstructured_scenes)warnings.push('Год '+year+': есть сцены без структурированных последствий.');
-  }catch(error){warnings.push('Год '+year+': '+String(error?.message||error));}
- }
- if(records.length){
-  try{
-   const read=scene=>readSceneNote(scene.prompt_note)?.delta||{};
-   const money=projectCompanion(full.lineage,{getDelta:read});
-   const actors=projectCharacterMemory(characters||[],full.lineage,{getDelta:read});
-   const plot=projectCausalMemory(full.lineage,{getDelta:read});
-   const snapshot={
-    format:'LW_STATE_CHECKPOINT_V1',world_id:worldId,branch_id:branch.id,
-    source_head:branch.head_scene_id,world_time:nowTime,scene_count:full.lineage.length,
-    // Confirmed current state and outstanding obligations, not a replacement for past scene texts.
-    characters:actors.characters.map(a=>({name:a.name,origin:a.origin,initial:a.initial,
-      introduced_scene_id:a.introduced_scene_id,state:a.state,
-      knowledge:a.knowledge,beliefs:a.beliefs})),
-    accounts:money.accounts.map(a=>({person:a.person,currency:a.currency,scale:a.scale,
-      known:a.known,balance:a.balance,observed_delta:a.observed_delta})),
-    items:money.items.map(i=>({id:i.id,label:i.label,owner:i.owner,holder:i.holder,
-      location:i.location,condition:i.condition,exists:i.exists})),
-    new_characters:money.new_characters,
-    open_threads:plot.open_threads,resolved_threads:plot.resolved_threads,
-    counts:plot.counts,issues:[...money.issues,...actors.warnings,...plot.warnings]
-   };
-   const archived=await writeSystemArchive(env,identity,worldId,{
-    key:'state-checkpoint-'+String(after).padStart(4,'0')+'-'+branch.id,
-    title:'STATE CHECKPOINT · '+after+' · '+world.name,
-    category:'checkpoint',content:JSON.stringify(snapshot)});
-   records.push({checkpoint:archived,source_head:branch.head_scene_id});
-  }catch(error){warnings.push('Checkpoint: '+String(error?.message||error));}
- }
- return {status:warnings.length?'partial':'archived',records,warnings};
+/** Stage transitions use immutable document revisions. Nothing closes on January 1st. */
+async function loadStageState(env,identity,id,lineage){
+ const rows=await supabase(env,'/rest/v1/lw_reference_docs?world_id=eq.'+encodeURIComponent(id)+
+  '&doc_key=eq.'+STAGE_CONTROL_KEY+
+  '&select=id,revision,content,sha256&order=revision.desc&limit=500',
+  {token:identity.token});
+ if(!Array.isArray(rows))throw Error('Библиотека игровых этапов недоступна.');
+ return chooseStageControl(rows,lineage,id);
+}
+function activeStageOrDefault(control){
+ return control.state.open_stage||{
+  id:null,title:'Текущий незакрытый этап',
+  start_after_scene_id:control.state.closed_stages.at(-1)?.end_scene_id||null
+ };
+}
+async function hydrateRecentForMemory(env,identity,id,lineage,count=3){
+ const ids=lineage.slice(-count).map(s=>s.id);
+ if(!ids.length)return lineage;
+ const rows=await supabase(env,'/rest/v1/lw_scenes?world_id=eq.'+encodeURIComponent(id)+
+  '&id=in.('+ids.join(',')+')&select=id,body,world_time,prompt_note',
+  {token:identity.token});
+ if(!Array.isArray(rows))throw Error('Не удалось загрузить последние полные сцены.');
+ const bodies=new Map(rows.map(s=>[s.id,s]));
+ return lineage.map(s=>bodies.has(s.id)?{...s,...bodies.get(s.id)}:s);
+}
+async function fullMemoryState(env,identity,id){
+ const full=await loadFullWorldLineage(env,identity,id);
+ if(!full.complete)throw Error('Полная действующая история не восстановлена: '+full.reason);
+ if(!full.lineage.length||full.state.branch.head_scene_id!==full.lineage.at(-1).id)
+  throw Error('Для этой операции требуется хотя бы одна валидная сцена.');
+ const stages=await loadStageState(env,identity,id,full.lineage);
+ return {full,stages,head:full.state.branch.head_scene_id};
+}
+async function assertMemoryHead(env,identity,id,expectedHead,sourceBranch){
+ const state=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_state',
+  {token:identity.token,body:{p_world:id}});
+ if(state?.branch?.id!==sourceBranch||state.branch.head_scene_id!==expectedHead)
+  throw Error('Действующая ветка изменилась. Перечитай историю перед закрытием этапа.');
+ return state;
+}
+async function persistStageControl(env,identity,id,stages,head,branchId,patch){
+ return writeSystemArchive(env,identity,id,{
+  key:STAGE_CONTROL_KEY,title:'Управление игровыми этапами LIVING WORLD',
+  category:'other',
+  content:JSON.stringify({format:STAGE_CONTROL_FORMAT,world_id:id,
+   source_head:head,branch_id:branchId,
+   open_stage:patch.open_stage??null,closed_stages:patch.closed_stages||[]}),
+  expectedRevision:stages.latest_revision});
 }
 async function loadFullWorldLineage(env,identity,id){
  const state=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_state',{token:identity.token,body:{p_world:id}});
