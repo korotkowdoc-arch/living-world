@@ -13,6 +13,7 @@ const env={
   SUPABASE_OAUTH_CLIENT_ID:'f08a0ef2-bdfc-4d0d-b9ab-ce900c85e0d6',
   BRIDGE_SUPABASE_USER_ID:'0a3fbf41-c3c6-4743-a88c-f9a7870fd244',
   SUPABASE_PUBLISHABLE_KEY:'public-test-value',
+  BRIDGE_SEAL_KEY:'a'.repeat(43),
   BRIDGE_WRITES_ENABLED:'false'
 };
 const call=(method,params={},headers={},config=env)=>bridge.fetch(new Request(root+'/mcp',{
