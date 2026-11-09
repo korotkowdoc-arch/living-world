@@ -11,6 +11,7 @@ import {projectCausalMemory,searchCausalMemory} from './world-causality.mjs';
 import {persistWorldAutosave} from './world-autosave.mjs';
 import {projectCharacterMemory} from './world-character-memory.mjs';
 import {buildYearArchive} from './year-archive.mjs';
+import {companionSettings,mergeCompanionPreferences} from './companion-settings.mjs';
 
 const app=document.getElementById('app');
 const cfgKey='lw_cloud_config_v03'; // Preserve the existing Supabase connection when upgrading.
@@ -18,6 +19,7 @@ const state={config:readConfig(),client:null,session:null,user:null,worlds:[],wo
 const x=v=>esc(v??'');
 // Historical start and current narrative period are separate; don't fabricate a date.
 const storyClock=(w=state.world)=>state.scenes.at(-1)?.world_time||w?.genesis_choices?.current_period||(w?.genesis_approved?'':w?.clock_start)||'';
+const uiCompanion=(world=state.world)=>companionSettings(world,state.branches.find(b=>b.id===world?.active_branch_id)?.head_scene_id||null,storyClock(world));
 const opt=(value,label,selected)=>`<option value="${x(value)}" ${String(value)===String(selected)?'selected':''}>${x(label)}</option>`;
 const btn=(id,label,cls='')=>`<button type="button" class="btn ${cls}" data-action="${id}">${label}</button>`;
 const f=(name,label,value='',type='text',hint='')=>`<div class="field"><label for="f-${name}">${x(label)}</label>${type==='textarea'?`<textarea id="f-${name}" name="${x(name)}">${x(value)}</textarea>`:`<input id="f-${name}" class="input" type="${type}" name="${x(name)}" value="${x(value)}"${name==='email'?' autocomplete="username"':name==='password'?' autocomplete="current-password"':type==='password'?' autocomplete="new-password"':''}>`}${hint?`<div class="hint">${x(hint)}</div>`:''}</div>`;
@@ -206,23 +208,23 @@ function renderSimulationPanel(w){
  const scene=state.memoryScenes.at(-1);
  const decisions=mode!=='off'?(readSceneNote(scene?.prompt_note)?.decisions||[]):[];
  const choiceKey=scene?'lw_sim_choice_'+w.id+'_'+scene.id:'';
- const savedChoice=choiceKey?localStorage.getItem(choiceKey)||'':'';
+ const savedChoice=uiCompanion(w).pending_decision?.source_scene_id===scene?.id?uiCompanion(w).pending_decision.choice_id:'';
  const controls=`<div class="sim-modes">
    <button type="button" class="mode-tile ${mode==='life'?'active':''}" data-action="sim-mode" data-mode="life" aria-pressed="${mode==='life'}"><strong>Прогон жизни</strong><small>Последовательно проживать предысторию, формируя характер</small></button>
    <button type="button" class="mode-tile ${mode==='skip'?'active':''}" data-action="sim-mode" data-mode="skip" aria-pressed="${mode==='skip'}"><strong>Ускорение времени</strong><small>Пропускать рутину, сохраняя значимые события и решения</small></button>
    <button type="button" class="mode-tile ${mode==='off'?'active':''}" data-action="sim-mode" data-mode="off" aria-pressed="${mode==='off'}"><strong>Начать играть отсюда / Стоп</strong><small>Вернуться к большим литературным сценам в текущей точке</small></button>
  </div>`;
  const decisionUI=decisions.length?`<div class="sim-decisions"><div class="eyebrow">Выбери, что будет делать герой дальше</div>${decisions.map(d=>`<button type="button" data-action="sim-choice" data-choice="${x(d.id)}" class="quick-option ${savedChoice===d.id?'active':''}"><strong>${x(d.label)}</strong><small>${x(d.description)}</small></button>`).join('')}</div>`:'';
- const panel=mode==='off'?'':`<div class="row" style="align-items:flex-end;margin-top:16px"><div class="field" style="min-width:180px"><label>Один шаг симуляции (максимум)</label><select id="sim-span">${SIMULATION_SPANS.map(p=>opt(p.id,p.label,'quarter')).join('')}</select></div>${aiButton('sim-auto','⚡ Автоматически продвинуть время')}${btn('sim-copy','Скопировать запрос симуляции')}${btn('open-chatgpt','Открыть ChatGPT')}</div>${decisionUI}<p class="footnote">Каждый шаг требует запроса к ИИ и утверждения последствий. Пока прямой AI-интеграции нет, приложение не умеет автоматически прогонять годы без копирования запроса. Можно остановиться в любой момент, выбрав «Начать играть отсюда / Стоп».</p>`;
+ const panel=mode==='off'?'':`<div class="row" style="align-items:flex-end;margin-top:16px"><div class="field" style="min-width:180px"><label>Один шаг симуляции (максимум)</label><select id="sim-span">${SIMULATION_SPANS.map(p=>opt(p.id,p.label,uiCompanion(w).simulation_span)).join('')}</select></div>${aiButton('sim-auto','⚡ Автоматически продвинуть время')}${btn('sim-copy','Скопировать запрос симуляции')}${btn('open-chatgpt','Открыть ChatGPT')}</div>${decisionUI}<p class="footnote">Каждый шаг требует запроса к ИИ и утверждения последствий. Пока прямой AI-интеграции нет, приложение не умеет автоматически прогонять годы без копирования запроса. Можно остановиться в любой момент, выбрав «Начать играть отсюда / Стоп».</p>`;
  return `<div class="panel" style="margin-bottom:18px"><h2 class="section-title">Время и жизнь персонажа</h2><p class="sub">Режимы используют ту же действующую ветку, её память и текущую дату. Переключение не отменяет прошлое.</p>${controls}${panel}</div>`;
 }
 
 function renderStory(){const w=state.world;if(!w)return needsWorld();const b=state.branches.find(b=>b.id===w.active_branch_id);const action=btn('story-reload','Перечитать сцены')+btn('goto-memory','Память действующей ветки')+btn('goto-assets','Деньги и вещи')+btn('goto-documents','Источники');
 const storyLabel=x(String(w.model_story||'gpt-6').toUpperCase())+' · Высокое';
 const relationLabel=x(String(w.model_relationships||'gpt-5.6').toUpperCase())+' · Высокое';
-const storyMode=state.storyMode==='relationship'?'relationship':'story';
+const storyMode=uiCompanion(w).scene_mode;
 const modeSelector=`<div class="eyebrow" style="margin-bottom:9px">Режим следующей сцены</div><div class="mode-choices" role="group" aria-label="Выбор режима запроса для ChatGPT"><button type="button" class="mode-tile ${storyMode==='story'?'active':''}" data-action="set-story-mode" data-mode="story" aria-pressed="${storyMode==='story'}"><strong>${storyLabel}</strong><small>Сюжет · Мир · Причинность</small></button><button type="button" class="mode-tile ${storyMode==='relationship'?'active':''}" data-action="set-story-mode" data-mode="relationship" aria-pressed="${storyMode==='relationship'}"><strong>${relationLabel}</strong><small>Отношения · Диалоги · Психология</small></button></div><p class="hint" id="story-mode-status" style="margin:9px 0 17px">Выбран режим ${storyMode==='relationship'?relationLabel:storyLabel}. ${state.aiReady?'При нажатии «Продолжить» будет вызвана соответствующая API-модель с высоким уровнем рассуждения.':'AI пока не подключён: в ChatGPT модель и уровень выбираются вручную.'} Память мира одна.</p>`;
-return `${heading('Архив сцен',w.name,'Полные сцены ведём в ChatGPT. Здесь сохраняются причинность, история и исправленные ветки.',action)}<div class="attention" style="margin-bottom:18px">Основной игровой режим: продолжай историю в ChatGPT. Подключённый MCP-мост читает память и записывает валидные последствия. Копирование текста и отдельный API-ключ для этого не требуются. Для записи без страницы подтверждения один раз включи автосохранение в «Настройках» выбранного мира.</div><div class="panel" style="margin-bottom:18px"><div class="row between"><span class="pill">Ветка: ${x(b?.name||'не выбрана')}</span><span class="tiny">${state.scenes.length} сцен на экране · время ${x(storyClock(w))}</span></div><div class="divider"></div>${modeSelector}<div class="form two"><div class="field"><label>Объём следующей художественной сцены</label><select id="scene-length">${opt("normal","Обычная · 1 500–3 000 слов",state.sceneLength)}${opt("large","Большая · 3 000–5 000 слов",state.sceneLength)}${opt("detailed","Подробная · 5 000–8 000 слов",state.sceneLength)}</select><p class="hint">Это ориентир для ChatGPT, а не гарантированный размер ответа. Продолжение большого эпизода может потребовать нескольких ответов.</p></div><div class="field"><label>Игровое время новой сцены</label><input class="input" id="story-clock" value="${x(storyClock(w))}" placeholder="Например, 1999-06 — день неизвестен"></div><div class="span2 field"><label>Режиссёрское уточнение (необязательно)</label><textarea id="story-note" style="min-height:75px" placeholder="Например: покажи развитие конфликта без канонической подгонки"></textarea></div></div><p class="footnote">Укажи текущий период; можно записать только месяц (например, 1999-06), не придумывая день. JSON-пакет сохраняет структурированные последствия, обычная сцена — только текст. ${x(state.aiReady?'Автоматический API подключён.':'Автоматический API не подключён: '+state.aiReason)} Причинная память автоматически охватывает максимум 200 последних сцен без гарантированного переноса старых фактов.</p><div class="row mobile-full" style="margin-top:12px">${aiButton('auto-scene','▶ Продолжить историю автоматически')}${btn('copy-scene-packet','Запрос с памятью (JSON)')}${btn('copy-scene-prompt','Простой текстовый запрос')}${btn('open-chatgpt','Открыть ChatGPT')}</div></div>${renderSimulationPanel(w)}${state.scenes.length?state.scenes.map((s,i)=>`<article class="scene"><div class="meta"><span>СЦЕНА ${String(i+1).padStart(3,'0')} · ${x(s.model)}</span><span>${x(s.world_time)}</span></div><div class="body">${x(s.body)}</div><div class="actions"><button class="btn small" data-action="revise" data-id="${x(s.id)}">✎ На это</button></div></article>`).join(''):`<div class="well"><h3>История ещё не началась</h3><p>Создай начальную ситуацию, затем попроси ChatGPT написать первую сцену и вставь её сюда.</p></div>`}<div class="panel"><h2 class="section-title">Добавить сцену</h2><p class="sub">Вставь текст, полученный от ChatGPT, или напиши свой. После сохранения сцена войдёт в текущую ветку.</p><form id="scene-form" class="form" style="margin-top:15px"><div class="field"><label>Текст сцены</label><textarea name="body" style="min-height:180px" placeholder="Вставь сюда новую сцену..."></textarea></div><button class="btn gold full" type="submit">Сохранить сцену в облаке</button></form></div><details class="panel" style="margin-bottom:18px"><summary style="cursor:pointer;font-weight:750">Вставить пакет ИИ: сцена + последствия (JSON)</summary><p class="sub" style="margin-top:12px">Скопируй «Запрос с памятью (JSON)», получи ответ в ChatGPT и вставь его целиком сюда. Только утверждённые изменения войдут в память активной ветки; в отменённой ветке они не сохраняются.</p><form id="scene-package-form" class="form" style="margin-top:12px"><div class="field"><label>Ответ ChatGPT (JSON)</label><textarea name="payload" style="min-height:190px" placeholder='{"scene":"...","world_time":"1999-06","changes":{"facts":[],"open_threads":[],"resolved_threads":[],"offscreen_events":[],"characters":[]}}'></textarea></div><button class="btn gold full" type="submit">Проверить, сохранить сцену и последствия</button></form></details>${state.scenes.length>=state.recentLimit?`<p style="text-align:center">${btn('load-more','Показать более ранние сцены')}</p>`:''}`;}
+return `${heading('Архив сцен',w.name,'Полные сцены ведём в ChatGPT. Здесь сохраняются причинность, история и исправленные ветки.',action)}<div class="attention" style="margin-bottom:18px">Основной игровой режим: продолжай историю в ChatGPT. Подключённый MCP-мост читает память и записывает валидные последствия. Копирование текста и отдельный API-ключ для этого не требуются. Для записи без страницы подтверждения один раз включи автосохранение в «Настройках» выбранного мира.</div><div class="panel" style="margin-bottom:18px"><div class="row between"><span class="pill">Ветка: ${x(b?.name||'не выбрана')}</span><span class="tiny">${state.scenes.length} сцен на экране · время ${x(storyClock(w))}</span></div><div class="divider"></div>${modeSelector}<div class="form two"><div class="field"><label>Объём следующей художественной сцены</label><select id="scene-length">${opt("normal","Обычная · 1 500–3 000 слов",uiCompanion(w).scene_length)}${opt("large","Большая · 3 000–5 000 слов",uiCompanion(w).scene_length)}${opt("detailed","Подробная · 5 000–8 000 слов",uiCompanion(w).scene_length)}</select><p class="hint">Это ориентир для ChatGPT, а не гарантированный размер ответа. Продолжение большого эпизода может потребовать нескольких ответов.</p></div><div class="field"><label>Игровое время новой сцены</label><input class="input" id="story-clock" value="${x(uiCompanion(w).next_scene_time||storyClock(w))}" placeholder="Например, 1999-06 — день неизвестен"></div><div class="span2 field"><label>Режиссёрское уточнение (необязательно)</label><textarea id="story-note" style="min-height:75px" placeholder="Например: покажи развитие конфликта без канонической подгонки">${x(uiCompanion(w).director_note)}</textarea></div></div><p class="footnote">Укажи текущий период; можно записать только месяц (например, 1999-06), не придумывая день. JSON-пакет сохраняет структурированные последствия, обычная сцена — только текст. ${x(state.aiReady?'Автоматический API подключён.':'Автоматический API не подключён: '+state.aiReason)} Причинная память автоматически охватывает максимум 200 последних сцен без гарантированного переноса старых фактов.</p><div class="row mobile-full" style="margin-top:12px">${aiButton('auto-scene','▶ Продолжить историю автоматически')}${btn('copy-scene-packet','Запрос с памятью (JSON)')}${btn('copy-scene-prompt','Простой текстовый запрос')}${btn('open-chatgpt','Открыть ChatGPT')}</div></div>${renderSimulationPanel(w)}${state.scenes.length?state.scenes.map((s,i)=>`<article class="scene"><div class="meta"><span>СЦЕНА ${String(i+1).padStart(3,'0')} · ${x(s.model)}</span><span>${x(s.world_time)}</span></div><div class="body">${x(s.body)}</div><div class="actions"><button class="btn small" data-action="revise" data-id="${x(s.id)}">✎ На это</button></div></article>`).join(''):`<div class="well"><h3>История ещё не началась</h3><p>Создай начальную ситуацию, затем попроси ChatGPT написать первую сцену и вставь её сюда.</p></div>`}<div class="panel"><h2 class="section-title">Добавить сцену</h2><p class="sub">Вставь текст, полученный от ChatGPT, или напиши свой. После сохранения сцена войдёт в текущую ветку.</p><form id="scene-form" class="form" style="margin-top:15px"><div class="field"><label>Текст сцены</label><textarea name="body" style="min-height:180px" placeholder="Вставь сюда новую сцену..."></textarea></div><button class="btn gold full" type="submit">Сохранить сцену в облаке</button></form></div><details class="panel" style="margin-bottom:18px"><summary style="cursor:pointer;font-weight:750">Вставить пакет ИИ: сцена + последствия (JSON)</summary><p class="sub" style="margin-top:12px">Скопируй «Запрос с памятью (JSON)», получи ответ в ChatGPT и вставь его целиком сюда. Только утверждённые изменения войдут в память активной ветки; в отменённой ветке они не сохраняются.</p><form id="scene-package-form" class="form" style="margin-top:12px"><div class="field"><label>Ответ ChatGPT (JSON)</label><textarea name="payload" style="min-height:190px" placeholder='{"scene":"...","world_time":"1999-06","changes":{"facts":[],"open_threads":[],"resolved_threads":[],"offscreen_events":[],"characters":[]}}'></textarea></div><button class="btn gold full" type="submit">Проверить, сохранить сцену и последствия</button></form></details>${state.scenes.length>=state.recentLimit?`<p style="text-align:center">${btn('load-more','Показать более ранние сцены')}</p>`:''}`;}
 
 
 function renderDocuments(){
@@ -387,7 +389,31 @@ function aiButton(id,title){
 }
 async function connect(){if(!state.config)return;const {url,key}=state.config;if(!/^https:\/\/[a-z0-9.-]+\.supabase\.co\/?$/i.test(url)||!key)throw Error('Некорректный Project URL или ключ Supabase.');const sdk=await import('https://esm.sh/@supabase/supabase-js@2');state.client=sdk.createClient(url,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});const result=await state.client.auth.getSession();if(result.error)throw result.error;state.session=result.data.session;state.user=state.session?.user||null;state.client.auth.onAuthStateChange((_event,session)=>{const old=state.user?.id;state.session=session;state.user=session?.user||null;if(state.user&&!old){loadWorlds().then(render).catch(e=>notify(errtext(e),true));}else if(!state.user){state.world=null;state.worlds=[];render();}});if(state.user)await loadWorlds();await checkAiConnection();}
 async function loadWorlds(){state.worlds=dataOrThrow(await state.client.from('lw_worlds').select('*').order('updated_at',{ascending:false}));}
-async function openWorld(id){state.assets=null;state.assetIssue=null;state.lastSceneRefreshAt=null;state.activeLineage=[];state.yearDraft=null;state.documents=[];state.documentsReady=null;state.documentsError='';state.docSelected=null;state.docContent=null;state.characterLedger=null;state.causalLedger=null;state.memoryQuery='';state.memoryKind='fact';state.memoryOffset=0;state.world=dataOrThrow(await state.client.from('lw_worlds').select('*').eq('id',id).single());const savedAnswers=state.world.genesis_choices?.quick_answers;state.quickAnswers=Array.isArray(savedAnswers)?savedAnswers.slice(0,QUICK_GENESIS_STEPS.length):[];state.quickStep=state.quickAnswers.length===QUICK_GENESIS_STEPS.length?QUICK_GENESIS_STEPS.length:0;state.storyMode=localStorage.getItem('lw_story_mode_'+id)==='relationship'?'relationship':'story';state.sceneLength=['normal','large','detailed'].includes(localStorage.getItem('lw_scene_length_'+id))?localStorage.getItem('lw_scene_length_'+id):'large';const [chars,branches]=await Promise.all([state.client.from('lw_characters').select('*').eq('world_id',id).order('created_at'),state.client.from('lw_branches').select('*').eq('world_id',id).order('created_at')]);state.characters=dataOrThrow(chars);state.branches=dataOrThrow(branches);if(!state.world.active_branch_id && state.branches[0]){state.world.active_branch_id=state.branches[0].id;dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:state.world.active_branch_id}).eq('id',id));}await loadScenes();await loadDocuments();}
+async function openWorld(id){state.assets=null;state.assetIssue=null;state.lastSceneRefreshAt=null;state.activeLineage=[];state.yearDraft=null;state.documents=[];state.documentsReady=null;state.documentsError='';state.docSelected=null;state.docContent=null;state.characterLedger=null;state.causalLedger=null;state.memoryQuery='';state.memoryKind='fact';state.memoryOffset=0;state.world=dataOrThrow(await state.client.from('lw_worlds').select('*').eq('id',id).single());const savedAnswers=state.world.genesis_choices?.quick_answers;state.quickAnswers=Array.isArray(savedAnswers)?savedAnswers.slice(0,QUICK_GENESIS_STEPS.length):[];state.quickStep=state.quickAnswers.length===QUICK_GENESIS_STEPS.length?QUICK_GENESIS_STEPS.length:0;const settings=companionSettings(state.world);state.storyMode=settings.scene_mode;state.sceneLength=settings.scene_length;const [chars,branches]=await Promise.all([state.client.from('lw_characters').select('*').eq('world_id',id).order('created_at'),state.client.from('lw_branches').select('*').eq('world_id',id).order('created_at')]);state.characters=dataOrThrow(chars);state.branches=dataOrThrow(branches);if(!state.world.active_branch_id && state.branches[0]){state.world.active_branch_id=state.branches[0].id;dataOrThrow(await state.client.from('lw_worlds').update({active_branch_id:state.world.active_branch_id}).eq('id',id));}await loadScenes();await loadDocuments();}
+/** Serialize device-originated changes and merge with the freshest Supabase copy.
+ * Never replace auto_save_enabled or unrelated genesis fields with stale local state.
+ */
+let companionSettingsQueue=Promise.resolve();
+function persistCompanionSettings(patch){
+ const id=state.world?.id;
+ if(!id)throw Error('Сначала выбери мир.');
+ const write=async()=>{
+  const fresh=dataOrThrow(await state.client.from('lw_worlds').select('*').eq('id',id).single());
+  const choices=mergeCompanionPreferences(fresh.genesis_choices||{},patch);
+  const updated=dataOrThrow(await state.client.from('lw_worlds')
+   .update({genesis_choices:choices}).eq('id',id).select().single());
+  if(state.world?.id===id){
+   state.world=updated;
+   const prefs=companionSettings(updated,
+    state.branches.find(b=>b.id===updated.active_branch_id)?.head_scene_id||null,storyClock(updated));
+   state.storyMode=prefs.scene_mode;state.sceneLength=prefs.scene_length;
+  }
+  return updated;
+ };
+ const work=companionSettingsQueue.then(write,write);
+ companionSettingsQueue=work.catch(()=>{});
+ return work;
+}
 async function refreshWorldAndBranch(){
  const w=state.world;
  if(!w)return;
@@ -980,40 +1006,36 @@ case 'close-modal':state.modal=null;state.revision=null;render();return;
 case 'set-story-mode':{
  const mode=el.dataset.mode;
  if(!['story','relationship'].includes(mode))throw Error('Неизвестный режим.');
- state.storyMode=mode;
+ await persistCompanionSettings({scene_mode:mode});
  localStorage.setItem('lw_story_mode_'+state.world.id,mode);
- document.querySelectorAll('[data-action="set-story-mode"]').forEach(button=>{
-  const active=button.dataset.mode===mode;
-  button.classList.toggle('active',active);
-  button.setAttribute('aria-pressed',String(active));
- });
- const status=document.getElementById('story-mode-status');
- if(status)status.textContent='Выбран режим '+(mode==='story'?String(state.world.model_story||'gpt-6').toUpperCase():String(state.world.model_relationships||'gpt-5.6').toUpperCase())+' · Высокое. Выбери модель вручную в ChatGPT; общая память сохраняется.';
- return;
+ render();notify('Режим следующей сцены сохранён в Supabase и доступен ChatGPT через OAuth-мост.');return;
 }
-
 case 'sim-mode':{
  const w=state.world;if(!w||!w.genesis_approved)throw Error('Сначала утверди Генезис.');
  const mode=el.dataset.mode;
  if(!['off','life','skip'].includes(mode))throw Error('Неизвестный режим времени.');
  const previous=w.genesis_choices?.simulation_mode||'off';
  if(mode==='life'&&state.scenes.length>0&&previous!=='life')throw Error('Прогон детства нужно начинать до первой сыгранной сцены, иначе это будет переписывание прошлого. Создай новый мир или используй обычное ускорение.');
- state.world=dataOrThrow(await state.client.from('lw_worlds').update({genesis_choices:{...(w.genesis_choices||{}),simulation_mode:mode}}).eq('id',w.id).select().single());
- render();notify(mode==='off'?'Симуляция остановлена. Полная история продолжится с текущего состояния.':mode==='life'?'Включён прогон предыстории.':'Включено ускорение времени.');return;
+ await persistCompanionSettings({simulation_mode:mode});
+ render();notify(mode==='off'?'Симуляция остановлена. ChatGPT получит команду продолжать литературные сцены.':
+  mode==='life'?'Прогон жизни сохранён в Supabase для ChatGPT.':'Ускорение времени сохранено в Supabase для ChatGPT.');return;
 }
 case 'sim-choice':{
  const w=state.world,scene=state.memoryScenes.at(-1),decisions=readSceneNote(scene?.prompt_note)?.decisions||[];
  if(!scene)throw Error('Для выбора не найдена сохранённая симуляция.');
- if(!decisions.some(d=>d.id===el.dataset.choice))throw Error('Выбор больше не действителен.');
- localStorage.setItem('lw_sim_choice_'+w.id+'_'+scene.id,el.dataset.choice);
- render();notify('Выбор сохранён на этом устройстве. Следующий запрос учтёт его последствия.');return;
+ const selected=decisions.find(d=>d.id===el.dataset.choice);
+ if(!selected)throw Error('Выбор больше не действителен.');
+ await persistCompanionSettings({pending_decision:{
+  source_scene_id:scene.id,choice_id:selected.id,label:selected.label,description:selected.description
+ }});
+ render();notify('Решение записано в Supabase — ChatGPT увидит его перед следующим этапом.');return;
 }
 case 'sim-copy':{
  const w=state.world,kind=w.genesis_choices?.simulation_mode;
  if(!['life','skip'].includes(kind))throw Error('Сначала выбери режим симуляции.');
- const span=document.getElementById('sim-span')?.value||'quarter';
+ const span=document.getElementById('sim-span')?.value||uiCompanion(w).simulation_span;
  const scene=state.memoryScenes.at(-1),decisions=readSceneNote(scene?.prompt_note)?.decisions||[];
- const chosen=scene?localStorage.getItem('lw_sim_choice_'+w.id+'_'+scene.id)||'':'';
+ const chosen=scene&&uiCompanion(w).pending_decision?.source_scene_id===scene.id?uiCompanion(w).pending_decision.choice_id:'';
  if(decisions.length&&!chosen)throw Error('Предыдущая симуляция закончилась решением. Выбери действие или нажми «Начать играть отсюда» для полной сцены.');
  const selected=decisions.find(d=>d.id===chosen);
  const decision=selected?selected.label+'. '+selected.description:'';
@@ -1038,9 +1060,9 @@ case 'sim-auto':{
  if(!['life','skip'].includes(kind))throw Error('Сначала выбери режим симуляции.');
  const scene=state.memoryScenes.at(-1);
  const decisions=readSceneNote(scene?.prompt_note)?.decisions||[];
- const chosen=scene?localStorage.getItem('lw_sim_choice_'+w.id+'_'+scene.id)||'':'';
+ const chosen=scene&&uiCompanion(w).pending_decision?.source_scene_id===scene.id?uiCompanion(w).pending_decision.choice_id:'';
  if(decisions.length&&!chosen)throw Error('Сначала выбери решение героя для следующего отрезка.');
- const result=await runAI({kind:'simulation',world_id:w.id,span:document.getElementById('sim-span')?.value||'quarter',choice_id:chosen});
+ const result=await runAI({kind:'simulation',world_id:w.id,span:document.getElementById('sim-span')?.value||uiCompanion(w).simulation_span,choice_id:chosen});
  await openWorld(w.id);state.view='story';render();
  notify('Время продвинулось до '+result.world_time+'. Сцена и последствия сохранены.');return;
 }
@@ -1105,6 +1127,20 @@ document.addEventListener('change',e=>{
  });
 });
 document.addEventListener('change',e=>{if(e.target?.id==='world-setup-source'){const choices=document.getElementById('world-setup-categories');if(choices)choices.hidden=!e.target.value;}if(e.target?.id==='world-setup-upload-files')updateWorldSetupFilesSummary();if(e.target?.id==='scene-length'&&state.world){state.sceneLength=e.target.value;localStorage.setItem('lw_scene_length_'+state.world.id,state.sceneLength);}});
+
+// A separate handler keeps autosave's native switch independent on mobile.
+document.addEventListener('change',e=>{
+ if(!state.world||state.view!=='story')return;
+ const key={ 'scene-length':'scene_length','sim-span':'simulation_span',
+  'story-clock':'next_scene_time','story-note':'director_note'}[e.target?.id];
+ if(!key)return;
+ const selected=String(e.target.value||'');
+ if(key==='scene_length')state.sceneLength=selected;
+ void persistCompanionSettings({[key]:selected}).then(()=>{
+  notify('Параметр сохранён в Supabase. Следующий запрос ChatGPT его получит.');
+ }).catch(error=>notify('Не удалось передать настройку ChatGPT: '+errtext(error),true));
+});
+
 let worldPressTimer=null,worldTouchStart=null;
 function clearWorldPress(){if(worldPressTimer!==null){clearTimeout(worldPressTimer);worldPressTimer=null;}worldTouchStart=null;}
 document.addEventListener('contextmenu',e=>{
