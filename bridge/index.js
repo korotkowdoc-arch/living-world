@@ -175,6 +175,48 @@ async function key(env,purpose) {
   if(!/^[A-Za-z0-9_-]{43}$/.test(env.BRIDGE_SEAL_KEY??'')) throw Error('Ключ шифрования не настроен.');
   return crypto.subtle.importKey('raw',await sha(purpose+':'+env.BRIDGE_SEAL_KEY),'AES-GCM',false,['encrypt','decrypt']);
 }
+const SCENE_PREFLIGHT_MAX_AGE_MS=2*60*60*1000;
+/** Fingerprint the settings and written world premise seen in GPT's preflight. */
+async function sceneContextFingerprint(world){
+ return fingerprint(JSON.stringify({
+  id:world?.id,name:world?.name,genre:world?.genre,premise:world?.premise,
+  world_rules:world?.world_rules,history:world?.history,timeline:world?.timeline,
+  clock_start:world?.clock_start,genesis_approved:world?.genesis_approved,
+  genesis_draft:world?.genesis_draft,genesis_choices:world?.genesis_choices,
+  model_story:world?.model_story,model_relationships:world?.model_relationships
+ }));
+}
+async function referenceContextFingerprint(env,identity,id){
+ if(!identity?.token)return 'demo';
+ const catalog=await sourceDocList(env,identity,id,{full:false});
+ if(!catalog.installed)return 'not-installed';
+ return fingerprint(JSON.stringify(catalog.docs.map(d=>[d.doc_key,d.revision,d.sha256])
+  .sort((a,b)=>a[0].localeCompare(b[0]))));
+}
+async function issueScenePreflight(env,identity,id,base){
+ return seal(env,'scene-preflight-v1',{
+  v:1,user:identity?.user||'demo',world:id,branch:base.branch?.id||null,
+  head:base.branch?.head_scene_id||null,world_time:base.world_time||null,
+  context:await sceneContextFingerprint(base.world),
+  sources:await referenceContextFingerprint(env,identity,id),
+  expiry:Date.now()+SCENE_PREFLIGHT_MAX_AGE_MS
+ });
+}
+async function verifyScenePreflight(env,identity,id,token,state,branchId,head){
+ if(!token)throw Error('Перед автосохранением вызови get_scene_preflight и передай выданный preflight_token.');
+ const proof=await unseal(env,'scene-preflight-v1',token);
+ if(proof?.v!==1||proof.expiry<Date.now()||
+    proof.user!==(identity?.user||'demo')||proof.world!==id)
+  throw Error('Предсценовая проверка истекла или относится к другому миру. Вызови get_scene_preflight заново.');
+ if(proof.branch!==branchId||proof.head!==head||
+    state.branch?.id!==branchId||state.branch?.head_scene_id!==head)
+  throw Error('Ветка или её последняя сцена изменились после preflight. Перечитай мир, не сохраняй устаревшее продолжение.');
+ if(proof.context!==await sceneContextFingerprint(state.world))
+  throw Error('Настройки/правила мира изменились после preflight. Перечитай параметры и пересчитай сцену.');
+ if(proof.sources!==await referenceContextFingerprint(env,identity,id))
+  throw Error('Редакции документов изменились после preflight. Сначала перечитай правила мира.');
+ return {checked:true,head,branch_id:branchId,world_time:proof.world_time};
+}
 async function seal(env,purpose,data) {
   const iv=crypto.getRandomValues(new Uint8Array(12));
   const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv},await key(env,purpose),utf8.encode(JSON.stringify(data)));
@@ -353,8 +395,9 @@ const tools = [
   { name:'get_branch_history', description:'История действующей ветки от новых сцен к старым. Для следующей страницы передай next_offset, branch.id и branch.head_scene_id. body_truncated показывает обрезку. Для полного текста одной сцены передай full_text=true и limit=1.', inputSchema:object({world_id:uuid,offset:{type:'integer',minimum:0,maximum:2000},limit:{type:'integer',minimum:1,maximum:20},branch_id:uuid,expected_head:{type:['string','null'],format:'uuid'},full_text:{type:'boolean'}},['world_id']), annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'save_scene_auto', description:'Сохраняй только реально сыгранную и согласованную сцену, если владелец включил auto_save_enabled в LIVING WORLD. Без ручного копирования: атомарная запись в действующую ветку с защитой от повторов по request_id и expected_head. Не используй для планов, отменённых сцен или неподтверждённых сумм. В мире без согласия на автосохранение инструмент отказывает.',inputSchema:object({
     world_id:uuid, branch_id:uuid, expected_head:{type:['string','null'],format:'uuid'}, request_id:uuid,
+    preflight_token:{type:'string',minLength:20,maxLength:5000,description:'Токен, полученный непосредственно из get_scene_preflight'},
     scene:{type:'string',maxLength:150000}, world_time:{type:'string',description:'Фактическое завершение сцены с известной точностью'},changes,decisions:decisionSchema
-  },['world_id','branch_id','expected_head','request_id','scene','world_time','changes']),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false} },
+  },['world_id','branch_id','expected_head','request_id','preflight_token','scene','world_time','changes']),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false} },
   { name:'save_scene_package', description:'Вызывай только по просьбе пользователя. Первый вызов без approval_code возвращает ссылку подтверждения. Покажи проверяемые текст сцены и последствия, затем ссылку пользователю и попроси открыть её, проверить пакет и вернуть полученный код. Второй вызов передаёт тот же пакет и approval_code. Не открывай ссылку и не подтверждай за пользователя. В демо результат не сохраняется.', inputSchema:object({
     world_id:uuid, branch_id:uuid, expected_head:{type:['string','null'],format:'uuid'}, request_id:uuid,
     scene:{type:'string',maxLength:150000}, world_time:{type:'string',description:'Фактическое время: YYYY-MM или YYYY-MM-DD или точный timestamp'}, changes,decisions:decisionSchema,
@@ -785,7 +828,9 @@ async function call(name,args,env,identity) {
     const assets=live?await companionState(env,identity,id):{complete:true,issues:[]};
     const actors=Array.isArray(args.actor_names)?args.actor_names:[];
     const intent=String(args.scene_intent||'').slice(0,1400);
+    const preflight_token=await issueScenePreflight(env,identity,id,base);
     return {mode,world_id:id,branch:base.branch,world_time:base.world_time,
+      preflight_token,preflight_expires_at:new Date(Date.now()+SCENE_PREFLIGHT_MAX_AGE_MS).toISOString(),
       memory_coverage:base.memory_coverage,
       companion_settings:companionSettings(base.world,base.branch?.head_scene_id,base.world_time),
       companion_guidance:companionGuidance(companionSettings(base.world,base.branch?.head_scene_id,base.world_time)),
@@ -854,6 +899,7 @@ async function call(name,args,env,identity) {
     const confirmed=live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState();
     if(confirmed.branch?.id!==branchKey||confirmed.branch.head_scene_id!==head)throw Error('Действующая ветка изменилась: не сохраняй старую сцену.');
     if(confirmed.world?.genesis_choices?.auto_save_enabled!==true)throw Error('Автосохранение не разрешено владельцем в настройках этого мира.');
+    await verifyScenePreflight(env,identity,id,args.preflight_token,confirmed,branchKey,head);
     if(live)await verifySceneBeforeCommit(env,identity,id,stamp,packet.changes,confirmed);
     if(!live)return dryRun({id:requestId,parent_scene_id:head,body:packet.scene,world_time:stamp,prompt_note:note});
     const saved=await appendSceneWithReceipt(env,identity,body,expectedScene);
@@ -862,7 +908,7 @@ async function call(name,args,env,identity) {
       confirmed.world?.genesis_choices?.current_period||confirmed.world?.clock_start;
     try{year_archive=await archiveElapsedYears(env,identity,id,past,stamp);}
     catch(error){year_archive={status:'needs_review',reason:String(error?.message||error)};}
-    return {mode,...saved,year_archive};
+    return {mode,...saved,preflight_checked:true,year_archive};
   }
   const digest=await fingerprint(JSON.stringify(body));
   if(args.approval_code===undefined) {
