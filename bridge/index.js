@@ -584,7 +584,7 @@ async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,ass
    yearReconciliation.documents=docStore.docs.filter(doc=>doc.category!=='checkpoint'&&!yearArchiveMetadata(doc)&&!stageYearMetadata(doc)&&doc.doc_key!==STAGE_CONTROL_KEY);
   }
  }
- const ref=buildSourcePreflight(yearReconciliation.documents,{intent,actors,maxExcerptChars:34000});
+ const ref=buildSourcePreflight(yearReconciliation.documents.filter(d=>d.doc_key!==STAGE_CONTROL_KEY),{intent,actors,maxExcerptChars:34000});
  const kinds=new Set(ref.manifest.map(d=>d.category));
  const findings=[];
  for(const issue of yearReconciliation.warnings){
