@@ -1035,12 +1035,7 @@ async function call(name,args,env,identity) {
     if(live)await verifySceneBeforeCommit(env,identity,id,stamp,packet.changes,confirmed);
     if(!live)return dryRun({id:requestId,parent_scene_id:head,body:packet.scene,world_time:stamp,prompt_note:note});
     const saved=await appendSceneWithReceipt(env,identity,body,expectedScene);
-    let year_archive={status:'not_due'};
-    const past=confirmed.scenes?.at(-1)?.world_time||
-      confirmed.world?.genesis_choices?.current_period||confirmed.world?.clock_start;
-    try{year_archive=await archiveElapsedYears(env,identity,id,past,stamp);}
-    catch(error){year_archive={status:'needs_review',reason:String(error?.message||error)};}
-    return {mode,...saved,preflight_checked:true,year_archive};
+    return {mode,...saved,preflight_checked:true,year_archive:{status:'manual_only'}};
   }
   const digest=await fingerprint(JSON.stringify(body));
   if(args.approval_code===undefined) {
@@ -1063,12 +1058,7 @@ async function call(name,args,env,identity) {
   if(finalState.branch?.id!==branchKey||finalState.branch.head_scene_id!==head)throw Error('Ветка изменилась после подтверждения.');
   await verifySceneBeforeCommit(env,identity,id,stamp,packet.changes,finalState);
   const saved=await appendSceneWithReceipt(env,identity,body,expectedScene);
-  let year_archive={status:'not_due'};
-  const past=finalState.scenes?.at(-1)?.world_time||
-    finalState.world?.genesis_choices?.current_period||finalState.world?.clock_start;
-  try{year_archive=await archiveElapsedYears(env,identity,id,past,stamp);}
-  catch(error){year_archive={status:'needs_review',reason:String(error?.message||error)};}
-  return {mode,...saved,year_archive};
+  return {mode,...saved,year_archive:{status:'manual_only'}};
 }
 
 const page=`<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LIVING WORLD Bridge</title>
