@@ -209,3 +209,53 @@ The website's disposable `/api/diagnostics/save-test` also uses a signed preflig
 ### Remaining limits
 
 A client can still choose not to invoke tools despite project instructions. The signed preflight makes the server **reject unverifiable new autosaves**, but does not force an AI model to issue a tool call. `get_sync_health` can prove an individual call had OAuth access; it cannot guarantee future calls. Full replay is limited to 30k scene rows; annual checkpoints are auditable artifacts and are not yet an unbounded replay seed. The app has no direct view into ChatGPT conversations.
+
+## v2.0.0 — Checkpoint for new chats, named stage Year Documents and source-linked memories
+
+**ChatGPT is the only narrative engine.** LIVING WORLD stores evidence and context in Supabase; no paid OpenAI API needed for these tools. All new stage/checkpoint records use the existing private `lw_reference_docs` library and its immutable revisions. **No additional database migration** is required if `reference_docs.sql` is already installed.
+
+### Key distinction
+
+- **Checkpoint** is created when the owner says `Создай checkpoint`, as many times as needed *inside an open stage*. It must help a **new ChatGPT chat resume without losing context**. Includes the entire current-stage structured scene chronology and scene IDs; present-day verified character knowledge/beliefs/state/history; open and resolved obligations; item/money trails; shared jokes, quotes and promises; up to three recent full source scenes; and optional handoff interpretation tied to actual scene IDs. Unstructured events are *explicitly marked* with their exact source IDs, not silently fabricated. A checkpoint never closes a stage.
+- **Year Document** is written only on explicit `Закрой этап` / `Закрой год` and covers a **named narrative stage**, not a calendar year. `До Хогвартса` could span years; `Первый курс` can cross January. It records all the stage's confirmed events and indexed shared memories and points to all original scenes. After close, a new stage starts only after the owner names it.
+- **Historical memory search** lets a later GPT conversation retrieve past personal jokes, exact quotes, gifts, promises and incidents through `search_story_memories` and `get_story_scene`. Only explicit `known_by` fields establish who knew an episode. The tool additionally searches actual old scene texts (including legacy scenes without memory tags), filtering out canceled branches; unstructured matches are excerpts requiring source verification.
+
+### New OAuth MCP tools
+
+`get_story_stage_state` — active named stage, closed stages and stale fork warnings.
+
+`open_story_stage` — open an explicitly named stage with the current `expected_head`.
+
+`create_chat_checkpoint` — create the handoff snapshot at `expected_head`, with optional `handoff_note` and `evidence_scene_ids`.
+
+`close_story_stage` — explicitly close the active stage and save its `year_document`; no date-based automation.
+
+`get_resume_context` — find the most recent valid checkpoint in active ancestry, present document slices with `next_offset`, list prior Year Documents and scene IDs after the checkpoint, and instruct the new chat to read missing full scene text before continuing.
+
+`search_story_memories` — cross-stage, branch-safe source search for jokes, callbacks, promises, quotes, relationships and events, including legacy texts.
+
+`get_story_scene` — full exact text and consequences of *one specific valid source scene*, read in chunks for old scenes far beyond the short history preview.
+
+Existing `get_scene_preflight` automatically selects only active-branch checkpoints and Year Documents. Stage control is versioned with a single immutable document key (`story-stage-control-v2`); concurrent state updates to the same revision cannot both become canonical. After `На это:`, the active-branch ancestry determines which stage-control revision, checkpoint and closed Year Documents are valid. No old branch events are resurrected.
+
+### Capture new long-term memories as scenes happen
+
+`save_scene_auto`, `save_scene_package`, and manual JSON import accept optional `changes.memories` with `id`, `kind` (joke, quote, promise, gift, secret, shared_memory, conflict, relationship, event, other), `title`, `detail`, `quote`, `participants`, `known_by`, `emotional_context`, `tags` and `related_to`. An exact `quote` is rejected unless present verbatim in the scene's text. Existing older scenes are not rewritten, and empty `known_by` means **not established**, not "nobody knows."
+
+### Recommended workflow (ChatGPT Project instructions)
+
+1. At the beginning of the first stage: `get_story_stage_state`, then `open_story_stage` with the user's chosen title (if not already open).
+2. Before every scene: `get_resume_context` when entering from a fresh chat, read **all** of its checkpoint chunks, plus any relevant Year Documents or complete source scenes; then `get_scene_preflight` and use its `preflight_token`.
+3. During scene saving, store causal changes and important personal memories with correct participants/knowledge. Confirm `persisted:true`; never invent what a character remembers.
+4. On explicit `Создай checkpoint`: `create_chat_checkpoint` after the last finished scene. The stage stays open.
+5. In the next chat: `get_resume_context`, read every part via `next_offset`, any post-checkpoint scenes and relevant old memories, then proceed. If a checkpoint is absent, disclose that and reconstruct from valid source scenes rather than pretending to remember.
+6. On explicit `Закрой этап`: `close_story_stage`. **Never** trigger it on January 1st, a birthday, or automatic school calendar advancement.
+7. If a past quote/promise becomes relevant, call `search_story_memories` and, if needed, `get_story_scene` for the original full text. A private reference is shared only if those participants actually know it.
+
+In the iPhone PWA, **Документы → Игровые этапы, checkpoint и память** has copyable ChatGPT commands for stage open, checkpoint, close, resume and searching older memories.
+
+### Limits / truthfulness
+
+These are **source-backed documents**, not perfect automatic extraction of all unstructured nuances. Earlier plain-text scenes without annotated changes remain accessible by exact scene and lexical text search. Checkpoint building refuses to silently exceed its 700,000-character document bound; the full primary source scenes are never deleted. Full replay currently has a 30,000 world-scene row safety cap; checkpoints do not yet seed an unlimited projector beyond that limit. The source search returns up to 120 candidate matches and reports when capped. ChatGPT still has to actually call the tools—no connector can force a model response to do so.
+
+Legacy `get_current_year_archive` and old calendar Year Documents remain readable for migration/compatibility, but *new automatic calendar-based Year Documents and checkpoints are disabled*.
