@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {WORLD_DRAFT_FIELDS,WORLD_TEXT_FIELDS,CHARACTER_TEXT_FIELDS,
- worldDraftPrompt,parseWorldDraft,characterDraftPrompt,parseCharacterDraft} from '../public/gpt-prompts.mjs';
+ worldDraftPrompt,parseWorldDraft,worldDraftFieldFromJSON,characterDraftPrompt,parseCharacterDraft,characterDraftFieldFromJSON} from '../public/gpt-prompts.mjs';
 import {GENESIS_FIELDS} from '../public/logic.mjs';
 
 const world={id:'11111111-1111-4111-8111-111111111111',name:'Новый AU',genre:'Фэнтези',
@@ -24,7 +24,7 @@ test('world prompt produces one parseable 8-field JSON template grounded in chos
  assert.equal(template.name,'Новый AU');
  assert.equal(template.clock_start,worldInput.clock_start);
  assert.match(prompt,/В школу поступают в 18 лет/);
- assert.match(prompt,/один JSON/i);
+ assert.match(prompt,/РОВНО ОДИН/);
  assert.match(prompt,/Текстовые наброски можно развить/);
  assert.match(prompt,/не изобретай биографию/i);
  assert.match(prompt,/ТОЛЬКО ГОТОВЫЙ JSON/);
@@ -33,6 +33,7 @@ test('world prompt produces one parseable 8-field JSON template grounded in chos
 test('world JSON importer checks types, keys, dates and immutable selected parameters',()=>{
  const draft={...worldInput,premise:'Полное описание магического мира'};
  assert.deepEqual(parseWorldDraft(JSON.stringify(draft),{source:worldInput}),draft);
+ assert.equal(worldDraftFieldFromJSON(JSON.stringify(draft)),null);
  assert.deepEqual(parseWorldDraft('```json\n'+JSON.stringify(draft)+'\n```',{source:worldInput}),draft);
  assert.throws(()=>parseWorldDraft('{“name”:“AU”}'),/Ошибка JSON/);
  assert.throws(()=>parseWorldDraft(JSON.stringify({...draft,past_changes:[]})),/Неверные поля/);
@@ -46,6 +47,7 @@ test('individual world field generation imports only that field, not history or 
   const p=worldDraftPrompt(world,worldInput,{field:key});
   assert.match(p,new RegExp('ТОЛЬКО ключ '+key));
   assert.deepEqual(parseWorldDraft(JSON.stringify({[key]:'Достоверное описание'}),{field:key}),{[key]:'Достоверное описание'});
+  assert.equal(worldDraftFieldFromJSON(JSON.stringify({[key]:'Достоверное описание'})),key);
   assert.throws(()=>parseWorldDraft(JSON.stringify({[key]:'Текст',name:'Другое имя'}),{field:key}),/Неверные поля/);
  }
  const approved={...world,genesis_approved:true};
@@ -66,6 +68,7 @@ test('character prompt contains full 13-field object, role and user identity rem
  assert.match(prompt,/не переписывай его историю/);
  const draft={...baseChar,goals:'Найти работу'};
  assert.deepEqual(parseCharacterDraft(JSON.stringify(draft),{expectedRole:'npc',expectedName:'Лия'}),draft);
+ assert.equal(characterDraftFieldFromJSON(JSON.stringify(draft)),null);
  assert.throws(()=>parseCharacterDraft(JSON.stringify({...draft,name:'Другая'}),{expectedName:'Лия'}),/имя/);
  assert.throws(()=>parseCharacterDraft(JSON.stringify({...draft,role:'hero'}),{expectedRole:'npc'}),/роль/);
  assert.throws(()=>parseCharacterDraft(JSON.stringify({...draft,inventory:[]})),/inventory/);
@@ -76,6 +79,7 @@ test('character one-field JSON does not overwrite any other form values',()=>{
   const p=characterDraftPrompt(world,other,baseChar,{field:key});
   assert.match(p,new RegExp('только ключ '+key));
   assert.deepEqual(parseCharacterDraft(JSON.stringify({[key]:'Значение'}),{field:key}),{[key]:'Значение'});
+  assert.equal(characterDraftFieldFromJSON(JSON.stringify({[key]:'Значение'})),key);
   assert.throws(()=>parseCharacterDraft(JSON.stringify({[key]:'Значение',name:'Чужое'}),{field:key}),/Неверные поля/);
  }
 });
