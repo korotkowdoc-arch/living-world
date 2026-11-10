@@ -892,7 +892,7 @@ async function recoverCompanionFromCheckpoint(env,identity,id){
   verified_source_head:true,expected_head:after.head,world_id:id,
   baselines:baselineState.characters||[]
  });
- return {selected,...after,rebuilt};
+ return {selected,after,rebuilt};
 }
 async function companionState(env,identity,id){
  const full=await loadFullWorldLineage(env,identity,id);
@@ -1953,7 +1953,7 @@ export default {async fetch(request,env={}){
       const data=await call(message.params?.name,message.params?.arguments??{},env,identity);
       return ok({resultType:'complete',content:[{type:'text',text:JSON.stringify(data)}],structuredContent:data});
     } catch(error) {
-      const safe=env.BRIDGE_TEST_DIAGNOSTICS==='true'?String(error?.stack||error):error instanceof TypeError || error instanceof SyntaxError || error.name==='TimeoutError' ? 'Операция не завершилась. Для повтора записи используй тот же UUID.' : error.message;
+      const safe=error instanceof TypeError || error instanceof SyntaxError || error.name==='TimeoutError' ? 'Операция не завершилась. Для повтора записи используй тот же UUID.' : error.message;
       return ok({resultType:'complete',isError:true,content:[{type:'text',text:safe}]});
     }
   }
