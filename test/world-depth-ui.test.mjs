@@ -46,5 +46,5 @@ test('fork diff keeps invalidated promises and new knowledge separated',()=>{
   knowledge_only_in_current:[{actor:'Гарри',fact:'Новая правда',scene_id:'scene-new'}]
  });
  for(const x of ['scene-old','scene-new','Старое обещание','Новое обещание','Старый секрет','Новая правда'])assert.ok(html.includes(x));
- assert.match(html,/не переносится автоматически/);
+ assert.match(html,/не переносятся автоматически/);
 });
