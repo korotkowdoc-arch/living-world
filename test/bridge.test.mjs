@@ -35,7 +35,7 @@ test('initialize and tools/list work without a Bearer token',async()=>{
  assert.equal(r.status,200);
  const d=(await r.json()).result;
  assert.equal(d.resultType,'complete');
- assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_causal_memory','get_scene_receipt','get_story_context','save_reference_document','get_character_memory','get_reference_catalog','get_reference_document','get_scene_preflight','get_current_year_archive','get_companion_state','get_branch_history','get_story_stage_state','get_resume_context','search_story_memories','get_story_scene','get_sync_health','get_revision_context']);
+ assert.deepEqual(d.tools.map(t=>t.name),['list_worlds','get_world_state','get_causal_memory','get_scene_receipt','get_story_context','save_reference_document','get_character_memory','get_reference_catalog','get_reference_document','get_scene_preflight','get_current_year_archive','get_companion_state','get_branch_history','get_story_stage_state','get_resume_context','search_story_memories','get_story_scene','get_world_depth','get_npc_offscreen_brief','get_memory_review_queue','audit_scene_draft','compare_story_branches','get_sync_health','get_revision_context']);
  assert.ok(d.tools.every(t=>t._meta.securitySchemes[0].type==='oauth2'));
 });
 test('real data calls are forbidden without a validated OAuth token',async()=>{
