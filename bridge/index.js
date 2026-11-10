@@ -811,6 +811,75 @@ async function loadFullWorldLineage(env,identity,id){
  try{return {complete:true,state,lineage:activeLineage(rows,head),all_rows:rows};}
  catch(error){return {complete:false,state,reason:error.message};}
 }
+/** A checkpoint is trusted ONLY after PostgreSQL proves it is on today's
+ * active ancestry. Falling back to the latest document without this proof
+ * would resurrect a removed «На это:» tail.
+ */
+async function selectVerifiedCheckpoint(env,identity,id){
+ const catalog=await sourceDocList(env,identity,id,{full:true});
+ if(!catalog.installed)throw Error('Библиотека checkpoint недоступна: '+catalog.message);
+ const checkpoints=catalog.docs.filter(d=>d.category==='checkpoint')
+  .sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+ let tried=0,failures=[];
+ for(const current of checkpoints.slice(0,30)){
+  let doc=current;
+  for(let rev=Number(current.revision);rev>0&&rev>Number(current.revision)-30;rev--){
+   if(doc.revision!==rev){
+    const data=await sourceDocRead(env,identity,id,current.doc_key,rev,0,700000);
+    doc={...data,content:data.content};
+   }
+   const checkpoint=parseCheckpointDoc(doc);
+   if(!checkpoint||checkpoint.world_id!==id||!isReplayableCheckpoint(checkpoint))continue;
+   tried++;
+   try{
+    const proof=await supabase(env,'/rest/v1/rpc/lw_bridge_v4_since_checkpoint',{
+     token:identity.token,body:{p_world:id,p_anchor:checkpoint.source_head,p_offset:0,p_limit:1}});
+    if(proof?.verified&&proof.checkpoint_head===checkpoint.source_head&&proof.world_id===id)
+     return {doc,checkpoint,proof,source:'SQL_ANCESTRY_VERIFIED'};
+   }catch(error){
+    if(/PGRST202|42883|function.*not found|could not find|does not exist/i.test(String(error?.message||'')))
+     throw Error('Для надёжного восстановления checkpoint установи supabase/checkpoint_recovery.sql в SQL Editor.');
+    failures.push(String(error?.message||error).slice(0,250));
+    // A rejected ancestor is not valid; older revisions may still be valid.
+   }
+  }
+ }
+ throw Error('Нет совместимого checkpoint из действующей ветки. Просмотрено '+tried+
+  '. Аннулированные snapshots не используются.'+
+  (failures.length?' Последняя ошибка: '+failures.at(-1):''));
+}
+async function collectCheckpointDelta(env,identity,id,selected,{maxScenes=5000}={}){
+ const total=Number(selected.proof.total_delta_scenes);
+ if(!Number.isInteger(total)||total<0)throw Error('SQL не вернул корректное число новых сцен.');
+ if(total>maxScenes)throw Error('После checkpoint '+total+
+  ' сцен: для безопасного восстановления текущего состояния нужно промежуточное сохранение или постраничная обработка.');
+ const scenes=[],head=selected.proof.current_head,branch=selected.proof.active_branch_id;
+ for(let offset=0;offset<total;offset+=200){
+  const part=await supabase(env,'/rest/v1/rpc/lw_bridge_v4_since_checkpoint',{
+   token:identity.token,body:{p_world:id,p_anchor:selected.checkpoint.source_head,
+    p_offset:offset,p_limit:Math.min(200,total-offset)}});
+  if(!part?.verified||part.current_head!==head||part.active_branch_id!==branch||
+    Number(part.total_delta_scenes)!==total)
+   throw Error('Действующая ветка изменилась во время восстановления checkpoint.');
+  if(!Array.isArray(part.rows)||part.rows.length!==Math.min(200,total-offset))
+   throw Error('Не все сцены после checkpoint загружены. Восстановление прекращено.');
+  scenes.push(...part.rows);
+ }
+ return {scenes,head,branch};
+}
+async function recoverCompanionFromCheckpoint(env,identity,id){
+ const selected=await selectVerifiedCheckpoint(env,identity,id);
+ const after=await collectCheckpointDelta(env,identity,id,selected);
+ const baselineState=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_state',
+  {token:identity.token,body:{p_world:id}});
+ if(baselineState.branch?.id!==after.branch||baselineState.branch.head_scene_id!==after.head)
+  throw Error('Ветка изменилась при проверке checkpoint.');
+ const rebuilt=replayFromCheckpoint(selected.checkpoint,after.scenes,{
+  verified_source_head:true,expected_head:after.head,world_id:id,
+  baselines:baselineState.characters||[]
+ });
+ return {selected,...after,rebuilt};
+}
 async function companionState(env,identity,id){
  const full=await loadFullWorldLineage(env,identity,id);
  const data=full.state,branch=data.branch;
