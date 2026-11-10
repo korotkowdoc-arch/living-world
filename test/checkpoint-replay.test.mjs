@@ -73,6 +73,23 @@ test('cannot use new checkpoint as canon without ancestry verification',()=>{
  assert.throws(()=>replayFromCheckpoint(snapshot,[b],{
   verified_source_head:true,expected_head:id1,world_id:world.id}),/поменялось/);
 });
+test('a corrected branch never replays its canceled sibling tail',()=>{
+ const snapshot=JSON.parse(buildChatCheckpoint({world,branch:{id:branchId,head_scene_id:id1},
+  lineage:[a],characters:[]}).content);
+ const canceled={id:'cccccccc-cccc-4ccc-8ccc-ccccccccccc3',parent_scene_id:id1,
+  world_time:'2010-02-01T10:00:00',body:'Отменённое событие',
+  prompt_note:packSceneNote({facts:['Отменённое событие'],
+   open_threads:['Отменённое обещание'],
+   memories:[{id:'canceled-only',title:'Отменённое воспоминание'}]})};
+ assert.throws(()=>replayFromCheckpoint(snapshot,[canceled,b],{
+  verified_source_head:true,expected_head:id2,world_id:world.id}),/разрыв/);
+ const restored=replayFromCheckpoint(snapshot,[b],{
+  verified_source_head:true,expected_head:id2,world_id:world.id});
+ assert.equal(restored.head_scene_id,id2);
+ assert.equal(restored.delta_scenes,1);
+ assert.doesNotMatch(JSON.stringify(restored.causality),/Отменённое/);
+ assert.doesNotMatch(JSON.stringify(restored.story_memories),/canceled-only|Отменённое/);
+});
 test('older checkpoint without causal details remains readable but cannot seed history',()=>{
  const snapshot=JSON.parse(buildChatCheckpoint({world,branch:{id:branchId,head_scene_id:id1},
   lineage:[a],characters:[]}).content);
