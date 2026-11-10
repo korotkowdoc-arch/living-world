@@ -3,9 +3,23 @@
  */
 const normalized=value=>String(value??'').normalize('NFC').toLocaleLowerCase('ru').replace(/ё/g,'е').trim().replace(/\s+/g,' ');
 const trim=value=>typeof value==='string'?value.trim():'';
-export function projectCausalMemory(scenes=[],{getDelta}={}){
+export function projectCausalMemory(scenes=[],{getDelta,seed=null}={}){
  const read=getDelta??(s=>s.changes??s.delta??{});
  const facts=[],offscreen_events=[],threads=new Map(),warnings=[];
+ if(seed){
+  if(seed.complete!==true||!Array.isArray(seed.facts)||!Array.isArray(seed.offscreen_events)||
+    !Array.isArray(seed.open_threads)||!Array.isArray(seed.resolved_threads)||
+    !Number.isSafeInteger(seed.scanned_scenes))
+   throw Error('Checkpoint причинных фактов неполон.');
+  facts.push(...seed.facts.map(e=>({...e})));
+  offscreen_events.push(...seed.offscreen_events.map(e=>({...e})));
+  for(const entry of [...seed.open_threads,...seed.resolved_threads]){
+   const k=normalized(entry.text);
+   if(!k)throw Error('Неправильная причинная линия в checkpoint.');
+   threads.set(k,{...entry,history:Array.isArray(entry.history)?entry.history.map(e=>({...e})):[]});
+  }
+  if(Array.isArray(seed.warnings))warnings.push(...seed.warnings);
+ }
  for(const scene of scenes){
   const c=read(scene)||{};
   const event=(text,kind)=>({kind,text,scene_id:scene.id,world_time:scene.world_time??null});
@@ -37,7 +51,7 @@ export function projectCausalMemory(scenes=[],{getDelta}={}){
  }
  const active=Array.from(threads.values()).filter(t=>t.status==='open');
  const resolved=Array.from(threads.values()).filter(t=>t.status==='resolved');
- return {complete:true,scanned_scenes:scenes.length,facts,offscreen_events,
+ return {complete:true,scanned_scenes:(seed?.scanned_scenes||0)+scenes.length,facts,offscreen_events,
   open_threads:active,resolved_threads:resolved,warnings,
   counts:{facts:facts.length,offscreen_events:offscreen_events.length,
     open_threads:active.length,resolved_threads:resolved.length}};
