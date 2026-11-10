@@ -2,6 +2,8 @@ import {handleAiRequest} from './ai.js';
 import {extractCompanionChanges,activeLineage,projectCompanion,validateNextEvents} from '../public/world-ledger.mjs';
 import {latestDocumentVersions,buildSourcePreflight,findDocExcerpts} from '../public/reference-documents.mjs';
 import {projectCharacterMemory,actorMemory} from '../public/world-character-memory.mjs';
+import {validateDepthDelta,depthSemanticWarnings,projectWorldDepth,actorDepth,compareWorldBranches,PSYCHOLOGY_ASPECTS,RELATION_DIMENSIONS} from '../public/world-depth.mjs';
+import {RETRO_INDEX_KEY_PREFIX,retroKey,makeRetroIndex,activeRetroMemories,searchRetroMemories,retroIndexCoverage} from '../public/retrospective-index.mjs';
 import {savedSceneStatus} from '../public/save-receipt.mjs';
 import {projectCausalMemory,causalSummary,searchCausalMemory} from '../public/world-causality.mjs';
 import {validStoryClock,isNondecreasingStoryTime} from '../public/continuity.mjs';
@@ -87,6 +89,7 @@ function parseScenePackage(raw) {
   }
   Object.assign(changes,extractCompanionChanges(c));
   changes.memories=validateSceneMemories(c.memories,result.scene);
+  Object.assign(changes,validateDepthDelta(c,result.scene));
   return {scene:result.scene.trim(),world_time:result.world_time||null,changes,decisions};
 }
 function packSceneNote(changes, directorNote='',decisions=[]) {
@@ -371,9 +374,44 @@ const storyMemoryEntry=object({
  known_by:{type:'array',items:{type:'string',maxLength:100},maxItems:20},
  tags:{type:'array',items:{type:'string',maxLength:100},maxItems:20},related_to:{type:'string',maxLength:80}
 },['id','kind','title','detail']);
+const evidenceProof={type:'string',minLength:1,maxLength:700};
+const psychEvent=object({
+ id:{type:'string',maxLength:80},character:{type:'string',maxLength:120},
+ aspect:{type:'string',enum:PSYCHOLOGY_ASPECTS},observation:{type:'string',maxLength:1500},
+ interpretation:{type:'string',maxLength:1400},certainty:{type:'string',enum:['explicit','interpretation']},
+ evidence:evidenceProof,tension_with:{type:'string',maxLength:600}
+},['id','character','aspect','observation','certainty','evidence']);
+const relationshipEvent=object({
+ id:{type:'string',maxLength:80},from:{type:'string',maxLength:120},
+ to:{type:'string',maxLength:120},dimension:{type:'string',enum:RELATION_DIMENSIONS},
+ shift:{type:'string',enum:['increased','decreased','unchanged','ambivalent','emerged']},
+ interpretation:{type:'string',enum:['explicit','interpretation']},
+ rationale:{type:'string',maxLength:1500},evidence:evidenceProof,unresolved:{type:'boolean'}
+},['id','from','to','dimension','shift','interpretation','rationale','evidence']);
+const subjectiveRecall=object({
+ id:{type:'string',maxLength:80},actor:{type:'string',maxLength:120},
+ memory_id:{type:'string',maxLength:80},meaning:{type:'string',maxLength:1500},
+ emotion:{type:'string',maxLength:250},certainty:{type:'string',enum:['explicit','interpretation']},evidence:evidenceProof
+},['id','actor','memory_id','meaning','certainty','evidence']);
+const offscreenEvent=object({
+ id:{type:'string',maxLength:80},actor:{type:'string',maxLength:120},
+ happened_at:{type:'string',maxLength:32},location:{type:'string',maxLength:200},
+ event:{type:'string',maxLength:1200},basis:{type:'string',enum:['narrated','witnessed','reported']},
+ evidence:evidenceProof,known_by:{type:'array',maxItems:20,items:{type:'string',maxLength:120}}
+},['id','actor','event','basis','evidence']);
+const npcIntention=object({
+ id:{type:'string',maxLength:80},actor:{type:'string',maxLength:120},
+ plan:{type:'string',maxLength:1100},motive:{type:'string',maxLength:900},
+ obstacle:{type:'string',maxLength:900},evidence:evidenceProof
+},['id','actor','plan','motive','evidence']);
 const changes = object({
   facts:strings, open_threads:strings, resolved_threads:strings, offscreen_events:strings,
   memories:{type:'array',maxItems:16,items:storyMemoryEntry},
+  psychology:{type:'array',maxItems:25,items:psychEvent},
+  relationships:{type:'array',maxItems:30,items:relationshipEvent},
+  recollections:{type:'array',maxItems:20,items:subjectiveRecall},
+  npc_offscreen:{type:'array',maxItems:15,items:offscreenEvent},
+  npc_intentions:{type:'array',maxItems:20,items:npcIntention},
   economy:{type:'array',items:economic,maxItems:35},items:{type:'array',items:itemChange,maxItems:40},new_characters:{type:'array',items:emergingCharacter,maxItems:15},
   characters:{type:'array', maxItems:30, items:object({
     name:{type:'string'}, ...fields, beliefs:strings,
