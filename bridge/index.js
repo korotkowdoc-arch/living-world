@@ -4,6 +4,7 @@ import {latestDocumentVersions,buildSourcePreflight,findDocExcerpts} from '../pu
 import {projectCharacterMemory,actorMemory} from '../public/world-character-memory.mjs';
 import {validateDepthDelta,depthSemanticWarnings,projectWorldDepth,actorDepth,compareWorldBranches,PSYCHOLOGY_ASPECTS,RELATION_DIMENSIONS} from '../public/world-depth.mjs';
 import {RETRO_INDEX_KEY_PREFIX,retroKey,makeRetroIndex,activeRetroMemories,searchRetroMemories,retroIndexCoverage} from '../public/retrospective-index.mjs';
+import {auditNarrativeScene} from '../public/narrative-audit.mjs';
 import {savedSceneStatus} from '../public/save-receipt.mjs';
 import {projectCausalMemory,causalSummary,searchCausalMemory} from '../public/world-causality.mjs';
 import {validStoryClock,isNondecreasingStoryTime} from '../public/continuity.mjs';
@@ -418,6 +419,17 @@ const changes = object({
     learned:{type:'array', items:object({fact:{type:'string'},via:{type:'string'}})}
   },['name'])}
 },[]);
+const retroKnown=object({actor:{type:'string',maxLength:120},channel:{type:'string',maxLength:220},
+ evidence:{type:'string',maxLength:700}},['actor','channel','evidence']);
+const retroEntry=object({
+ id:{type:'string',maxLength:80},kind:{type:'string',enum:['joke','quote','promise','gift','secret','shared_memory','conflict','relationship','event','other']},
+ title:{type:'string',maxLength:180},detail:{type:'string',maxLength:1800},
+ evidence:{type:'string',maxLength:900},quote:{type:'string',maxLength:600},
+ emotional_context:{type:'string',maxLength:700},
+ participants:{type:'array',maxItems:20,items:{type:'string',maxLength:120}},
+ known_by:{type:'array',maxItems:20,items:retroKnown},
+ tags:{type:'array',maxItems:20,items:{type:'string',maxLength:80}}
+},['id','kind','title','detail','evidence']);
 const decisionSchema={type:'array',maxItems:4,items:object({
  id:{type:'string',maxLength:30},label:{type:'string',maxLength:200},description:{type:'string',maxLength:800}
 },['id','label','description'])};
@@ -469,6 +481,26 @@ const tools = [
     world_id:uuid,scene_id:uuid,offset:{type:'integer',minimum:0,maximum:150000},
     limit:{type:'integer',minimum:1,maximum:25000}
   },['world_id','scene_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_world_depth',description:'Глубокая психология, история интерпретаций, направленные многомерные отношения, личные переосмысления и подтверждённые события NPC. Из ВСЕЙ действующей ветки.',inputSchema:object({
+    world_id:uuid,actor_names:{type:'array',maxItems:15,items:{type:'string',maxLength:120}}
+  },['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_npc_offscreen_brief',description:'Без записи и выдумывания событий: доступные цели, знания, положение NPC и планы, которые ЕЩЁ НЕ произошли. Перед внекадровой сценой сверяй эти ограничения.',inputSchema:object({
+    world_id:uuid,actor_names:{type:'array',maxItems:12,items:{type:'string',maxLength:120}}
+  },['world_id','actor_names']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_memory_review_queue',description:'Показать сцены, в которых ещё не выполнена ретроспективная разметка шуток/обещаний/связей. Требует подтверждения источников через get_story_scene перед записью.',inputSchema:object({
+    world_id:uuid,offset:{type:'integer',minimum:0,maximum:30000},limit:{type:'integer',minimum:1,maximum:30}
+  },['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'index_legacy_scene_memories',description:'ТОЛЬКО по команде пользователя «Переиндексируй старые сцены»: создаёт отдельную ревизию подтверждённых оригинальным текстом воспоминаний; исходная сцена НЕ меняется. Для known_by требуются реальный канал и точная опора на текст.',inputSchema:object({
+    world_id:uuid,scene_id:uuid,expected_head:uuid,
+    entries:{type:'array',maxItems:25,items:retroEntry}
+  },['world_id','scene_id','expected_head','entries']),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false} },
+  { name:'audit_scene_draft',description:'СТАТИЧЕСКАЯ проверка проекта сцены до сохранения: время, источник психологических изменений, старые воспоминания, планы NPC, ресурсы и возможная утечка знаний. Ошибки блокируют, предупреждения требуют проверки; инструмент не понимает весь смысл прозы.',inputSchema:object({
+    world_id:uuid,scene:{type:'string',maxLength:150000},
+    world_time:{type:'string',maxLength:32},changes
+  },['world_id','scene','world_time','changes']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'compare_story_branches',description:'Сравнение двух веток после «На это:»: общий префикс, аннулированные/новые сцены и факты, изменения отношений и вещей, без слияния отменённого хвоста в текущий канон.',inputSchema:object({
+    world_id:uuid,other_branch_id:uuid
+  },['world_id','other_branch_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_sync_health',description:'OAuth-проверка компаньона: активная ветка, автосейв, полнота последней сцены, структурированные последствия, документы и источники. Только чтение, без технической записи.',inputSchema:object({world_id:uuid},['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_revision_context',description:'До исправления «На это:» прочитай полный исходный текст валидной сцены и получи защищённый токен актуальной ветки. Ничего не изменяет.',inputSchema:object({world_id:uuid,target_scene_id:uuid},['world_id','target_scene_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'commit_scene_revision',description:'Только по запросу «На это:»: сохраняет исходный валидный префикс плюс новое продолжение в НОВУЮ ветку, без удаления старых сцен. Требует get_revision_context и реальные последствия изменения.',inputSchema:object({
