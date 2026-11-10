@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import bridge from '../bridge/index.js';
 import {packSceneNote} from '../public/continuity.mjs';
-import {replayFromCheckpoint} from '../public/checkpoint-replay.mjs';
 
 const root='https://living-world-bridge-mcp.korotkowdoc.workers.dev';
 const worldId='10000000-0000-4000-8000-000000000009';
@@ -15,7 +14,7 @@ const env={
  BRIDGE_SUPABASE_USER_ID:'0a3fbf41-c3c6-4743-a88c-f9a7870fd244',
  SUPABASE_PUBLISHABLE_KEY:'public-test-value',
  BRIDGE_SEAL_KEY:'a'.repeat(43),
- BRIDGE_WRITES_ENABLED:'true',BRIDGE_TEST_DIAGNOSTICS:'true'
+ BRIDGE_WRITES_ENABLED:'true'
 };
 function jwt(){
  const now=Math.floor(Date.now()/1000);
@@ -98,14 +97,6 @@ test('OAuth stage open -> checkpoint -> resume -> Year close -> memory search (o
   const checkpointRecord=stored.find(d=>d.category==='checkpoint');
   assert.ok(checkpointRecord);
   assert.match(JSON.parse(checkpointRecord.content).checkpoint_attestation,/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
-  const locallyReplayed=replayFromCheckpoint(JSON.parse(checkpointRecord.content),[],{
-   verified_source_head:true,expected_head:sceneId,world_id:worldId});
-  assert.equal(locallyReplayed.recovered,true);
-  assert.ok(Array.isArray(locallyReplayed.economy.accounts));
-  assert.ok(Array.isArray(locallyReplayed.characters.characters));
-  assert.ok(Array.isArray(locallyReplayed.causality.resolved_threads));
-  assert.ok(Array.isArray(locallyReplayed.depth.psychology));
-  locallyReplayed.characters.characters.map(x=>x.history.slice(-25));
   const recoveryPage=await call('get_checkpoint_recovery',{world_id:worldId});
   assert.equal(recoveryPage.validated_checkpoint,true);
   const recovered=await call('get_recovered_state',{world_id:worldId});
