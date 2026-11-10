@@ -1251,9 +1251,28 @@ async function call(name,args,env,identity) {
     const docs=await sourceDocList(env,identity,id,{full:true});
     const years=docs.installed?validStageYearDocs(docs.docs,stages.state,full.lineage,id)
      .filter(d=>stageYearMetadata(d)):[],tokens=[query,...(args.actor_names||[])];
-    const retro=docs.installed?searchRetroMemories(
+    const retroCandidates=docs.installed?searchRetroMemories(
      activeRetroMemories(docs.docs,full.lineage.map(s=>s.id),id),
      {query,actor_names:args.actor_names||[],limit:args.limit??20}):{total:0,items:[]};
+    const verifiedRetro=[],retroRejected=[],bodies=new Map();
+    for(const memory of retroCandidates.items){
+     let body=bodies.get(memory.scene_id);
+     if(body===undefined){
+      const original=await supabase(env,'/rest/v1/lw_scenes?world_id=eq.'+encodeURIComponent(id)+
+       '&id=eq.'+encodeURIComponent(memory.scene_id)+'&select=id,body&limit=1',
+       {token:identity.token});
+      body=Array.isArray(original)&&original.length===1?String(original[0].body||''):null;
+      bodies.set(memory.scene_id,body);
+     }
+     if(body&&memory.source_digest===await fingerprint(body)&&
+        body.includes(memory.evidence)&&(!memory.quote||body.includes(memory.quote))&&
+        (memory.known_by||[]).every(k=>body.includes(k.evidence))){
+      verifiedRetro.push({...memory,source_text_verified:true});
+     }else retroRejected.push({scene_id:memory.scene_id,id:memory.id,
+      code:'RETRO_SOURCE_MISMATCH'});
+    }
+    const retro={total:verifiedRetro.length,items:verifiedRetro,
+     rejected_count:retroRejected.length,source_validation:'original_text_sha256_and_literal_evidence'};
     const matching_years=years.flatMap(d=>{
       const excerpts=findDocExcerpts(d.content,tokens,{radius:400,max:3});
       return excerpts.length?[{doc_key:d.doc_key,revision:d.revision,title:d.title,
