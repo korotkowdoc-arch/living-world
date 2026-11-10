@@ -1431,10 +1431,22 @@ async function call(name,args,env,identity) {
     const was=oldItems.get(k)||null,now=newItems.get(k)||null;
     return JSON.stringify(was)===JSON.stringify(now)?[]:[{item_id:k,old:was,new:now}];
    });
+   const accountsKey=a=>JSON.stringify([a.person,a.currency,a.scale]);
+   const oldAccounts=new Map(before.accounts.map(a=>[accountsKey(a),a]));
+   const newAccounts=new Map(after.accounts.map(a=>[accountsKey(a),a]));
+   const account_differences=[...new Set([...oldAccounts.keys(),...newAccounts.keys()])].flatMap(k=>{
+    const was=oldAccounts.get(k),now=newAccounts.get(k);
+    const view=a=>a?{person:a.person,currency:a.currency,scale:a.scale,
+     known:a.known,balance:a.balance,observed_delta:a.observed_delta}:null;
+    return JSON.stringify(view(was))===JSON.stringify(view(now))?[]:
+     [{account:k,old:view(was),new:view(now)}];
+   });
    return {mode,world_id:id,current_branch_id:full.state.branch.id,
     compared_branch_id:other,compared_branch_title:rows[0].name,
     current_head:full.state.branch.head_scene_id,other_head:rows[0].head_scene_id,
-    ...diff,item_differences:item_differences.slice(0,150),
+    ...diff,account_differences:account_differences.slice(0,120),
+    account_differences_complete:account_differences.length<=120,
+    item_differences:item_differences.slice(0,150),
     item_differences_complete:item_differences.length<=150,
     warnings:[...before.issues,...after.issues].slice(-25),
     warning:'Аннулированное прошлое читается ТОЛЬКО как материал сравнения, но не переносится в активную историю.'};
