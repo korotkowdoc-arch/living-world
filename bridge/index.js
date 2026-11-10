@@ -888,7 +888,34 @@ async function recoverCompanionFromCheckpoint(env,identity,id){
 async function companionState(env,identity,id){
  const full=await loadFullWorldLineage(env,identity,id);
  const data=full.state,branch=data.branch;
- if(!full.complete)return {mode:'live',world_id:id,branch_id:branch.id,head_scene_id:branch.head_scene_id,complete:false,reason:full.reason};
+ if(!full.complete){
+  try{
+   const recovered=await recoverCompanionFromCheckpoint(env,identity,id);
+   const p=recovered.rebuilt;
+   return {mode:'live',world_id:id,branch_id:branch.id,
+    head_scene_id:branch.head_scene_id,complete:true,
+    recovered_from_checkpoint:true,
+    source_head:recovered.selected.checkpoint.source_head,
+    accounts:p.economy.accounts,items:p.economy.items,
+    new_characters:p.economy.new_characters,
+    audit:p.economy.audit.slice(-250),
+    issues:[...p.economy.issues,...p.data_quality.warnings],
+    scanned_scenes:p.scanned_world_scenes,
+    character_memory:p.characters.characters.map(c=>({
+     name:c.name,origin:c.origin,state:c.state,knowledge_count:c.knowledge.length,
+     belief_count:c.beliefs.length})),
+    character_warnings:p.characters.warnings,
+    causal_memory:causalSummary(p.causality),depth_memory:p.depth,
+    memory_provenance:{verified_source_head:true,
+     checkpoint:recovered.selected.doc.doc_key,
+     after_checkpoint_scenes:recovered.after.scenes.length,
+     unstructured_before_checkpoint:p.data_quality.missing_structured_at_checkpoint,
+     unstructured_after_checkpoint:p.data_quality.missing_structured_in_delta}};
+  }catch(error){
+   return {mode:'live',world_id:id,branch_id:branch.id,head_scene_id:branch.head_scene_id,
+    complete:false,reason:full.reason+' Checkpoint recovery: '+(error?.message||error)};
+  }
+ }
  const lineage=full.lineage,getDelta=s=>readSceneNote(s.prompt_note)?.delta||{};
  const projection=projectCompanion(lineage,{getDelta,strict:false});
  const people=projectCharacterMemory(data.characters||[],lineage,{getDelta});
@@ -1108,6 +1135,13 @@ async function call(name,args,env,identity) {
   }
   if(name==='get_resume_context'){
     if(!live)throw Error('В демо нет персональной истории.');
+    const fullCheck=await loadFullWorldLineage(env,identity,id);
+    if(!fullCheck.complete){
+     return {mode,world_id:id,complete:false,recovery_required:true,
+      reason:fullCheck.reason,
+      next_tool:'get_checkpoint_recovery',
+      instructions:'Для очень длинной истории используй get_checkpoint_recovery с чтением ВСЕХ страниц checkpoint и новых сцен. Потом get_recovered_state для подтверждённого структурированного состояния. Миграция supabase/checkpoint_recovery.sql должна быть установлена. До проверки checkpoint не создавай новую каноническую сцену.'};
+    }
     const {full,stages,head}=await fullMemoryState(env,identity,id);
     const docs=await sourceDocList(env,identity,id,{full:true});
     if(!docs.installed)throw Error('Библиотека документов недоступна: '+docs.message);
