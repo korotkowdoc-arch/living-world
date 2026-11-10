@@ -19,6 +19,8 @@ test('SQL checkpoint recovery proves owner and active head ancestry, not chronol
 });
 test('verified old-scene search includes ONLY active ancestry, with source clues',()=>{
  assert.match(sql,/create or replace function public\.lw_bridge_v4_search_active_scenes/);
+ assert.doesNotMatch(sql,/^as \$(?!\$)\s*$/m);
+ assert.doesNotMatch(sql,/^\$;\s*$/m);
  assert.match(sql,/with recursive ancestry/);
  assert.match(sql,/join ancestry/);
  assert.match(sql,/p_query/);
