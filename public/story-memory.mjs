@@ -182,10 +182,14 @@ function makeSnapshot({world,branch,lineage,characters,stage,kind,handoff_note='
    start_after_scene_id:stage?.start_after_scene_id??null,scene_count:selected.length},
   scope:'Подтверждённая действующая цепочка, а не видимое окно текущего чата',
   source_scene_ids:selected.map(s=>s.id),
+  scanned_world_scenes:lineage.length,
+  causal_facts:causal.facts,causal_offscreen_events:causal.offscreen_events,
+  causal_warnings:causal.warnings,resource_warnings:assets.issues,
+  character_warnings:people.warnings,depth_warnings:depth.warnings,
   chronology:allScenes,
   open_threads:causal.open_threads,resolved_threads:causal.resolved_threads,
   characters:people.characters.map(c=>({
-   name:c.name,origin:c.origin,initial:c.initial,state:c.state,
+   name:c.name,origin:c.origin,initial:c.initial,state:c.state,introduced_scene_id:c.introduced_scene_id,
    knowledge:c.knowledge,beliefs:c.beliefs,history:c.history
   })),
   accounts:assets.accounts.map(a=>({person:a.person,currency:a.currency,scale:a.scale,
