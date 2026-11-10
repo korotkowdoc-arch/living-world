@@ -98,8 +98,14 @@ test('OAuth stage open -> checkpoint -> resume -> Year close -> memory search (o
   const checkpointRecord=stored.find(d=>d.category==='checkpoint');
   assert.ok(checkpointRecord);
   assert.match(JSON.parse(checkpointRecord.content).checkpoint_attestation,/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
-  assert.equal(replayFromCheckpoint(JSON.parse(checkpointRecord.content),[],{
-   verified_source_head:true,expected_head:sceneId,world_id:worldId}).recovered,true);
+  const locallyReplayed=replayFromCheckpoint(JSON.parse(checkpointRecord.content),[],{
+   verified_source_head:true,expected_head:sceneId,world_id:worldId});
+  assert.equal(locallyReplayed.recovered,true);
+  assert.ok(Array.isArray(locallyReplayed.economy.accounts));
+  assert.ok(Array.isArray(locallyReplayed.characters.characters));
+  assert.ok(Array.isArray(locallyReplayed.causality.resolved_threads));
+  assert.ok(Array.isArray(locallyReplayed.depth.psychology));
+  locallyReplayed.characters.characters.map(x=>x.history.slice(-25));
   const recoveryPage=await call('get_checkpoint_recovery',{world_id:worldId});
   assert.equal(recoveryPage.validated_checkpoint,true);
   const recovered=await call('get_recovered_state',{world_id:worldId});
