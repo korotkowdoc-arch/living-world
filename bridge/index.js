@@ -5,6 +5,8 @@ import {projectCharacterMemory,actorMemory} from '../public/world-character-memo
 import {validateDepthDelta,depthSemanticWarnings,projectWorldDepth,actorDepth,compareWorldBranches,PSYCHOLOGY_ASPECTS,RELATION_DIMENSIONS} from '../public/world-depth.mjs';
 import {RETRO_INDEX_KEY_PREFIX,retroKey,makeRetroIndex,activeRetroMemories,searchRetroMemories,retroIndexCoverage} from '../public/retrospective-index.mjs';
 import {auditNarrativeScene} from '../public/narrative-audit.mjs';
+import {isReplayableCheckpoint,replayFromCheckpoint} from '../public/checkpoint-replay.mjs';
+import {parseCheckpointDoc} from '../public/story-memory.mjs';
 import {savedSceneStatus} from '../public/save-receipt.mjs';
 import {projectCausalMemory,causalSummary,searchCausalMemory} from '../public/world-causality.mjs';
 import {validStoryClock,isNondecreasingStoryTime} from '../public/continuity.mjs';
@@ -501,6 +503,12 @@ const tools = [
   { name:'compare_story_branches',description:'Сравнение двух веток после «На это:»: общий префикс, аннулированные/новые сцены и факты, изменения отношений и вещей, без слияния отменённого хвоста в текущий канон.',inputSchema:object({
     world_id:uuid,other_branch_id:uuid
   },['world_id','other_branch_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_checkpoint_recovery',description:'Восстановление даже после 30 000 сцен: Supabase транзакционно доказывает, что checkpoint является предком действующей ветки, и выдаёт точную часть checkpoint + новые события. Для полной записи данных нужен установленный checkpoint_recovery.sql. Не заменяет чтение старых шуток.',inputSchema:object({
+    world_id:uuid,checkpoint_offset:{type:'integer',minimum:0,maximum:700000},
+    delta_offset:{type:'integer',minimum:0,maximum:100000},
+    scene_limit:{type:'integer',minimum:1,maximum:100}
+  },['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_recovered_state',description:'Вычислить проверенные текущие деньги, предметы, знания, причинные линии, психологию и отношения из checkpoint плюс следующих сцен. Требует checkpoint_recovery.sql и максимум 5000 сцен после последнего снимка; не делает предположений.',inputSchema:object({world_id:uuid},['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_sync_health',description:'OAuth-проверка компаньона: активная ветка, автосейв, полнота последней сцены, структурированные последствия, документы и источники. Только чтение, без технической записи.',inputSchema:object({world_id:uuid},['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_revision_context',description:'До исправления «На это:» прочитай полный исходный текст валидной сцены и получи защищённый токен актуальной ветки. Ничего не изменяет.',inputSchema:object({world_id:uuid,target_scene_id:uuid},['world_id','target_scene_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'commit_scene_revision',description:'Только по запросу «На это:»: сохраняет исходный валидный префикс плюс новое продолжение в НОВУЮ ветку, без удаления старых сцен. Требует get_revision_context и реальные последствия изменения.',inputSchema:object({
