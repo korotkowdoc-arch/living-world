@@ -5,7 +5,7 @@
 const clean=v=>typeof v==='string'?v.trim():'';
 const key=v=>clean(v).normalize('NFC').toLocaleLowerCase('ru').replace(/ё/g,'е');
 const STATE_FIELDS=Object.freeze(['location','health','mood','status','goals','relationships','inventory']);
-export function projectCharacterMemory(baselines=[],scenes=[],{getDelta}={}){
+export function projectCharacterMemory(baselines=[],scenes=[],{getDelta,seed=null}={}){
  const read=getDelta||((scene)=>scene.changes??scene.delta??{});
  const characters=new Map(),warnings=[];
  function ensure(name){
@@ -26,6 +26,25 @@ export function projectCharacterMemory(baselines=[],scenes=[],{getDelta}={}){
     location:p.location||'',health:p.health||'',mood:p.mood||'',status:p.status||'',inventory:p.inventory||''};
   c.state=Object.fromEntries(STATE_FIELDS.map(f=>[f,c.initial[f]||'']));
   c.origin='baseline';
+ }
+ if(seed){
+  if(seed.complete!==true||!Array.isArray(seed.characters)||
+    !Number.isSafeInteger(seed.scanned_scenes))
+   throw Error('Checkpoint знаний неполон или неподтверждён.');
+  for(const previous of seed.characters){
+   if(!clean(previous.name))throw Error('Персонаж checkpoint без имени.');
+   const c=ensure(previous.name);
+   c.name=previous.name;c.origin=previous.origin||'checkpoint';
+   c.initial=previous.initial?{...previous.initial}:null;
+   c.state={...previous.state};
+   c.introduced_scene_id=previous.introduced_scene_id??null;
+   c.knowledge=(Array.isArray(previous.knowledge)?previous.knowledge:[])
+    .map(x=>({normalized:key(x.fact),...x}));
+   c.beliefs=(Array.isArray(previous.beliefs)?previous.beliefs:[])
+    .map(x=>({normalized:key(x.text),...x}));
+   c.history=(Array.isArray(previous.history)?previous.history:[]).map(x=>({...x}));
+  }
+  if(Array.isArray(seed.warnings))warnings.push(...seed.warnings);
  }
  for(const scene of scenes){
   const delta=read(scene)||{};
@@ -70,7 +89,7 @@ export function projectCharacterMemory(baselines=[],scenes=[],{getDelta}={}){
   beliefs:c.beliefs.map(({normalized,...rest})=>rest),
   history:c.history
  }));
- return {complete:true,scanned_scenes:scenes.length,characters:output,warnings};
+ return {complete:true,scanned_scenes:(seed?.scanned_scenes||0)+scenes.length,characters:output,warnings,recovered_from_checkpoint:!!seed};
 }
 export function actorMemory(ledger,actorNames=[],{maxEntries=200}={}){
  const names=new Set(actorNames.map(key));
