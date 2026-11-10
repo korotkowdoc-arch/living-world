@@ -74,9 +74,33 @@ export function activeLineage(allScenes,headId,max=50000){
 const accountKey=(name,currency,scale)=>JSON.stringify([name,currency,scale]);
 function newAccount(person,currency,scale){return {person,currency,scale,known:false,balance:null,observed_delta:0,entries:[]};}
 function requireItem(items,id,action){const item=items.get(id);if(!item||!item.exists)fail('Нельзя выполнить '+action+': предмет '+id+' отсутствует в этой ветке.');return item;}
-export function projectCompanion(scenes,{getDelta,strict=false}={}){
+export function projectCompanion(scenes,{getDelta,strict=false,seed=null}={}){
   const read=getDelta??(scene=>scene.changes??scene.delta??{});
-  const accounts=new Map(),items=new Map(),characters=new Map(),audit=[],issues=[],seenOps=new Set();
+  const accounts=new Map(),items=new Map(),characters=new Map();
+  const audit=[],issues=[],seenOps=new Set();
+  // Seed is a trusted, source-head-verified immutable checkpoint; never accept
+  // an arbitrary unverified prompt as a financial opening balance.
+  if(seed){
+    if(seed.complete!==true||!Array.isArray(seed.accounts)||!Array.isArray(seed.items)||
+       !Array.isArray(seed.new_characters)||!Number.isSafeInteger(seed.scanned_scenes))
+      fail('Checkpoint финансов и предметов неполон; пересчёт без надёжного seed запрещён.');
+    for(const a of seed.accounts){
+      if(!validPerson(a.person)||!str(a.currency,20)||!Number.isInteger(a.scale)||
+        typeof a.known!=='boolean'||(a.known&&!Number.isSafeInteger(a.balance)))
+        fail('Некорректный счёт в checkpoint.');
+      const cloned={...a,entries:Array.isArray(a.entries)?a.entries.map(e=>({...e})):[]};
+      accounts.set(accountKey(a.person,a.currency,a.scale),cloned);
+    }
+    for(const item of seed.items){
+      if(!str(item.id,100)||typeof item.exists!=='boolean')fail('Предмет в checkpoint некорректен.');
+      items.set(item.id,{...item,history:Array.isArray(item.history)?item.history.map(e=>({...e})):[]});
+    }
+    for(const npc of seed.new_characters){
+      if(!validPerson(npc.name))fail('Неправильный NPC в checkpoint.');
+      characters.set(npc.name.toLocaleLowerCase('ru'),{...npc});
+    }
+    if(Array.isArray(seed.issues))issues.push(...seed.issues);
+  }
   const acc=(person,currency,scale)=>{
     const key=accountKey(person,currency,scale);
     if(!accounts.has(key))accounts.set(key,newAccount(person,currency,scale));
@@ -153,7 +177,9 @@ export function projectCompanion(scenes,{getDelta,strict=false}={}){
       characters.set(key,{...c,created_scene_id:scene.id,created_at:scene.world_time});
     }
   }
-  return {accounts:Array.from(accounts.values()),items:Array.from(items.values()),new_characters:Array.from(characters.values()),audit,issues,scanned_scenes:scenes.length,complete:true};
+  return {accounts:Array.from(accounts.values()),items:Array.from(items.values()),new_characters:Array.from(characters.values()),
+    audit,issues,scanned_scenes:(seed?.scanned_scenes||0)+scenes.length,complete:true,
+    recovered_from_checkpoint:!!seed};
 }
 export function formatAmount(account){
   if(!account)return 'неизвестно';
