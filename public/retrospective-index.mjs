@@ -36,7 +36,10 @@ export function validateRetroAnnotations(sourceBody,entries=[]){
   if(!Array.isArray(e.known_by??[])||knowing.length>20)throw Error('known_by должен быть массивом доказанных каналов знаний.');
   const known_by=knowing.map(k=>{
    if(!isObj(k)||!name(k.actor)||!clean(k.channel,220)||!clean(k.evidence,700)||
-    !sourceBody.includes(k.evidence))throw Error('Для известности факта нужен актор, канал и дословное подтверждение из исходной сцены.');
+    !sourceBody.includes(k.evidence))
+    throw Error('Для известности факта нужен актор, канал и дословное подтверждение из исходной сцены.');
+   if(!sourceBody.toLocaleLowerCase('ru').includes(name(k.actor).toLocaleLowerCase('ru')))
+    throw Error('Имя знающего не упоминается в исходной сцене. Укажи источник по другой сцене или оставь known_by пустым.');
    return {actor:name(k.actor),channel:clean(k.channel,220),evidence:clean(k.evidence,700)};
   });
   const tags=arr(e.tags);
