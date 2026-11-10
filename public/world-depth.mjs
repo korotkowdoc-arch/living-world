@@ -3,6 +3,8 @@
  * Observations and actor interpretations never become omniscient world facts.
  * Works only on valid scene ancestry; no GPT API or autonomous fiction.
  */
+import {projectCausalMemory} from './world-causality.mjs';
+import {projectCharacterMemory} from './world-character-memory.mjs';
 export const PSYCHOLOGY_ASPECTS=Object.freeze(['trait','value','fear','desire','habit','boundary','coping','trigger','self_image','inner_conflict','motivation']);
 export const RELATION_DIMENSIONS=Object.freeze(['trust','respect','affection','irritation','fear','attraction','loyalty','resentment','comfort','jealousy','solidarity','distance']);
 export const RELATION_SHIFTS=Object.freeze(['increased','decreased','unchanged','ambivalent','emerged']);
@@ -216,6 +218,28 @@ export function compareWorldBranches(left=[],right=[],{getDelta}={}){
  const facts=s=>new Set(s.flatMap(sc=>safeArray((readDelta(sc)||{}).facts)));
  const lFacts=facts(left),rFacts=facts(right);
  const difference=(a,b)=>[...a].filter(x=>!b.has(x));
+ const oldCausal=projectCausalMemory(left,{getDelta:readDelta});
+ const newCausal=projectCausalMemory(right,{getDelta:readDelta});
+ const oldActors=projectCharacterMemory([],left,{getDelta:readDelta});
+ const newActors=projectCharacterMemory([],right,{getDelta:readDelta});
+ const named=t=>new Map(t.map(e=>[key(e.text),e]));
+ const previousThreads=named(oldCausal.open_threads),currentThreads=named(newCausal.open_threads);
+ const oldKnowledge=oldActors.characters.flatMap(c=>c.knowledge.map(k=>({actor:c.name,...k})));
+ const newKnowledge=newActors.characters.flatMap(c=>c.knowledge.map(k=>({actor:c.name,...k})));
+ const knowledgeId=k=>key(k.actor)+'|'+key(k.fact);
+ const oldKnowledgeIds=new Set(oldKnowledge.map(knowledgeId)),
+  newKnowledgeIds=new Set(newKnowledge.map(knowledgeId));
+ const psychChanges=[];
+ const byName=list=>new Map(list.map(p=>[key(p.name),p]));
+ const oldPsych=byName(leftDepth.psychology),newPsych=byName(rightDepth.psychology);
+ for(const actor of new Set([...oldPsych.keys(),...newPsych.keys()])){
+  const before=oldPsych.get(actor),now=newPsych.get(actor);
+  for(const aspect of new Set([...Object.keys(before?.aspects||{}),...Object.keys(now?.aspects||{})])){
+   const b=before?.aspects[aspect]||null,a=now?.aspects[aspect]||null;
+   if(b?.scene_id!==a?.scene_id||b?.observation!==a?.observation)
+    psychChanges.push({actor,aspect,was:b,now:a});
+  }
+ }
  const relationKey=l=>key(l.from)+'→'+key(l.to),dimensionDiff=[];
  const lMap=new Map(leftDepth.relationships.map(l=>[relationKey(l),l]));
  const rMap=new Map(rightDepth.relationships.map(l=>[relationKey(l),l]));
@@ -234,6 +258,11 @@ export function compareWorldBranches(left=[],right=[],{getDelta}={}){
   invalidated_facts:difference(lFacts,rFacts),
   new_facts:difference(rFacts,lFacts),
   relationship_changes:dimensionDiff,
+  psychology_changes:psychChanges,
+  open_threads_only_in_previous:[...previousThreads].filter(([k])=>!currentThreads.has(k)).map(([,v])=>v),
+  open_threads_only_in_current:[...currentThreads].filter(([k])=>!previousThreads.has(k)).map(([,v])=>v),
+  knowledge_only_in_previous:oldKnowledge.filter(k=>!newKnowledgeIds.has(knowledgeId(k))),
+  knowledge_only_in_current:newKnowledge.filter(k=>!oldKnowledgeIds.has(knowledgeId(k))),
   old_memory_ids:divergentLeft.flatMap(s=>safeArray(readDelta(s).memories).map(m=>m.id)),
   new_memory_ids:divergentRight.flatMap(s=>safeArray(readDelta(s).memories).map(m=>m.id)),
   old_confirmed_offscreen:divergentLeft.flatMap(s=>safeArray(readDelta(s).npc_offscreen).map(e=>e.id)),
