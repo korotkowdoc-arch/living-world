@@ -85,5 +85,20 @@ export function renderBranchComparisonView(diff){
     <h4>Новые факты</h4>
     ${list(diff.new_facts?.slice(0,40),x=>`<p>${cut(x,800)}</p>`)}</div>
    </div><h3>Изменения связей</h3><ul>${lines}</ul>
+   <h3>Психологические изменения</h3>
+   ${list(diff.psychology_changes?.slice(0,45),e=>`<p><b>${cut(e.actor,120)} · ${cut(e.aspect,80)}</b>:
+    ${cut(e.was?.observation||'не зафиксировано',500)} → ${cut(e.now?.observation||'не зафиксировано',500)}</p>`)}
+   <div class="grid">
+    <div><h3>Обязательства только в старой ветке</h3>
+      ${list(diff.open_threads_only_in_previous?.slice(0,50),e=>`<p>${cut(e.text,800)}${proof({scene_id:e.opened_scene_id,world_time:e.opened_at})}</p>`)}
+     <h3>Знания только в старой ветке</h3>
+      ${list(diff.knowledge_only_in_previous?.slice(0,50),e=>`<p><b>${cut(e.actor,120)}</b> — ${cut(e.fact,800)}${proof(e)}</p>`)}
+    </div>
+    <div><h3>Обязательства только в действующей ветке</h3>
+      ${list(diff.open_threads_only_in_current?.slice(0,50),e=>`<p>${cut(e.text,800)}${proof({scene_id:e.opened_scene_id,world_time:e.opened_at})}</p>`)}
+     <h3>Новые знания действующей ветки</h3>
+      ${list(diff.knowledge_only_in_current?.slice(0,50),e=>`<p><b>${cut(e.actor,120)}</b> — ${cut(e.fact,800)}${proof(e)}</p>`)}
+    </div>
+   </div>
    <p class="footnote">Старую ветку можно просматривать и сравнивать. Её события не переносятся автоматически в действительный канон.</p></div>`;
 }
