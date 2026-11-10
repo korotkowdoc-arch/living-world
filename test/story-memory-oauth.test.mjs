@@ -85,6 +85,9 @@ test('OAuth stage open -> checkpoint -> resume -> Year close -> memory search (o
    handoff_note:'Обещание книги важно Лии.',evidence_scene_ids:[sceneId]});
   assert.equal(cp.persisted,true);
   assert.equal(cp.stage_title,'До Хогвартса');
+  const checkpointRecord=stored.find(d=>d.category==='checkpoint');
+  assert.ok(checkpointRecord);
+  assert.match(JSON.parse(checkpointRecord.content).checkpoint_attestation,/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
   const resumed=await call('get_resume_context',{world_id:worldId,offset:0,limit:25000});
   assert.equal(resumed.checkpoint_found,true);
   assert.match(resumed.checkpoint.content,/Обещание книги важно Лии/);
