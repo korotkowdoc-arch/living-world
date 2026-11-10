@@ -1221,10 +1221,30 @@ async function call(name,args,env,identity) {
   }
   if(name==='search_story_memories'){
     if(!live)throw Error('Поиск реальных воспоминаний доступен только в рабочем мире.');
-    const full=await loadFullWorldLineage(env,identity,id);
-    if(!full.complete)throw Error('Не удалось восстановить всю память: '+full.reason);
-    const query=String(args.query||'').trim().slice(0,200);
+    const query=String(args.query||'').trim().slice(0,150);
     if(!query)throw Error('Укажи слово, фразу или тему воспоминания.');
+    const full=await loadFullWorldLineage(env,identity,id);
+    if(!full.complete){
+     if(query.length<3)throw Error('Для долгой истории нужно хотя бы три символа запроса.');
+     const sql=await supabase(env,'/rest/v1/rpc/lw_bridge_v4_search_active_scenes',{
+      token:identity.token,body:{p_world:id,p_query:query,p_offset:0,p_limit:Math.min(50,args.limit??20)}});
+     if(!sql?.verified||sql.world_id!==id)throw Error('Поиск не подтвердил действительную ветку.');
+     const filtered=sql.rows.map(r=>({
+      scene_id:r.id,world_time:r.world_time,excerpt:r.excerpt,
+      kind:r.body_match?'original_scene_text':'structured_scene_note',
+      known_by:'not_established',open_full_scene_with:'get_story_scene'}));
+     const annotations=searchStoryMemories(sql.rows.map(r=>({
+      id:r.id,world_time:r.world_time,prompt_note:r.prompt_note})),{
+      query,actor_names:args.actor_names||[],kind:args.kind||null,limit:args.limit??20});
+     return {mode,world_id:id,query,verified_active_branch:true,
+      recovery_mode:'sql_active_ancestry_search',
+      active_branch_id:sql.active_branch_id,current_head:sql.current_head,
+      structured_memories:annotations,original_scene_matches:filtered,
+      matching_year_documents:[],reviewed_legacy_memories:{total:0,items:[]},
+      search_complete:sql.next_offset===null,next_offset:sql.next_offset,
+      total_matches:sql.match_total,
+      warning:'Больше 30 000 строк мира: поиск проверяет ТОЛЬКО действительную ветку через SQL. Старые Year Documents и отдельно аннотированные воспоминания при необходимости открывай по ключу; полная проверка всех них в этом ответе не выполнялась.'};
+    }
     const structured=searchStoryMemories(full.lineage,{query,actor_names:args.actor_names||[],
      kind:args.kind||null,limit:args.limit??20});
     const stages=await loadStageState(env,identity,id,full.lineage);
