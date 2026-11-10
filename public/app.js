@@ -12,6 +12,7 @@ import {persistWorldAutosave} from './world-autosave.mjs';
 import {projectCharacterMemory} from './world-character-memory.mjs';
 import {STAGE_CONTROL_KEY} from './story-memory.mjs';
 import {projectWorldDepth,compareWorldBranches} from './world-depth.mjs';
+import {renderWorldDepthView,renderBranchComparisonView} from './world-depth-ui.mjs';
 import {WORLD_TEXT_FIELDS,CHARACTER_TEXT_FIELDS,worldDraftPrompt,parseWorldDraft,worldDraftFieldFromJSON,characterDraftPrompt,parseCharacterDraft,characterDraftFieldFromJSON} from './gpt-prompts.mjs';
 import {companionSettings,mergeCompanionPreferences} from './companion-settings.mjs';
 import {companionHealth} from './companion-health.mjs';
@@ -419,9 +420,29 @@ function renderMemory(){
  ${box('События вне кадра ('+m.counts.offscreen_events+')',`<ul>${m.offscreen_events.slice(-40).map(renderEvent).join('')||'<li>Пока не зафиксированы.</li>'}</ul>`)}
  </div>
  ${m.warnings.length?`<div class="attention">В журнале обнаружены ${m.warnings.length} закрытых линий без ранее найденного открытия. Проверь источник.</div>`:''}
+ ${renderWorldDepthView(state.depthLedger,{query:state.depthQuery})}
  ${renderCharacterMemory()}`;
 }
-function renderHistory(){if(!state.world)return needsWorld();return `${heading('Временные линии','Ветки реальности','Каждая правка сохраняет прежний вариант, но не переносит отменённые события.')}<div class="panel">${state.branches.map(b=>`<div class="listrow"><div><b>${x(b.name)}</b> ${b.id===state.world.active_branch_id?'<span class="tag">Действующая</span>':''}<p>Создана: ${x(new Date(b.created_at).toLocaleString('ru-RU'))}</p><p>Текущая сцена: ${x(b.head_scene_id||'нет')}</p></div>${b.id!==state.world.active_branch_id?`<button class="btn small" data-action="switch-branch" data-id="${x(b.id)}">Перейти</button>`:''}</div>`).join('')}</div><div class="well" style="margin-top:16px">Чтобы изменить прошлое, в разделе «История» нажми «На это» под нужной сценой. Новая ветка возникнет автоматически.</div>`;}
+function renderHistory(){
+ if(!state.world)return needsWorld();
+ const active=state.world.active_branch_id;
+ const alternatives=state.branches.filter(b=>b.id!==active);
+ const rows=state.branches.map(b=>`<div class="listrow"><div>
+ <b>${x(b.name)}</b> ${b.id===active?'<span class="tag">Действующая</span>':''}
+ <p>Создана: ${x(new Date(b.created_at).toLocaleString('ru-RU'))}</p>
+ <p>Последняя сцена: ${x(b.head_scene_id||'нет')}</p>
+ </div>${b.id!==active?`<button class="btn small" data-action="switch-branch" data-id="${x(b.id)}">Перейти</button>`:''}</div>`).join('');
+ const compare=alternatives.length?`<div class="panel"><h2 class="section-title">Машина времени: сравнить с другой веткой</h2>
+ <div class="field"><label for="compare-branch">Старая ветка</label>
+ <select id="compare-branch">${alternatives.map(b=>opt(b.id,b.name,alternatives[0].id)).join('')}</select></div>
+ <div class="row">${btn('compare-branches-local','Сравнить изменения','gold')}${btn('compare-branches-gpt','✦ Детальное сравнение через GPT')}</div>
+ <p class="hint">Разница рассчитывается по сценам каждого варианта; отменённая ветка не становится каноном.</p>
+ </div>`:''; 
+ return `${heading('Временные линии','Ветки реальности','Каждая правка сохраняет прежний вариант, но не переносит отменённые события.')}
+ <div class="panel">${rows}</div>${compare}
+ ${renderBranchComparisonView(state.branchComparison)}
+ <div class="well" style="margin-top:16px">Чтобы изменить прошлое, в разделе «История» нажми «На это» под нужной сценой. Новая ветка возникнет автоматически.</div>`;
+}
 function renderSettings(){const w=state.world,auto=w?.genesis_choices?.auto_save_enabled===true;
 return `${heading('Настройки','Моё приложение','Приватность, модели, резервное копирование и вход.')}<div class="panel stack">${renderSyncHealth()}${w?`<div class="ai-status">
 <b>Импорт документов из ChatGPT: ${w.genesis_choices?.document_upload_enabled===true?'разрешён':'запрещён'}</b>
@@ -1006,6 +1027,46 @@ case 'health-reload':await reloadSyncHealth();return;
 case 'navigate':await openSection(el.dataset.view);return;
 case 'goto-memory':await openSection('memory');return;
 case 'memory-reload':await reloadSceneData();return;
+case 'depth-search':state.depthQuery=document.getElementById('depth-query')?.value?.trim()||'';render();return;
+case 'depth-copy-retro':{
+ if(!state.world)throw Error('Сначала выбери мир.');
+ await clipboard('LIVING WORLD Bridge OAuth. В мире '+state.world.id+' вызови get_memory_review_queue, затем get_story_scene для одной или нескольких старых сцен. Извлеки не выдумывая только шутки, обещания, цитаты и личные воспоминания с дословной evidence из текста. Согласуй записи со мной и вызови index_legacy_scene_memories с настоящим expected_head. НИКОГДА не изменяй оригинальные сцены и не приписывай знания NPC без канала.');
+ return;
+}
+case 'depth-copy-npc':{
+ if(!state.world)throw Error('Сначала выбери мир.');
+ await clipboard('LIVING WORLD Bridge OAuth. Для мира '+state.world.id+' перед продолжением событий вне кадра получи get_npc_offscreen_brief с нужными actor_names, проверь цели, доступные знания, положение, ресурсы и уже подтверждённые события NPC. НЕ считай их планы состоявшимися. Сцену создавай только из причинно возможных действий. После сцены проверь изменения.');
+ return;
+}
+case 'depth-copy-audit':{
+ if(!state.world)throw Error('Сначала выбери мир.');
+ await clipboard('LIVING WORLD Bridge OAuth. Перед сохранением следующей сцены мира '+state.world.id+' выполни audit_scene_draft с её полным текстом, world_time и changes. Не сохраняй при ошибках. Предупреждения о знании, предметах и психологических интерпретациях проверь с оригинальными сценами. Далее get_scene_preflight и save_scene_auto с токеном и проверкой persisted:true.');
+ return;
+}
+case 'depth-copy-recovery':{
+ if(!state.world)throw Error('Сначала выбери мир.');
+ await clipboard('LIVING WORLD Bridge OAuth. Восстанови подтверждённое состояние мира '+state.world.id+' из последнего совместимого checkpoint командой get_recovered_state. Для следующего чата используй get_checkpoint_recovery, дочитывай все части checkpoint и дельты, сверяй с Year Documents. Если Supabase отвечает, что не установлена миграция checkpoint_recovery.sql, скажи мне об этом и НЕ делай вид, будто восстановление проверено.');
+ return;
+}
+case 'compare-branches-local':{
+ if(!state.world)throw Error('Сначала выбери мир.');
+ if(!state.allWorldRows||!state.activeLineage?.length)await loadAssets();
+ const otherId=document.getElementById('compare-branch')?.value;
+ const other=state.branches.find(b=>b.id===otherId);
+ if(!other?.head_scene_id||!state.allWorldRows)throw Error('Другая ветка не загружена.');
+ const previous=activeLineage(state.allWorldRows,other.head_scene_id);
+ state.branchComparison=compareWorldBranches(previous,state.activeLineage,{
+  getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}
+ });
+ render();return;
+}
+case 'compare-branches-gpt':{
+ if(!state.world)throw Error('Сначала выбери мир.');
+ const otherId=document.getElementById('compare-branch')?.value;
+ if(!otherId)throw Error('Выбери ветку.');
+ await clipboard('LIVING WORLD Bridge OAuth. В мире '+state.world.id+' сравни действующую ветку с '+otherId+' через compare_story_branches. Проверь различия персонажей, отношений, предметов, обещаний и отменённые события. Старую ветку не восстанавливай как канон.');
+ return;
+}
 case 'memory-search':state.memoryQuery=document.getElementById('memory-query')?.value?.trim()||'';state.memoryKind=document.getElementById('memory-kind')?.value||'fact';state.memoryOffset=0;render();return;
 case 'memory-prev':state.memoryOffset=Math.max(0,state.memoryOffset-40);render();return;
 case 'memory-next':state.memoryOffset+=40;render();return;
