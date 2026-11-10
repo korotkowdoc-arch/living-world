@@ -1916,7 +1916,7 @@ export default {async fetch(request,env={}){
       world_time:time,prompt_note:packSceneNote({facts:['Координаты маяка расшифрованы.']})}));
   }
   if(request.method==='GET' && path==='/health') return json({
-    service:'living-world-bridge',version:'3.0.0',
+    service:'living-world-bridge',version:'3.4.0',
     mode:env.BRIDGE_MODE==='live'?'live':'not-live',
     missing_configuration:['BRIDGE_PUBLIC_URL','SUPABASE_URL','SUPABASE_OAUTH_CLIENT_ID','BRIDGE_SUPABASE_USER_ID','SUPABASE_PUBLISHABLE_KEY','BRIDGE_SEAL_KEY'].filter(name=>!env[name]),
     writes_enabled:writesEnabled(env)
