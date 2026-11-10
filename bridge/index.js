@@ -1412,6 +1412,9 @@ async function call(name,args,env,identity) {
   }
   if(name==='index_legacy_scene_memories'){
    if(!live||!writesEnabled(env))throw Error('Запись аннотаций недоступна.');
+   const authorization=await rpc('lw_bridge_v2_state',{p_world:id});
+   if(authorization.world?.genesis_choices?.document_upload_enabled!==true)
+    throw Error('Владелец ещё не разрешил импорт документов из ChatGPT. Включи его в настройках нужного мира.');
    const sceneId=checkId(args.scene_id),expected=checkId(args.expected_head);
    const full=await loadFullWorldLineage(env,identity,id);
    if(!full.complete||full.state.branch.head_scene_id!==expected||
