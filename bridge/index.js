@@ -1177,6 +1177,132 @@ async function call(name,args,env,identity) {
       scanned_scenes:full.lineage.length,counts:memory.counts,
       ...searchCausalMemory(memory,{kind:args.kind??'fact',query:args.query??'',offset:args.offset??0,limit:args.limit??40})};
   }
+  if(name==='get_world_depth'){
+   if(!live)throw Error('Психологическая память доступна только для действительной истории.');
+   const full=await loadFullWorldLineage(env,identity,id);
+   if(!full.complete)throw Error('Нет полной валидной ветки: '+full.reason);
+   const get=s=>readSceneNote(s.prompt_note)?.delta||{};
+   const depth=projectWorldDepth(full.lineage,{getDelta:get});
+   const names=(args.actor_names||[]).length?args.actor_names:depth.psychology.map(p=>p.name);
+   const selected=actorDepth(depth,names,{maxHistory:60});
+   return {mode,world_id:id,branch_id:full.state.branch.id,
+    source_head:full.state.branch.head_scene_id,scanned_scenes:depth.scanned_scenes,
+    ...selected,all_relationships_count:depth.relationships.length,
+    warning:'Интерпретации и противоречивые чувства остаются субъективными. Не называй их объективными фактами.'};
+  }
+  if(name==='get_npc_offscreen_brief'){
+   if(!live)throw Error('Нельзя строить жизнь NPC из демоданных.');
+   const full=await loadFullWorldLineage(env,identity,id);
+   if(!full.complete)throw Error('Не установлена валидная причинная история: '+full.reason);
+   const get=s=>readSceneNote(s.prompt_note)?.delta||{};
+   const depth=projectWorldDepth(full.lineage,{getDelta:get});
+   const people=projectCharacterMemory(full.state.characters||[],full.lineage,{getDelta:get});
+   const names=Array.isArray(args.actor_names)?args.actor_names:[];
+   const selected=actorDepth(depth,names,{maxHistory:45});
+   const brief=names.map(n=>{
+    const char=people.characters.find(p=>p.name.toLocaleLowerCase('ru')===n.toLocaleLowerCase('ru'));
+    return {name:n,exists:!!char,
+     confirmed_state:char?{role:char.initial?.role||'npc',location:char.state.location,
+      health:char.state.health,goals:char.state.goals,knowledge:char.knowledge,
+      beliefs:char.beliefs,recent_actions:char.history.slice(-20)}:null};
+   });
+   return {mode,world_id:id,source_head:full.state.branch.head_scene_id,
+    people:brief,psychology:selected.psychology,relationships:selected.relationships,
+    confirmed_offscreen:selected.confirmed_offscreen,
+    intended_not_yet_happened:selected.npc_intentions,
+    rules:['Учитывай реальные даты и расстояния','Не сообщай герою о неизвестных ему событиях',
+     'Не выдавай намерения NPC за события','Фиксируй совершившееся только если оно действительно прозвучало в валидной художественной сцене',
+     'У NPC есть свои цели, препятствия и возможность отказаться, даже если это неудобно сюжету']};
+  }
+  if(name==='get_memory_review_queue'){
+   if(!live)throw Error('Индексация старых сцен доступна только для твоего мира.');
+   const full=await loadFullWorldLineage(env,identity,id);
+   if(!full.complete)throw Error('Не удалось проверить действующую ветку: '+full.reason);
+   const docs=await sourceDocList(env,identity,id,{full:true});
+   if(!docs.installed)throw Error('Библиотека воспоминаний недоступна: '+docs.message);
+   const progress=retroIndexCoverage(full.lineage,docs.docs,id);
+   const offset=boundedInteger(args.offset??0,0,30000),limit=boundedInteger(args.limit??20,1,30);
+   return {mode,world_id:id,branch_id:full.state.branch.id,source_head:full.state.branch.head_scene_id,
+    source_scene_count:progress.source_scene_count,indexed_scene_count:progress.indexed_scene_count,
+    remaining_count:progress.remaining_count,
+    pending:progress.pending.slice(offset,offset+limit),next_offset:offset+limit<progress.remaining_count?offset+limit:null,
+    instructions:'Вызови get_story_scene для каждого ID, выдели ДОСЛОВНЫЕ цитаты и evidence, затем index_legacy_scene_memories. Если значимых воспоминаний нет, допустим пустой entries для пометки как проверенная сцена. Не изменяй исходный текст.'};
+  }
+  if(name==='index_legacy_scene_memories'){
+   if(!live||!writesEnabled(env))throw Error('Запись аннотаций недоступна.');
+   const sceneId=checkId(args.scene_id),expected=checkId(args.expected_head);
+   const full=await loadFullWorldLineage(env,identity,id);
+   if(!full.complete||full.state.branch.head_scene_id!==expected||
+      !full.lineage.some(s=>s.id===sceneId))
+    throw Error('Текущая ветка/последняя сцена поменялась или исходная сцена аннулирована.');
+   const rows=await supabase(env,'/rest/v1/lw_scenes?world_id=eq.'+encodeURIComponent(id)+
+    '&id=eq.'+sceneId+'&select=id,body,world_time,prompt_note&limit=1',{token:identity.token});
+   if(!Array.isArray(rows)||rows.length!==1)throw Error('Невозможно проверить полный текст исходной сцены.');
+   const original=rows[0],digest=await fingerprint(original.body);
+   const entry=makeRetroIndex({worldId:id,scene:original,head:expected,
+    entries:args.entries||[],digest});
+   await assertMemoryHead(env,identity,id,expected,full.state.branch.id);
+   const save=await writeSystemArchive(env,identity,id,{
+    key:entry.key,title:entry.title,category:entry.category,content:entry.content});
+   const checked=await assertMemoryHead(env,identity,id,expected,full.state.branch.id).then(()=>true).catch(()=>false);
+   return {mode,persisted:true,scene_id:sceneId,source_digest:digest,
+    source_text_unchanged:true,document_key:entry.key,revision:save.revision,
+    memories:entry.count,unchanged:!!save.unchanged,head_still_current:checked,
+    warning:checked?null:'Пока сохраняли индекс, ветка поменялась. Аннотация допустима только если исходная сцена осталась валидной; повторно проверь активную ветку.'};
+  }
+  if(name==='audit_scene_draft'){
+   const state=live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState();
+   const body=String(args.scene||''),time=String(args.world_time||'');
+   let parsed;
+   try{parsed=parseScenePackage(JSON.stringify({scene:body,world_time:time,changes:args.changes}));}
+   catch(error){
+    return {mode,world_id:id,passed:false,counts:{errors:1,warnings:0,information:0},
+     issues:[{code:'INVALID_SCENE_PACKET',severity:'error',detail:error.message}],
+     caveat:'Инструмент проверяет только явную структуру. Нельзя гарантировать все психологические нюансы автоматической проверкой.'};
+   }
+   const actors=state.characters||[];
+   const report=auditNarrativeScene({scene:parsed.scene,world_time:time,
+    previous_time:state.scenes?.at(-1)?.world_time||state.world?.genesis_choices?.current_period||'',
+    changes:parsed.changes,characters:actors});
+   if(live&&(parsed.changes.economy.length||parsed.changes.items.length)){
+    const current=await companionState(env,identity,id);
+    if(!current.complete)report.issues.push({code:'ASSETS_NOT_VERIFIABLE',severity:'error',detail:current.reason});
+    else{
+     try{validateNextEvents(current,parsed.changes,actors);}
+     catch(error){report.issues.push({code:'INVALID_ACCOUNT_OR_ITEM',severity:'error',detail:error.message});}
+    }
+   }
+   report.counts={errors:report.issues.filter(e=>e.severity==='error').length,
+    warnings:report.issues.filter(e=>e.severity==='warning').length,
+    information:report.issues.filter(e=>e.severity==='info').length};
+   report.passed=report.counts.errors===0;
+   return {mode,world_id:id,source_head:state.branch?.head_scene_id,audit:report,
+    note:'Это предварительный аудит, он ничего не сохраняет. Для сохранения всё равно нужны get_scene_preflight и save_scene_auto.'};
+  }
+  if(name==='compare_story_branches'){
+   if(!live)throw Error('Сравнение веток требует сохранённую историю.');
+   const other=checkId(args.other_branch_id),full=await loadFullWorldLineage(env,identity,id);
+   if(!full.complete)throw Error('В мире неполная цепочка: '+full.reason);
+   const rows=await supabase(env,'/rest/v1/lw_branches?world_id=eq.'+encodeURIComponent(id)+
+    '&id=eq.'+other+'&select=id,name,head_scene_id&limit=1',{token:identity.token});
+   if(!Array.isArray(rows)||rows.length!==1)throw Error('Другая ветка недоступна владельцу мира.');
+   const alt=activeLineage(full.all_rows,rows[0].head_scene_id),get=s=>readSceneNote(s.prompt_note)?.delta||{};
+   const diff=compareWorldBranches(alt,full.lineage,{getDelta:get});
+   const before=projectCompanion(alt,{getDelta:get}),after=projectCompanion(full.lineage,{getDelta:get});
+   const map=v=>new Map(v.map(x=>[x.id,x]));
+   const oldItems=map(before.items),newItems=map(after.items);
+   const item_differences=[...new Set([...oldItems.keys(),...newItems.keys()])].flatMap(k=>{
+    const was=oldItems.get(k)||null,now=newItems.get(k)||null;
+    return JSON.stringify(was)===JSON.stringify(now)?[]:[{item_id:k,old:was,new:now}];
+   });
+   return {mode,world_id:id,current_branch_id:full.state.branch.id,
+    compared_branch_id:other,compared_branch_title:rows[0].name,
+    current_head:full.state.branch.head_scene_id,other_head:rows[0].head_scene_id,
+    ...diff,item_differences:item_differences.slice(0,150),
+    item_differences_complete:item_differences.length<=150,
+    warnings:[...before.issues,...after.issues].slice(-25),
+    warning:'Аннулированное прошлое читается ТОЛЬКО как материал сравнения, но не переносится в активную историю.'};
+  }
   if(name==='get_sync_health'){
     const state=live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState();
     const base=branchState(state,mode);
