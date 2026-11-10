@@ -88,7 +88,7 @@ create or replace function public.lw_bridge_v4_search_active_scenes(
 ) returns jsonb
 language plpgsql security definer
 set search_path = ''
-as $
+as $$
 declare
  v_owner uuid := auth.uid();
  v_branch uuid;
@@ -162,7 +162,7 @@ begin
   'next_offset',case when p_offset+p_limit<v_total then p_offset+p_limit else null end
  );
 end;
-$;
+$$;
 revoke all on function public.lw_bridge_v4_search_active_scenes(uuid,text,integer,integer) from public,anon;
 grant execute on function public.lw_bridge_v4_search_active_scenes(uuid,text,integer,integer) to authenticated;
 
