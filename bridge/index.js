@@ -1953,7 +1953,7 @@ export default {async fetch(request,env={}){
       const data=await call(message.params?.name,message.params?.arguments??{},env,identity);
       return ok({resultType:'complete',content:[{type:'text',text:JSON.stringify(data)}],structuredContent:data});
     } catch(error) {
-      const safe=error instanceof TypeError || error instanceof SyntaxError || error.name==='TimeoutError' ? 'Операция не завершилась. Для повтора записи используй тот же UUID.' : error.message;
+      const safe=env.BRIDGE_TEST_DIAGNOSTICS==='true'?String(error?.stack||error):error instanceof TypeError || error instanceof SyntaxError || error.name==='TimeoutError' ? 'Операция не завершилась. Для повтора записи используй тот же UUID.' : error.message;
       return ok({resultType:'complete',isError:true,content:[{type:'text',text:safe}]});
     }
   }
