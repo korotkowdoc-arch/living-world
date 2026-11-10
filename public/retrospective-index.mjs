@@ -6,7 +6,7 @@
 export const RETRO_INDEX_FORMAT='LW_RETRO_MEMORY_V1';
 export const RETRO_INDEX_KEY_PREFIX='retro-memory-';
 const clean=(v,max=2000)=>typeof v==='string'?v.trim().slice(0,max):'';
-const okUuid=v=>typeof v==='string'&&/^[0-9a-f]{8}(-[0-9a-f]{4}){4}$/i.test(v);
+const okUuid=v=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 const arr=v=>Array.isArray(v)?v:[];
 const isObj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 const name=v=>clean(v,120);
