@@ -100,6 +100,8 @@ test('OAuth stage open -> checkpoint -> resume -> Year close -> memory search (o
   assert.match(JSON.parse(checkpointRecord.content).checkpoint_attestation,/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
   assert.equal(replayFromCheckpoint(JSON.parse(checkpointRecord.content),[],{
    verified_source_head:true,expected_head:sceneId,world_id:worldId}).recovered,true);
+  const recoveryPage=await call('get_checkpoint_recovery',{world_id:worldId});
+  assert.equal(recoveryPage.validated_checkpoint,true);
   const recovered=await call('get_recovered_state',{world_id:worldId});
   assert.equal(recovered.recovered,true);
   assert.equal(recovered.delta_scenes,0);
