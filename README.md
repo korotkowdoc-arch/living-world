@@ -259,3 +259,50 @@ In the iPhone PWA, **Документы → Игровые этапы, checkpoin
 These are **source-backed documents**, not perfect automatic extraction of all unstructured nuances. Earlier plain-text scenes without annotated changes remain accessible by exact scene and lexical text search. Checkpoint building refuses to silently exceed its 700,000-character document bound; the full primary source scenes are never deleted. Full replay currently has a 30,000 world-scene row safety cap; checkpoints do not yet seed an unlimited projector beyond that limit. The source search returns up to 120 candidate matches and reports when capped. ChatGPT still has to actually call the tools—no connector can force a model response to do so.
 
 Legacy `get_current_year_archive` and old calendar Year Documents remain readable for migration/compatibility, but *new automatic calendar-based Year Documents and checkpoints are disabled*.
+
+## v2.4.0 — Psychological depth, old-memory review, NPC autonomy, world-memory UI, fork comparison and checkpoint replay
+
+LIVING WORLD remains a **ChatGPT-first** companion. It never generates narrative in the background. All facts originate from valid scenes and are stored in the private Supabase account. This release covers the previously proposed v2.1–v2.4 roadmap without a second paid OpenAI API.
+
+### 1. Deep, directed psychological memory
+
+New optional scene-delta arrays: `psychology`, `relationships` and `recollections`. Each record has a unique ID and a **literal evidence fragment from the scene text**. A record distinguishes `explicit` from `interpretation`; a recent interpretation does not magically erase an explicit established trait. Psychology stores traits, values, desires, fears, triggers, boundaries, self-image, inner conflict, coping and motivation. Directed relationships track multiple simultaneous dimensions, not one arbitrary numeric romance/trust score: trust, respect, affection, irritation, fear, attraction, loyalty, resentment, comfort, jealousy, solidarity and distance. Conflicts and reversals retain source scene IDs, not averaged away.
+
+A new **«Личная память и отношения»** panel appears in the **«Память»** screen with searchable actors, emotional changes, source links, offscreen events and plans. These are derived exclusively from the current valid branch. ChatGPT `get_world_depth` and `get_scene_preflight` supply relevant context to future scenes.
+
+### 2. Verified reindexing of old scenes
+
+`get_memory_review_queue` lists active-branch scenes not yet reviewed. GPT reads exact, full older text using `get_story_scene`, then submits `index_legacy_scene_memories` with exact quotes, evidence spans, participants and **known_by with an evidence-backed communication channel**. The bridge creates an immutable revisioned `other` document keyed to the scene ID; **it never edits old scenes**. `search_story_memories` retrieves both in-scene structured memories and these retroannotations, checking each result against the source scene's text and SHA256. An arbitrary uploaded summary cannot be trusted as evidence without matching its original scene. All results exclude canceled branches. A retroannotation remains an interpretation, not independently established new canon.
+
+### 3. NPC life outside the protagonist's view
+
+New `npc_offscreen` array records an event only when it really happened and appears in the narrative text; `npc_intentions` records a **plan that has not yet happened**. Both have source evidence. `get_npc_offscreen_brief` supplies actors' verified situation, motivations, knowledge boundaries and already confirmed offscreen actions. ChatGPT can use them to narrate independent lives; the PWA and bridge cannot run GPT or turn plans into events while no chat is active. Old `offscreen_events` remain as backward-compatible narrative facts.
+
+### 4. Causal audit before saving
+
+`audit_scene_draft` checks structured evidence, chronology, resource references, likely knowledge-channel mismatches, missing actors and future-dated offscreen claims. It distinguishes hard **errors** from **warnings** that require revisiting source scenes. It is not a perfect semantic oracle: it cannot prove unseen fiction, intent or a dialogue's unspoken meaning. Existing `save_scene_auto` and `save_scene_package` still validate exact scene provenance, in-world time, bank/item operations, and the signed preflight token. For safe workflow, ask GPT to run the audit before committing; do not treat a warning as a fabricated fact.
+
+### 5. Fork machine / compare «На это:»
+
+`compare_story_branches` compares an owner-authorized archived branch to the current branch: shared valid prefix, invalidated and replacement scenes/facts, open obligations, character knowledge, psychology, multidimensional relationships, items, balances and confirmed offscreen events. The PWA **«Ветки»** section includes a local source-based comparison plus a GPT copyable command. Old branch data is read for comparison only, never silently imported back into active canon.
+
+### 6. Source-attested checkpoint recovery
+
+New `public/checkpoint-replay.mjs` can replay only the post-checkpoint scenes into audited money/items, character knowledge/beliefs, plot obligations, personal memories and psychological state. New checkpoints built by `create_chat_checkpoint` carry an **AES-GCM authenticated bridge attestation** over the exact state body, world, branch and source head. Uploaded/edited/older unsigned checkpoints can still be read as context but **cannot seed automatic projections**.
+
+A new PostgreSQL security-definer RPC, `lw_bridge_v4_since_checkpoint`, runs an owner-authorized **active-branch recursive ancestry proof**. It pages scene deltas after the proofed checkpoint, rejecting stale heads and canceled tails. `get_checkpoint_recovery` supplies the complete checkpoint text in chunks plus all changes after it; `get_recovered_state` rebuilds the current structured state and explicitly reports missing historical annotations. `get_story_scene` and long-world lexical search can also verify active ancestry beyond the previous 30k world-row replay bound.
+
+**One-time owner action required** for fast/checkpoint replay: execute [`supabase/checkpoint_recovery.sql`](supabase/checkpoint_recovery.sql) in Supabase SQL Editor. This migration adds ONLY two read-only, owner-authorized SQL functions, `lw_bridge_v4_since_checkpoint` and `lw_bridge_v4_search_active_scenes`; it does not change/delete any saved story data. Until installed, the new recovery tools explain the setup error; ordinary v2.0 scene operations are unaffected. Create a **new v2.4 checkpoint** after release for authenticated incremental recovery. Old v2.0 checkpoints remain readable but are deliberately not accepted as trusted automatic state seeds.
+
+### 7. Director-calibration document permission
+
+The separate opt-in `document_upload_enabled` remains OFF until the user explicitly enables it. The owner can enable/disable it in either **«Документы»** or **«Настройки»** for the selected world. On the next attempt, ChatGPT `save_reference_document` can save a requested, reviewed `director_calibration` (e.g. gradual changes to Harry's work, physical condition, street environment, Lia's autonomy, and pacing for ages 15–18). No sexual conduct involving minors and no mandated crime/drug use are assumed from these calibrations. No document is uploaded merely by opening the Settings screen.
+
+### Requirements and operational limits
+
+- Owner authentication / RLS, branch ancestry, signed preflight, scene idempotency and manual stage closure from v1.9–v2.0 remain intact.
+- Full-world projection still has a **30,000-row safety limit**. Checkpoint-based rebuild provides a verified *alternative* when a recent authenticated snapshot exists, with up to **5,000 structured scene deltas** after it and a 100,000-deep ancestry proof cap.
+- A checkpoint may be up to ~700,000 characters; larger snapshots refuse instead of silently trimming. A snapshot does not capture unsaid subtext from unstructured prose; original scenes and Year Documents remain necessary for nuanced recollection.
+- The bridge cannot force an LLM to call MCP tools. This release increases **checkability**, not automatic compliance.
+- Permission to save reference documents is separate from permission to auto-save scenes. Enabling either is a deliberate owner action.
+- Never assume a failed, unavailable, or unverified tool write succeeded. Never use canceled branches as canonical memory.
