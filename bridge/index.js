@@ -825,8 +825,13 @@ async function selectVerifiedCheckpoint(env,identity,id){
   let doc=current;
   for(let rev=Number(current.revision);rev>0&&rev>Number(current.revision)-30;rev--){
    if(doc.revision!==rev){
-    const data=await sourceDocRead(env,identity,id,current.doc_key,rev,0,700000);
-    doc={...data,content:data.content};
+    const data=await sourceDocRead(env,identity,id,current.doc_key,rev,0,25000);
+    let content=data.content,next=data.next_offset;
+    while(next!==null){
+     const part=await sourceDocRead(env,identity,id,current.doc_key,rev,next,25000);
+     content+=part.content;next=part.next_offset;
+    }
+    doc={...data,revision:rev,content};
    }
    const checkpoint=parseCheckpointDoc(doc);
    if(!checkpoint||checkpoint.world_id!==id||!isReplayableCheckpoint(checkpoint))continue;
