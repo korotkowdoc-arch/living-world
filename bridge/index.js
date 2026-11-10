@@ -834,7 +834,16 @@ async function selectVerifiedCheckpoint(env,identity,id){
     doc={...data,revision:rev,content};
    }
    const checkpoint=parseCheckpointDoc(doc);
-   if(!checkpoint||checkpoint.world_id!==id||!isReplayableCheckpoint(checkpoint))continue;
+   if(!checkpoint||checkpoint.world_id!==id||!isReplayableCheckpoint(checkpoint)||
+      !checkpoint.checkpoint_attestation)continue;
+   let signed;
+   try{
+    signed=await unseal(env,'checkpoint-attestation-v1',checkpoint.checkpoint_attestation);
+    const canonical={...checkpoint};delete canonical.checkpoint_attestation;
+    if(signed.world_id!==id||signed.source_head!==checkpoint.source_head||
+       signed.branch_id!==checkpoint.branch_id||
+       signed.body_fingerprint!==await fingerprint(JSON.stringify(canonical)))continue;
+   }catch{continue;}
    tried++;
    try{
     const proof=await supabase(env,'/rest/v1/rpc/lw_bridge_v4_since_checkpoint',{
@@ -1098,6 +1107,13 @@ async function call(name,args,env,identity) {
     const doc=buildChatCheckpoint({world:full.state.world,branch:full.state.branch,
      lineage:hydrated,characters:full.state.characters||[],stage:activeStageOrDefault(stages),
      handoff_note:args.handoff_note||'',evidence_scene_ids:proofIds});
+    // A user-uploaded document with the same JSON shape must NOT be treated as a
+    // cryptographically verified state seed. Sign the server-built exact snapshot.
+    const attestation=await seal(env,'checkpoint-attestation-v1',{
+     world_id:id,branch_id:full.state.branch.id,source_head:head,
+     body_fingerprint:await fingerprint(doc.content)});
+    doc.content=JSON.stringify({...JSON.parse(doc.content),checkpoint_attestation:attestation});
+    if(doc.content.length>700000)throw Error('Подписанный checkpoint слишком большой: память нельзя незаметно обрезать.');
     await assertMemoryHead(env,identity,id,head,full.state.branch.id);
     const saved=await writeSystemArchive(env,identity,id,{
      key:doc.key,title:doc.title,category:'checkpoint',content:doc.content});
