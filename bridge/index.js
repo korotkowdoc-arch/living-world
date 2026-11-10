@@ -800,7 +800,7 @@ async function loadFullWorldLineage(env,identity,id){
   rows.push(...page);
   if(page.length<pageSize)break;
  }
- try{return {complete:true,state,lineage:activeLineage(rows,head)};}
+ try{return {complete:true,state,lineage:activeLineage(rows,head),all_rows:rows};}
  catch(error){return {complete:false,state,reason:error.message};}
 }
 async function companionState(env,identity,id){
@@ -811,13 +811,14 @@ async function companionState(env,identity,id){
  const projection=projectCompanion(lineage,{getDelta,strict:false});
  const people=projectCharacterMemory(data.characters||[],lineage,{getDelta});
  const causal=projectCausalMemory(lineage,{getDelta});
+ const depth=projectWorldDepth(lineage,{getDelta});
  return {mode:'live',world_id:id,branch_id:branch.id,head_scene_id:branch.head_scene_id,
   valid_scene_ids:lineage.map(s=>s.id),
   complete:true,accounts:projection.accounts,items:projection.items,new_characters:projection.new_characters,
   audit:projection.audit.slice(-250),total_transactions:projection.audit.length,
   issues:projection.issues,scanned_scenes:projection.scanned_scenes,
   character_memory:people.characters.map(c=>({name:c.name,origin:c.origin,state:c.state,knowledge_count:c.knowledge.length,belief_count:c.beliefs.length})),
-  character_warnings:people.warnings,causal_memory:causalSummary(causal)};
+  character_warnings:people.warnings,causal_memory:causalSummary(causal),depth_memory:depth};
 }
 async function getRevisionSource(env,identity,id,targetId){
  const full=await loadFullWorldLineage(env,identity,id);
@@ -1260,6 +1261,7 @@ async function call(name,args,env,identity) {
       resource_memory:{complete:assets.complete,issues:assets.issues||[]},
       causal_memory:assets.complete?assets.causal_memory:{complete:false,reason:assets.reason},
       character_memory:assets.complete?{complete:true,profiles:(assets.character_memory||[]).filter(p=>actors.some(name=>name.toLocaleLowerCase('ru')===p.name.toLocaleLowerCase('ru'))),warnings:assets.character_warnings||[]}:{complete:false,reason:assets.reason},
+      psychological_memory:assets.complete?{complete:true,...actorDepth(assets.depth_memory,actors)}:{complete:false,reason:assets.reason},
       documents:live?await sourcePreflight(env,identity,id,intent,actors,base,assets):{installed:false,ready:false},
       narrative_checks:['Хронология и точное время','Цели, характер и изменения отношений','Что каждый знает и каким каналом','Травмы, состояние, ресурсы и местонахождение','Какие сцены и ветки аннулированы','Правила, глоссарий и актуальные изменения']}
   }
@@ -1276,6 +1278,7 @@ async function call(name,args,env,identity) {
       companion_guidance:companionGuidance(companionSettings(base.world,base.branch?.head_scene_id,base.world_time)),
       companion:resources,causal_memory:assets.complete?assets.causal_memory:{complete:false,reason:assets.reason},
       character_memory:assets.complete?{complete:true,profiles:assets.character_memory,warnings:assets.character_warnings}:{complete:false,reason:assets.reason},
+      depth_summary:assets.complete?{relationships:assets.depth_memory.relationships.map(r=>({from:r.from,to:r.to,dimensions:r.dimensions})),actors:assets.depth_memory.psychology.map(p=>({name:p.name,aspects:p.aspects}))}:{complete:false,reason:assets.reason},
       reference_documents:refs};
   }
   if(name==='get_companion_state') return live?await companionState(env,identity,id):{mode:'demo',world_id:id,complete:true,...projectCompanion(demoState().scenes,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}})};
