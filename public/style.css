@@ -170,3 +170,14 @@ body.ai-running::after{content:"ИИ создаёт сцену и фиксиру
 .sync-journal .hint{overflow-wrap:anywhere}
 .sync-health .tag{white-space:nowrap}
 @media(max-width:650px){.sync-journal .listrow{flex-wrap:wrap}.sync-health .row{flex-wrap:wrap}}
+
+/* v2.4: dense, source-linked personal memory and branch comparison. */
+.world-depth .listrow{align-items:start;border-top:1px solid var(--line);gap:12px}
+.world-depth details{border-top:1px solid var(--line);padding-top:12px}
+.world-depth summary{cursor:pointer;font-weight:700;padding-bottom:8px}
+.world-depth p,.branch-diff p{overflow-wrap:anywhere;line-height:1.55}
+.world-depth .row{flex-wrap:wrap}
+.branch-diff{min-width:0}
+.branch-diff h3{font-size:1rem}
+.branch-diff li{overflow-wrap:anywhere;margin-bottom:6px}
+@media(max-width:650px){.world-depth .btn{width:100%}.world-depth .listrow{flex-wrap:wrap}.branch-diff .grid{grid-template-columns:1fr}}
