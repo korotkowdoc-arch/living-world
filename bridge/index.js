@@ -1196,11 +1196,18 @@ async function call(name,args,env,identity) {
   }
   if(name==='get_story_scene'){
     if(!live)throw Error('Полные исторические сцены доступны в рабочем мире.');
-    const full=await loadFullWorldLineage(env,identity,id);
-    if(!full.complete)throw Error('Не удалось проверить действительную ветку: '+full.reason);
-    const target=checkId(args.scene_id);
-    if(!full.lineage.some(s=>s.id===target))
-     throw Error('Сцена не находится в действительной ветке или была отменена.');
+    const target=checkId(args.scene_id),full=await loadFullWorldLineage(env,identity,id);
+    if(full.complete){
+     if(!full.lineage.some(s=>s.id===target))
+      throw Error('Сцена не находится в действительной ветке или была отменена.');
+    }else{
+     // A large world cannot rely on the bounded complete-lineage projector.
+     // PostgreSQL proves target is a real ancestor of the current head.
+     const checked=await supabase(env,'/rest/v1/rpc/lw_bridge_v4_since_checkpoint',{
+      token:identity.token,body:{p_world:id,p_anchor:target,p_offset:0,p_limit:1}});
+     if(!checked?.verified||checked.checkpoint_head!==target)
+      throw Error('Нельзя подтвердить исходную сцену в действительной ветке.');
+    }
     const rows=await supabase(env,'/rest/v1/lw_scenes?world_id=eq.'+encodeURIComponent(id)+
      '&id=eq.'+target+'&select=id,body,world_time,prompt_note&limit=1',{token:identity.token});
     if(!Array.isArray(rows)||rows.length!==1)throw Error('Исходная сцена недоступна.');
