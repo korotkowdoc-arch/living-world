@@ -11,13 +11,14 @@ import {projectCausalMemory,searchCausalMemory} from './world-causality.mjs';
 import {persistWorldAutosave} from './world-autosave.mjs';
 import {projectCharacterMemory} from './world-character-memory.mjs';
 import {STAGE_CONTROL_KEY} from './story-memory.mjs';
+import {projectWorldDepth,compareWorldBranches} from './world-depth.mjs';
 import {WORLD_TEXT_FIELDS,CHARACTER_TEXT_FIELDS,worldDraftPrompt,parseWorldDraft,worldDraftFieldFromJSON,characterDraftPrompt,parseCharacterDraft,characterDraftFieldFromJSON} from './gpt-prompts.mjs';
 import {companionSettings,mergeCompanionPreferences} from './companion-settings.mjs';
 import {companionHealth} from './companion-health.mjs';
 
 const app=document.getElementById('app');
 const cfgKey='lw_cloud_config_v03'; // Preserve the existing Supabase connection when upgrading.
-const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[],aiReady:false,aiReason:'Подключение ещё не проверено',assets:null,assetIssue:null,documents:[],documentsReady:null,documentsError:'',docSelected:null,docContent:null,characterLedger:null,causalLedger:null,memoryQuery:'',memoryKind:'fact',memoryOffset:0,worldContext:null,suppressWorldClickUntil:0,saveDiagnostic:null,autoSavePendingWorldId:null,autoSaveErrors:{},busyLabel:'',pendingView:null,lastSceneRefreshAt:null,activeLineage:[],yearDraft:null,gptWorldField:null,gptCharacterField:null,healthReport:null};
+const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[],aiReady:false,aiReason:'Подключение ещё не проверено',assets:null,assetIssue:null,documents:[],documentsReady:null,documentsError:'',docSelected:null,docContent:null,characterLedger:null,causalLedger:null,memoryQuery:'',memoryKind:'fact',memoryOffset:0,worldContext:null,suppressWorldClickUntil:0,saveDiagnostic:null,autoSavePendingWorldId:null,autoSaveErrors:{},busyLabel:'',pendingView:null,lastSceneRefreshAt:null,activeLineage:[],yearDraft:null,gptWorldField:null,gptCharacterField:null,healthReport:null,depthLedger:null,depthQuery:'',branchComparison:null,allWorldRows:null};
 const x=v=>esc(v??'');
 // Historical start and current narrative period are separate; don't fabricate a date.
 const storyClock=(w=state.world)=>state.scenes.at(-1)?.world_time||w?.genesis_choices?.current_period||(w?.genesis_approved?'':w?.clock_start)||'';
@@ -422,7 +423,11 @@ function renderMemory(){
 }
 function renderHistory(){if(!state.world)return needsWorld();return `${heading('Временные линии','Ветки реальности','Каждая правка сохраняет прежний вариант, но не переносит отменённые события.')}<div class="panel">${state.branches.map(b=>`<div class="listrow"><div><b>${x(b.name)}</b> ${b.id===state.world.active_branch_id?'<span class="tag">Действующая</span>':''}<p>Создана: ${x(new Date(b.created_at).toLocaleString('ru-RU'))}</p><p>Текущая сцена: ${x(b.head_scene_id||'нет')}</p></div>${b.id!==state.world.active_branch_id?`<button class="btn small" data-action="switch-branch" data-id="${x(b.id)}">Перейти</button>`:''}</div>`).join('')}</div><div class="well" style="margin-top:16px">Чтобы изменить прошлое, в разделе «История» нажми «На это» под нужной сценой. Новая ветка возникнет автоматически.</div>`;}
 function renderSettings(){const w=state.world,auto=w?.genesis_choices?.auto_save_enabled===true;
-return `${heading('Настройки','Моё приложение','Приватность, модели, резервное копирование и вход.')}<div class="panel stack">${renderSyncHealth()}${w?`<div class="ai-status"><b>Запись сцен из ChatGPT: ${auto?'автоматическое сохранение разрешено':'ручное подтверждение каждой сцены'}</b><p>Если включить, подключённый MCP-мост сможет записывать действительно сыгранные сцены в этот мир одним вызовом при правильной ветке и владельце. Это не включает платный API и не меняет модель ChatGPT.</p>${btn('goto-world-auto-save','Автосейв на карточках миров','gold')}</div>`:''}<details class="login-help"><summary>Дополнительно: самостоятельная генерация на сайте через отдельный API</summary><div class="ai-status"><b>Автоматический ИИ: ${state.aiReady?'Подключён':'Не подключён'}</b><p>${state.aiReady?'Кнопки Генезиса, сцен и ускорения вызывают OpenAI API через защищённый Worker.':'Для автоматической генерации добавь секрет OPENAI_API_KEY в Cloudflare Worker living-world-bridge-mcp и проверь подключение. '+x(state.aiReason)}</p>${btn('ai-refresh','Проверить AI-подключение')}</div></details>
+return `${heading('Настройки','Моё приложение','Приватность, модели, резервное копирование и вход.')}<div class="panel stack">${renderSyncHealth()}${w?`<div class="ai-status">
+<b>Импорт документов из ChatGPT: ${w.genesis_choices?.document_upload_enabled===true?'разрешён':'запрещён'}</b>
+<p>Разрешение действует только для этого мира. GPT сможет сохранять запрошенные тобой документы, например director_calibration, но не изменять валидные сцены.</p>
+${btn('toggle-document-import',w.genesis_choices?.document_upload_enabled===true?'Запретить импорт документов':'Разрешить импорт документов',w.genesis_choices?.document_upload_enabled===true?'':'gold')}
+</div>`:``}${w?`<div class="ai-status"><b>Запись сцен из ChatGPT: ${auto?'автоматическое сохранение разрешено':'ручное подтверждение каждой сцены'}</b><p>Если включить, подключённый MCP-мост сможет записывать действительно сыгранные сцены в этот мир одним вызовом при правильной ветке и владельце. Это не включает платный API и не меняет модель ChatGPT.</p>${btn('goto-world-auto-save','Автосейв на карточках миров','gold')}</div>`:''}<details class="login-help"><summary>Дополнительно: самостоятельная генерация на сайте через отдельный API</summary><div class="ai-status"><b>Автоматический ИИ: ${state.aiReady?'Подключён':'Не подключён'}</b><p>${state.aiReady?'Кнопки Генезиса, сцен и ускорения вызывают OpenAI API через защищённый Worker.':'Для автоматической генерации добавь секрет OPENAI_API_KEY в Cloudflare Worker living-world-bridge-mcp и проверь подключение. '+x(state.aiReason)}</p>${btn('ai-refresh','Проверить AI-подключение')}</div></details>
  <details class="login-help" open><summary>Диагностика настоящих сейвов</summary>
  <div class="panel"><p class="sub">Проверка через Cloudflare и Supabase: создать <b>отдельный временный технический мир</b>, сохранить сцену, повторить запрос с тем же ID, прочитать баланс и предмет, затем удалить временный мир. Твои миры и история Гарри не изменяются.</p>
  ${btn('run-save-diagnostic','Проверить сейвы в реальной базе','gold')}
@@ -522,7 +527,7 @@ async function loadAssets(refreshHead=true){
    .order('created_at',{ascending:true}).order('id',{ascending:true}).range(offset,offset+pageSize-1);
   const page=dataOrThrow(await res);
   if(all.length+page.length>maxRows){
-   state.assets=null;state.characterLedger=null;state.causalLedger=null;
+   state.assets=null;state.characterLedger=null;state.causalLedger=null;state.depthLedger=null;state.branchComparison=null;state.allWorldRows=null;
    throw Error('История содержит более 30 000 записей. Они не удалены, но полный пересчёт активов в приложении ограничен. Нужна проверка checkpoint.');
   }
   all.push(...page);
@@ -530,14 +535,16 @@ async function loadAssets(refreshHead=true){
  }
  const latestHead=dataOrThrow(await state.client.from('lw_branches').select('head_scene_id').eq('id',branch.id).single());
  if(latestHead.head_scene_id!==branch.head_scene_id){
-  state.assets=null;state.characterLedger=null;state.causalLedger=null;
+  state.assets=null;state.characterLedger=null;state.causalLedger=null;state.depthLedger=null;state.branchComparison=null;state.allWorldRows=null;
   throw Error('Ветка изменилась во время чтения истории. Перечитай её перед продолжением.');
  }
  const lineage=activeLineage(all,branch.head_scene_id);
  state.activeLineage=lineage;
+ state.allWorldRows=all;
  state.assets=projectCompanion(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{},strict:false});
  state.characterLedger=projectCharacterMemory(state.characters,lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
  state.causalLedger=projectCausalMemory(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
+ state.depthLedger=projectWorldDepth(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
  state.assetIssue=null;
 }
 
