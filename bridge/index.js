@@ -537,14 +537,32 @@ function branchState({world,branch,characters,scenes,has_older_scenes=false},mod
       history_page_size:20},ancestry_limit:200};
 }
 
-function sourceDocList(env,identity,id,{full=true}={}){
- const fields=full?'id,world_id,doc_key,revision,category,title,source_filename,sha256,created_at,content':'id,world_id,doc_key,revision,category,title,source_filename,sha256,created_at';
- const url='/rest/v1/lw_reference_docs?world_id=eq.'+encodeURIComponent(id)+'&select='+encodeURIComponent(fields)+'&order=doc_key.asc,revision.desc&limit=150';
- return supabase(env,url,{token:identity.token}).then(rows=>{
-  if(!Array.isArray(rows))throw Error('Не удалось загрузить библиотеку документов.');
-  const latest=latestDocumentVersions(rows);
-  return {installed:true,docs:latest,total_revisions_loaded:rows.length};
- }).catch(error=>({installed:false,docs:[],message:'Библиотека документов недоступна. Проверь миграцию lw_reference_docs и авторизацию. '+(error?.message||'')}));
+/** Read ALL installed document keys, not just the first 150 sorted keys.
+ * A truncated catalog is a dangerous false memory; explicit failure is safer.
+ */
+async function sourceDocList(env,identity,id,{full=true}={}){
+ const fields=full?'id,world_id,doc_key,revision,category,title,source_filename,sha256,created_at,content':
+  'id,world_id,doc_key,revision,category,title,source_filename,sha256,created_at';
+ const pageSize=200,maxDocs=20000;
+ try{
+  const rows=[];
+  for(let offset=0;offset<=maxDocs;offset+=pageSize){
+   const url='/rest/v1/lw_reference_docs?world_id=eq.'+encodeURIComponent(id)+
+    '&select='+encodeURIComponent(fields)+
+    '&order=doc_key.asc,revision.desc,id.asc&limit='+pageSize+'&offset='+offset;
+   const page=await supabase(env,url,{token:identity.token});
+   if(!Array.isArray(page))throw Error('Библиотека не вернула список документов.');
+   if(rows.length+page.length>maxDocs)
+    throw Error('Более 20 000 редакций документов. Каталог неполон; необходима постраничная миграция.');
+   rows.push(...page);
+   if(page.length<pageSize)break;
+  }
+  return {installed:true,docs:latestDocumentVersions(rows),total_revisions_loaded:rows.length,
+   complete:true};
+ }catch(error){
+  return {installed:false,docs:[],complete:false,message:
+   'Библиотека документов не может быть проверена целиком: '+(error?.message||'')};
+ }
 }
 async function sourceDocRead(env,identity,id,key,revision=null,offset=0,limit=15000){
  const validated=String(key||'');
