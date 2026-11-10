@@ -14,5 +14,11 @@
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
+  },
+  "previews": {
+    "vars": {
+      "BRIDGE_MODE": "demo",
+      "BRIDGE_WRITES_ENABLED": "false"
+    }
   }
 }
