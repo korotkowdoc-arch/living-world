@@ -1389,6 +1389,58 @@ async function call(name,args,env,identity) {
     warnings:[...before.issues,...after.issues].slice(-25),
     warning:'Аннулированное прошлое читается ТОЛЬКО как материал сравнения, но не переносится в активную историю.'};
   }
+  if(name==='get_checkpoint_recovery'){
+   if(!live)throw Error('Восстановление checkpoint доступно только владельцу мира.');
+   const selected=await selectVerifiedCheckpoint(env,identity,id);
+   const checkpoint_offset=boundedInteger(args.checkpoint_offset??0,0,700000);
+   const delta_offset=boundedInteger(args.delta_offset??0,0,100000);
+   const limit=boundedInteger(args.scene_limit??35,1,100);
+   const chunk=await supabase(env,'/rest/v1/rpc/lw_bridge_v4_since_checkpoint',{
+    token:identity.token,body:{p_world:id,p_anchor:selected.checkpoint.source_head,
+     p_offset:delta_offset,p_limit:limit}});
+   if(!chunk.verified||chunk.current_head!==selected.proof.current_head||
+       chunk.active_branch_id!==selected.proof.active_branch_id)
+    throw Error('Ветка сменилась после подтверждения checkpoint. Перечитай контекст.');
+   const full=selected.doc.content,part=full.slice(checkpoint_offset,checkpoint_offset+25000);
+   return {mode,world_id:id,validated_checkpoint:true,
+    source_head:selected.checkpoint.source_head,
+    current_head:chunk.current_head,active_branch_id:chunk.active_branch_id,
+    checkpoint:{doc_key:selected.doc.doc_key,revision:selected.doc.revision,
+     content:part,offset:checkpoint_offset,
+     total_length:full.length,next_offset:checkpoint_offset+part.length<full.length?
+      checkpoint_offset+part.length:null},
+    after_checkpoint:{source_head:chunk.checkpoint_head,
+     total_scenes:chunk.total_delta_scenes,offset:chunk.offset,
+     scenes:chunk.rows,next_offset:chunk.next_offset,complete:chunk.complete},
+    warning:'Нужно дочитать ВСЕ части checkpoint и все следующие сцены. Восстановление требует только подтверждённого SQL предка. Старые нюансы при необходимости ищи в Year Documents и оригинальных сценах.'};
+  }
+  if(name==='get_recovered_state'){
+   if(!live)throw Error('Восстановление из проверенного checkpoint недоступно в демо.');
+   const {selected,after,rebuilt}=await recoverCompanionFromCheckpoint(env,identity,id);
+   return {mode,world_id:id,recovered:true,
+    source_head:selected.checkpoint.source_head,head_scene_id:after.head,
+    current_branch_id:after.branch,checkpoint_revision:selected.doc.revision,
+    delta_scenes:after.scenes.length,scanned_world_scenes:rebuilt.scanned_world_scenes,
+    world_time:rebuilt.world_time,
+    accounts:rebuilt.economy.accounts.map(x=>({person:x.person,currency:x.currency,scale:x.scale,
+     known:x.known,balance:x.balance,observed_delta:x.observed_delta})),
+    items:rebuilt.economy.items.map(x=>({id:x.id,label:x.label,owner:x.owner,
+     holder:x.holder,location:x.location,condition:x.condition,exists:x.exists})),
+    people:rebuilt.characters.characters.map(x=>({name:x.name,state:x.state,knowledge:x.knowledge,
+     beliefs:x.beliefs,recent_updates:x.history.slice(-25)})),
+    open_threads:rebuilt.causality.open_threads,
+    closed_threads:rebuilt.causality.resolved_threads.slice(-70),
+    recent_facts:rebuilt.causality.facts.slice(-100),
+    psychology:rebuilt.depth.psychology.map(x=>({name:x.name,aspects:x.aspects,
+     recent_observations:x.observations.slice(-25)})),
+    relationships:rebuilt.depth.relationships.map(x=>({from:x.from,to:x.to,
+     dimensions:x.dimensions,recent_changes:x.history.slice(-25)})),
+    subjective_recollections:rebuilt.depth.recollections.slice(-80),
+    confirmed_offscreen:rebuilt.depth.confirmed_offscreen.slice(-60),
+    uncompleted_plans:rebuilt.depth.npc_intentions.slice(-60),
+    data_quality:rebuilt.data_quality,
+    warning:'Восстановлены структурированные факты с доказанной контрольной точки, не все нюансы непромаркированной прозы. При старых отсылках читай первичную сцену.'};
+  }
   if(name==='get_sync_health'){
     const state=live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState();
     const base=branchState(state,mode);
