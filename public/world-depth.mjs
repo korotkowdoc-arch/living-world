@@ -134,12 +134,34 @@ const read=s=>s.changes??s.delta??{};
 /** Fold ordered confirmed scene deltas, including contradictory viewpoints.
  * No numeric "affection score" and no false reconciliation of opposing feelings.
  */
-export function projectWorldDepth(scenes=[],{getDelta}={}){
+export function projectWorldDepth(scenes=[],{getDelta,seed=null}={}){
  const get=getDelta||read,people=new Map(),links=new Map(),recollections=[],offscreen=[],plans=[],warnings=[];
  const actor=v=>{
   const k=key(v);if(!people.has(k))people.set(k,{name:v,observations:[],aspects:{},latest_emotions:[]});
   return people.get(k);
  };
+ if(seed){
+  if(seed.complete!==true||!Array.isArray(seed.psychology)||!Array.isArray(seed.relationships)||
+    !Array.isArray(seed.recollections)||!Array.isArray(seed.confirmed_offscreen)||
+    !Array.isArray(seed.npc_intentions)||!Number.isSafeInteger(seed.scanned_scenes))
+   throw Error('Психологический checkpoint неполон.');
+  for(const p of seed.psychology){
+   if(!name(p.name))throw Error('Психологическое состояние без персонажа.');
+   people.set(key(p.name),{...p,aspects:{...p.aspects},
+    observations:safeArray(p.observations).map(e=>({...e})),
+    latest_emotions:safeArray(p.latest_emotions).map(e=>({...e}))});
+  }
+  for(const r of seed.relationships){
+   if(!name(r.from)||!name(r.to))throw Error('Отношение в checkpoint без участников.');
+   links.set(JSON.stringify([key(r.from),key(r.to)]),{...r,
+    dimensions:{...r.dimensions},history:safeArray(r.history).map(e=>({...e})),
+    conflicts:safeArray(r.conflicts).map(e=>({...e}))});
+  }
+  recollections.push(...seed.recollections.map(e=>({...e})));
+  offscreen.push(...seed.confirmed_offscreen.map(e=>({...e})));
+  plans.push(...seed.npc_intentions.map(e=>({...e})));
+  if(Array.isArray(seed.warnings))warnings.push(...seed.warnings);
+ }
  for(const scene of scenes){
   const delta=get(scene)||{};
   for(const e of safeArray(delta.psychology)){
@@ -170,7 +192,7 @@ export function projectWorldDepth(scenes=[],{getDelta}={}){
   for(const e of safeArray(delta.npc_offscreen))if(e?.actor&&e?.event)offscreen.push(ref(scene,e));
   for(const e of safeArray(delta.npc_intentions))if(e?.actor&&e?.plan)plans.push(ref(scene,e));
  }
- return {complete:true,scanned_scenes:scenes.length,psychology:Array.from(people.values()),
+ return {complete:true,scanned_scenes:(seed?.scanned_scenes||0)+scenes.length,psychology:Array.from(people.values()),
   relationships:Array.from(links.values()),recollections,confirmed_offscreen:offscreen,
   npc_intentions:plans,warnings};
 }
