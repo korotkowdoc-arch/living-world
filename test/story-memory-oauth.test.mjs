@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import bridge from '../bridge/index.js';
 import {packSceneNote} from '../public/continuity.mjs';
+import {replayFromCheckpoint} from '../public/checkpoint-replay.mjs';
 
 const root='https://living-world-bridge-mcp.korotkowdoc.workers.dev';
 const worldId='10000000-0000-4000-8000-000000000009';
@@ -97,6 +98,8 @@ test('OAuth stage open -> checkpoint -> resume -> Year close -> memory search (o
   const checkpointRecord=stored.find(d=>d.category==='checkpoint');
   assert.ok(checkpointRecord);
   assert.match(JSON.parse(checkpointRecord.content).checkpoint_attestation,/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+  assert.equal(replayFromCheckpoint(JSON.parse(checkpointRecord.content),[],{
+   verified_source_head:true,expected_head:sceneId,world_id:worldId}).recovered,true);
   const recovered=await call('get_recovered_state',{world_id:worldId});
   assert.equal(recovered.recovered,true);
   assert.equal(recovered.delta_scenes,0);
