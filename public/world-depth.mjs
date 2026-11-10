@@ -157,7 +157,7 @@ export function projectWorldDepth(scenes=[],{getDelta}={}){
    };
    const event=ref(scene,e);
    const previous=entry.dimensions[e.dimension];
-   if(previous?.shift!==event.shift&&previous?.scene_id!==event.scene_id)
+   if(previous&&previous.shift!==event.shift&&previous.scene_id!==event.scene_id)
     entry.conflicts.push({dimension:e.dimension,previous_scene_id:previous.scene_id,current_scene_id:event.scene_id,
      from:previous.shift,to:event.shift,meaning:'Изменение отношений требует учитывать оба события.'});
    entry.history.push(event);entry.dimensions[e.dimension]=event;links.set(code,entry);
