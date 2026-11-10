@@ -672,7 +672,7 @@ async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,ass
    yearReconciliation.documents=docStore.docs.filter(doc=>doc.category!=='checkpoint'&&!yearArchiveMetadata(doc)&&!stageYearMetadata(doc)&&doc.doc_key!==STAGE_CONTROL_KEY);
   }
  }
- const ref=buildSourcePreflight(yearReconciliation.documents.filter(d=>d.doc_key!==STAGE_CONTROL_KEY),{intent,actors,maxExcerptChars:34000});
+ const ref=buildSourcePreflight(yearReconciliation.documents.filter(d=>d.doc_key!==STAGE_CONTROL_KEY&&!d.doc_key?.startsWith(RETRO_INDEX_KEY_PREFIX)),{intent,actors,maxExcerptChars:34000});
  const kinds=new Set(ref.manifest.map(d=>d.category));
  const findings=[];
  for(const issue of yearReconciliation.warnings){
@@ -1092,6 +1092,9 @@ async function call(name,args,env,identity) {
     const docs=await sourceDocList(env,identity,id,{full:true});
     const years=docs.installed?validStageYearDocs(docs.docs,stages.state,full.lineage,id)
      .filter(d=>stageYearMetadata(d)):[],tokens=[query,...(args.actor_names||[])];
+    const retro=docs.installed?searchRetroMemories(
+     activeRetroMemories(docs.docs,full.lineage.map(s=>s.id),id),
+     {query,actor_names:args.actor_names||[],limit:args.limit??20}):{total:0,items:[]};
     const matching_years=years.flatMap(d=>{
       const excerpts=findDocExcerpts(d.content,tokens,{radius:400,max:3});
       return excerpts.length?[{doc_key:d.doc_key,revision:d.revision,title:d.title,
@@ -1118,6 +1121,7 @@ async function call(name,args,env,identity) {
      });
     }
     return {mode,world_id:id,query,structured_memories:structured,
+     reviewed_legacy_memories:retro,
      matching_year_documents:matching_years,original_scene_matches:raw,
      search_complete:!capped,warning:capped?'Поиск по исходным сценам ограничен первыми 120 совпадениями во всём мире; результат НЕ исчерпывающий. Уточни запрос.':null,
      knowledge_rule:'Вся информация о том, кто знает фразу, должна быть подтверждена сценой/learned. Участие не равно знанию всех секретов.'};
