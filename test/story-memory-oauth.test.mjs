@@ -15,7 +15,7 @@ const env={
  BRIDGE_SUPABASE_USER_ID:'0a3fbf41-c3c6-4743-a88c-f9a7870fd244',
  SUPABASE_PUBLISHABLE_KEY:'public-test-value',
  BRIDGE_SEAL_KEY:'a'.repeat(43),
- BRIDGE_WRITES_ENABLED:'true'
+ BRIDGE_WRITES_ENABLED:'true',BRIDGE_TEST_DIAGNOSTICS:'true'
 };
 function jwt(){
  const now=Math.floor(Date.now()/1000);
