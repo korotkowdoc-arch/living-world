@@ -45,12 +45,21 @@ test('OAuth stage open -> checkpoint -> resume -> Year close -> memory search (o
   branch:{id:branchId,name:'Первая ветка',head_scene_id:sceneId},
   scenes:[scene],characters:[],has_older_scenes:false};
  const stored=[];
+ let activeAnchor=true;
  const former=globalThis.fetch;
  const asyncBody=r=>r?.body?JSON.parse(r.body):null;
  globalThis.fetch=async (raw,opts={})=>{
   const url=String(raw),method=opts.method||'GET';
   if(url.endsWith('/auth/v1/user'))return Response.json({id:env.BRIDGE_SUPABASE_USER_ID});
   if(url.endsWith('/rest/v1/rpc/lw_bridge_v2_state'))return Response.json(state);
+  if(url.endsWith('/rest/v1/rpc/lw_bridge_v4_since_checkpoint')){
+   const input=asyncBody(opts);
+   assert.equal(input.p_anchor,sceneId);
+   if(!activeAnchor)return Response.json({code:'LW409',message:'anchor invalidated'},{status:409});
+   return Response.json({verified:true,world_id:worldId,active_branch_id:branchId,
+    checkpoint_head:sceneId,current_head:sceneId,total_delta_scenes:0,
+    offset:input.p_offset,rows:[],next_offset:null,complete:true});
+  }
   if(url.includes('/rest/v1/lw_scenes?world_id=eq.')&&url.includes('id=in.'))return Response.json([scene]);
   if(url.includes('/rest/v1/lw_scenes?world_id=eq.')&&url.includes('id=eq.'))return Response.json([scene]);
   if(url.includes('/rest/v1/lw_scenes?world_id=eq.')&&url.includes('body=ilike.'))return Response.json([scene]);
@@ -85,6 +94,17 @@ test('OAuth stage open -> checkpoint -> resume -> Year close -> memory search (o
    handoff_note:'Обещание книги важно Лии.',evidence_scene_ids:[sceneId]});
   assert.equal(cp.persisted,true);
   assert.equal(cp.stage_title,'До Хогвартса');
+  const checkpointRecord=stored.find(d=>d.category==='checkpoint');
+  assert.ok(checkpointRecord);
+  assert.match(JSON.parse(checkpointRecord.content).checkpoint_attestation,/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+  const recoveryPage=await call('get_checkpoint_recovery',{world_id:worldId});
+  assert.equal(recoveryPage.validated_checkpoint,true);
+  const recovered=await call('get_recovered_state',{world_id:worldId});
+  assert.equal(recovered.recovered,true);
+  assert.equal(recovered.delta_scenes,0);
+  activeAnchor=false;
+  await assert.rejects(()=>call('get_recovered_state',{world_id:worldId}),/Нет совместимого checkpoint/);
+  activeAnchor=true;
   const resumed=await call('get_resume_context',{world_id:worldId,offset:0,limit:25000});
   assert.equal(resumed.checkpoint_found,true);
   assert.match(resumed.checkpoint.content,/Обещание книги важно Лии/);

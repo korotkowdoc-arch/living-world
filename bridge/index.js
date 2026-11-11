@@ -2,6 +2,11 @@ import {handleAiRequest} from './ai.js';
 import {extractCompanionChanges,activeLineage,projectCompanion,validateNextEvents} from '../public/world-ledger.mjs';
 import {latestDocumentVersions,buildSourcePreflight,findDocExcerpts} from '../public/reference-documents.mjs';
 import {projectCharacterMemory,actorMemory} from '../public/world-character-memory.mjs';
+import {validateDepthDelta,depthSemanticWarnings,projectWorldDepth,actorDepth,compareWorldBranches,PSYCHOLOGY_ASPECTS,RELATION_DIMENSIONS} from '../public/world-depth.mjs';
+import {RETRO_INDEX_KEY_PREFIX,retroKey,makeRetroIndex,activeRetroMemories,searchRetroMemories,retroIndexCoverage} from '../public/retrospective-index.mjs';
+import {auditNarrativeScene} from '../public/narrative-audit.mjs';
+import {isReplayableCheckpoint,replayFromCheckpoint} from '../public/checkpoint-replay.mjs';
+import {parseCheckpointDoc} from '../public/story-memory.mjs';
 import {savedSceneStatus} from '../public/save-receipt.mjs';
 import {projectCausalMemory,causalSummary,searchCausalMemory} from '../public/world-causality.mjs';
 import {validStoryClock,isNondecreasingStoryTime} from '../public/continuity.mjs';
@@ -87,6 +92,7 @@ function parseScenePackage(raw) {
   }
   Object.assign(changes,extractCompanionChanges(c));
   changes.memories=validateSceneMemories(c.memories,result.scene);
+  Object.assign(changes,validateDepthDelta(c,result.scene));
   return {scene:result.scene.trim(),world_time:result.world_time||null,changes,decisions};
 }
 function packSceneNote(changes, directorNote='',decisions=[]) {
@@ -371,15 +377,61 @@ const storyMemoryEntry=object({
  known_by:{type:'array',items:{type:'string',maxLength:100},maxItems:20},
  tags:{type:'array',items:{type:'string',maxLength:100},maxItems:20},related_to:{type:'string',maxLength:80}
 },['id','kind','title','detail']);
+const evidenceProof={type:'string',minLength:1,maxLength:700};
+const psychEvent=object({
+ id:{type:'string',maxLength:80},character:{type:'string',maxLength:120},
+ aspect:{type:'string',enum:PSYCHOLOGY_ASPECTS},observation:{type:'string',maxLength:1500},
+ interpretation:{type:'string',maxLength:1400},certainty:{type:'string',enum:['explicit','interpretation']},
+ evidence:evidenceProof,tension_with:{type:'string',maxLength:600}
+},['id','character','aspect','observation','certainty','evidence']);
+const relationshipEvent=object({
+ id:{type:'string',maxLength:80},from:{type:'string',maxLength:120},
+ to:{type:'string',maxLength:120},dimension:{type:'string',enum:RELATION_DIMENSIONS},
+ shift:{type:'string',enum:['increased','decreased','unchanged','ambivalent','emerged']},
+ interpretation:{type:'string',enum:['explicit','interpretation']},
+ rationale:{type:'string',maxLength:1500},evidence:evidenceProof,unresolved:{type:'boolean'}
+},['id','from','to','dimension','shift','interpretation','rationale','evidence']);
+const subjectiveRecall=object({
+ id:{type:'string',maxLength:80},actor:{type:'string',maxLength:120},
+ memory_id:{type:'string',maxLength:80},meaning:{type:'string',maxLength:1500},
+ emotion:{type:'string',maxLength:250},certainty:{type:'string',enum:['explicit','interpretation']},evidence:evidenceProof
+},['id','actor','memory_id','meaning','certainty','evidence']);
+const offscreenEvent=object({
+ id:{type:'string',maxLength:80},actor:{type:'string',maxLength:120},
+ happened_at:{type:'string',maxLength:32},location:{type:'string',maxLength:200},
+ event:{type:'string',maxLength:1200},basis:{type:'string',enum:['narrated','witnessed','reported']},
+ evidence:evidenceProof,known_by:{type:'array',maxItems:20,items:{type:'string',maxLength:120}}
+},['id','actor','event','basis','evidence']);
+const npcIntention=object({
+ id:{type:'string',maxLength:80},actor:{type:'string',maxLength:120},
+ plan:{type:'string',maxLength:1100},motive:{type:'string',maxLength:900},
+ obstacle:{type:'string',maxLength:900},evidence:evidenceProof
+},['id','actor','plan','motive','evidence']);
 const changes = object({
   facts:strings, open_threads:strings, resolved_threads:strings, offscreen_events:strings,
   memories:{type:'array',maxItems:16,items:storyMemoryEntry},
+  psychology:{type:'array',maxItems:25,items:psychEvent},
+  relationships:{type:'array',maxItems:30,items:relationshipEvent},
+  recollections:{type:'array',maxItems:20,items:subjectiveRecall},
+  npc_offscreen:{type:'array',maxItems:15,items:offscreenEvent},
+  npc_intentions:{type:'array',maxItems:20,items:npcIntention},
   economy:{type:'array',items:economic,maxItems:35},items:{type:'array',items:itemChange,maxItems:40},new_characters:{type:'array',items:emergingCharacter,maxItems:15},
   characters:{type:'array', maxItems:30, items:object({
     name:{type:'string'}, ...fields, beliefs:strings,
     learned:{type:'array', items:object({fact:{type:'string'},via:{type:'string'}})}
   },['name'])}
 },[]);
+const retroKnown=object({actor:{type:'string',maxLength:120},channel:{type:'string',maxLength:220},
+ evidence:{type:'string',maxLength:700}},['actor','channel','evidence']);
+const retroEntry=object({
+ id:{type:'string',maxLength:80},kind:{type:'string',enum:['joke','quote','promise','gift','secret','shared_memory','conflict','relationship','event','other']},
+ title:{type:'string',maxLength:180},detail:{type:'string',maxLength:1800},
+ evidence:{type:'string',maxLength:900},quote:{type:'string',maxLength:600},
+ emotional_context:{type:'string',maxLength:700},
+ participants:{type:'array',maxItems:20,items:{type:'string',maxLength:120}},
+ known_by:{type:'array',maxItems:20,items:retroKnown},
+ tags:{type:'array',maxItems:20,items:{type:'string',maxLength:80}}
+},['id','kind','title','detail','evidence']);
 const decisionSchema={type:'array',maxItems:4,items:object({
  id:{type:'string',maxLength:30},label:{type:'string',maxLength:200},description:{type:'string',maxLength:800}
 },['id','label','description'])};
@@ -431,6 +483,32 @@ const tools = [
     world_id:uuid,scene_id:uuid,offset:{type:'integer',minimum:0,maximum:150000},
     limit:{type:'integer',minimum:1,maximum:25000}
   },['world_id','scene_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_world_depth',description:'Глубокая психология, история интерпретаций, направленные многомерные отношения, личные переосмысления и подтверждённые события NPC. Из ВСЕЙ действующей ветки.',inputSchema:object({
+    world_id:uuid,actor_names:{type:'array',maxItems:15,items:{type:'string',maxLength:120}}
+  },['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_npc_offscreen_brief',description:'Без записи и выдумывания событий: доступные цели, знания, положение NPC и планы, которые ЕЩЁ НЕ произошли. Перед внекадровой сценой сверяй эти ограничения.',inputSchema:object({
+    world_id:uuid,actor_names:{type:'array',maxItems:12,items:{type:'string',maxLength:120}}
+  },['world_id','actor_names']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_memory_review_queue',description:'Показать сцены, в которых ещё не выполнена ретроспективная разметка шуток/обещаний/связей. Требует подтверждения источников через get_story_scene перед записью.',inputSchema:object({
+    world_id:uuid,offset:{type:'integer',minimum:0,maximum:30000},limit:{type:'integer',minimum:1,maximum:30}
+  },['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'index_legacy_scene_memories',description:'ТОЛЬКО по команде пользователя «Переиндексируй старые сцены»: создаёт отдельную ревизию подтверждённых оригинальным текстом воспоминаний; исходная сцена НЕ меняется. Для known_by требуются реальный канал и точная опора на текст.',inputSchema:object({
+    world_id:uuid,scene_id:uuid,expected_head:uuid,
+    entries:{type:'array',maxItems:25,items:retroEntry}
+  },['world_id','scene_id','expected_head','entries']),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false} },
+  { name:'audit_scene_draft',description:'СТАТИЧЕСКАЯ проверка проекта сцены до сохранения: время, источник психологических изменений, старые воспоминания, планы NPC, ресурсы и возможная утечка знаний. Ошибки блокируют, предупреждения требуют проверки; инструмент не понимает весь смысл прозы.',inputSchema:object({
+    world_id:uuid,scene:{type:'string',maxLength:150000},
+    world_time:{type:'string',maxLength:32},changes
+  },['world_id','scene','world_time','changes']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'compare_story_branches',description:'Сравнение двух веток после «На это:»: общий префикс, аннулированные/новые сцены и факты, изменения отношений и вещей, без слияния отменённого хвоста в текущий канон.',inputSchema:object({
+    world_id:uuid,other_branch_id:uuid
+  },['world_id','other_branch_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_checkpoint_recovery',description:'Восстановление даже после 30 000 сцен: Supabase транзакционно доказывает, что checkpoint является предком действующей ветки, и выдаёт точную часть checkpoint + новые события. Для полной записи данных нужен установленный checkpoint_recovery.sql. Не заменяет чтение старых шуток.',inputSchema:object({
+    world_id:uuid,checkpoint_offset:{type:'integer',minimum:0,maximum:700000},
+    delta_offset:{type:'integer',minimum:0,maximum:100000},
+    scene_limit:{type:'integer',minimum:1,maximum:100}
+  },['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_recovered_state',description:'Вычислить проверенные текущие деньги, предметы, знания, причинные линии, психологию и отношения из checkpoint плюс следующих сцен. Требует checkpoint_recovery.sql и максимум 5000 сцен после последнего снимка; не делает предположений.',inputSchema:object({world_id:uuid},['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_sync_health',description:'OAuth-проверка компаньона: активная ветка, автосейв, полнота последней сцены, структурированные последствия, документы и источники. Только чтение, без технической записи.',inputSchema:object({world_id:uuid},['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_revision_context',description:'До исправления «На это:» прочитай полный исходный текст валидной сцены и получи защищённый токен актуальной ветки. Ничего не изменяет.',inputSchema:object({world_id:uuid,target_scene_id:uuid},['world_id','target_scene_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'commit_scene_revision',description:'Только по запросу «На это:»: сохраняет исходный валидный префикс плюс новое продолжение в НОВУЮ ветку, без удаления старых сцен. Требует get_revision_context и реальные последствия изменения.',inputSchema:object({
@@ -499,14 +577,32 @@ function branchState({world,branch,characters,scenes,has_older_scenes=false},mod
       history_page_size:20},ancestry_limit:200};
 }
 
-function sourceDocList(env,identity,id,{full=true}={}){
- const fields=full?'id,world_id,doc_key,revision,category,title,source_filename,sha256,created_at,content':'id,world_id,doc_key,revision,category,title,source_filename,sha256,created_at';
- const url='/rest/v1/lw_reference_docs?world_id=eq.'+encodeURIComponent(id)+'&select='+encodeURIComponent(fields)+'&order=doc_key.asc,revision.desc&limit=150';
- return supabase(env,url,{token:identity.token}).then(rows=>{
-  if(!Array.isArray(rows))throw Error('Не удалось загрузить библиотеку документов.');
-  const latest=latestDocumentVersions(rows);
-  return {installed:true,docs:latest,total_revisions_loaded:rows.length};
- }).catch(error=>({installed:false,docs:[],message:'Библиотека документов недоступна. Проверь миграцию lw_reference_docs и авторизацию. '+(error?.message||'')}));
+/** Read ALL installed document keys, not just the first 150 sorted keys.
+ * A truncated catalog is a dangerous false memory; explicit failure is safer.
+ */
+async function sourceDocList(env,identity,id,{full=true}={}){
+ const fields=full?'id,world_id,doc_key,revision,category,title,source_filename,sha256,created_at,content':
+  'id,world_id,doc_key,revision,category,title,source_filename,sha256,created_at';
+ const pageSize=200,maxDocs=20000;
+ try{
+  const rows=[];
+  for(let offset=0;offset<=maxDocs;offset+=pageSize){
+   const url='/rest/v1/lw_reference_docs?world_id=eq.'+encodeURIComponent(id)+
+    '&select='+encodeURIComponent(fields)+
+    '&order=doc_key.asc,revision.desc,id.asc&limit='+pageSize+'&offset='+offset;
+   const page=await supabase(env,url,{token:identity.token});
+   if(!Array.isArray(page))throw Error('Библиотека не вернула список документов.');
+   if(rows.length+page.length>maxDocs)
+    throw Error('Более 20 000 редакций документов. Каталог неполон; необходима постраничная миграция.');
+   rows.push(...page);
+   if(page.length<pageSize)break;
+  }
+  return {installed:true,docs:latestDocumentVersions(rows),total_revisions_loaded:rows.length,
+   complete:true};
+ }catch(error){
+  return {installed:false,docs:[],complete:false,message:
+   'Библиотека документов не может быть проверена целиком: '+(error?.message||'')};
+ }
 }
 async function sourceDocRead(env,identity,id,key,revision=null,offset=0,limit=15000){
  const validated=String(key||'');
@@ -584,7 +680,7 @@ async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,ass
    yearReconciliation.documents=docStore.docs.filter(doc=>doc.category!=='checkpoint'&&!yearArchiveMetadata(doc)&&!stageYearMetadata(doc)&&doc.doc_key!==STAGE_CONTROL_KEY);
   }
  }
- const ref=buildSourcePreflight(yearReconciliation.documents.filter(d=>d.doc_key!==STAGE_CONTROL_KEY),{intent,actors,maxExcerptChars:34000});
+ const ref=buildSourcePreflight(yearReconciliation.documents.filter(d=>d.doc_key!==STAGE_CONTROL_KEY&&!d.doc_key?.startsWith(RETRO_INDEX_KEY_PREFIX)),{intent,actors,maxExcerptChars:34000});
  const kinds=new Set(ref.manifest.map(d=>d.category));
  const findings=[];
  for(const issue of yearReconciliation.warnings){
@@ -712,24 +808,135 @@ async function loadFullWorldLineage(env,identity,id){
   rows.push(...page);
   if(page.length<pageSize)break;
  }
- try{return {complete:true,state,lineage:activeLineage(rows,head)};}
+ try{return {complete:true,state,lineage:activeLineage(rows,head),all_rows:rows};}
  catch(error){return {complete:false,state,reason:error.message};}
+}
+/** A checkpoint is trusted ONLY after PostgreSQL proves it is on today's
+ * active ancestry. Falling back to the latest document without this proof
+ * would resurrect a removed «На это:» tail.
+ */
+async function selectVerifiedCheckpoint(env,identity,id){
+ const catalog=await sourceDocList(env,identity,id,{full:true});
+ if(!catalog.installed)throw Error('Библиотека checkpoint недоступна: '+catalog.message);
+ const checkpoints=catalog.docs.filter(d=>d.category==='checkpoint')
+  .sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+ let tried=0,failures=[];
+ for(const current of checkpoints.slice(0,30)){
+  let doc=current;
+  for(let rev=Number(current.revision);rev>0&&rev>Number(current.revision)-30;rev--){
+   if(doc.revision!==rev){
+    const data=await sourceDocRead(env,identity,id,current.doc_key,rev,0,25000);
+    let content=data.content,next=data.next_offset;
+    while(next!==null){
+     const part=await sourceDocRead(env,identity,id,current.doc_key,rev,next,25000);
+     content+=part.content;next=part.next_offset;
+    }
+    doc={...data,revision:rev,content};
+   }
+   const checkpoint=parseCheckpointDoc(doc);
+   if(!checkpoint||checkpoint.world_id!==id||!isReplayableCheckpoint(checkpoint)||
+      !checkpoint.checkpoint_attestation)continue;
+   let signed;
+   try{
+    signed=await unseal(env,'checkpoint-attestation-v1',checkpoint.checkpoint_attestation);
+    const canonical={...checkpoint};delete canonical.checkpoint_attestation;
+    if(signed.world_id!==id||signed.source_head!==checkpoint.source_head||
+       signed.branch_id!==checkpoint.branch_id||
+       signed.body_fingerprint!==await fingerprint(JSON.stringify(canonical)))continue;
+   }catch{continue;}
+   tried++;
+   try{
+    const proof=await supabase(env,'/rest/v1/rpc/lw_bridge_v4_since_checkpoint',{
+     token:identity.token,body:{p_world:id,p_anchor:checkpoint.source_head,p_offset:0,p_limit:1}});
+    if(proof?.verified&&proof.checkpoint_head===checkpoint.source_head&&proof.world_id===id)
+     return {doc,checkpoint,proof,source:'SQL_ANCESTRY_VERIFIED'};
+   }catch(error){
+    if(/PGRST202|42883|function.*not found|could not find|does not exist/i.test(String(error?.message||'')))
+     throw Error('Для надёжного восстановления checkpoint установи supabase/checkpoint_recovery.sql в SQL Editor.');
+    failures.push(String(error?.message||error).slice(0,250));
+    // A rejected ancestor is not valid; older revisions may still be valid.
+   }
+  }
+ }
+ throw Error('Нет совместимого checkpoint из действующей ветки. Просмотрено '+tried+
+  '. Аннулированные snapshots не используются.'+
+  (failures.length?' Последняя ошибка: '+failures.at(-1):''));
+}
+async function collectCheckpointDelta(env,identity,id,selected,{maxScenes=5000}={}){
+ const total=Number(selected.proof.total_delta_scenes);
+ if(!Number.isInteger(total)||total<0)throw Error('SQL не вернул корректное число новых сцен.');
+ if(total>maxScenes)throw Error('После checkpoint '+total+
+  ' сцен: для безопасного восстановления текущего состояния нужно промежуточное сохранение или постраничная обработка.');
+ const scenes=[],head=selected.proof.current_head,branch=selected.proof.active_branch_id;
+ for(let offset=0;offset<total;offset+=200){
+  const part=await supabase(env,'/rest/v1/rpc/lw_bridge_v4_since_checkpoint',{
+   token:identity.token,body:{p_world:id,p_anchor:selected.checkpoint.source_head,
+    p_offset:offset,p_limit:Math.min(200,total-offset)}});
+  if(!part?.verified||part.current_head!==head||part.active_branch_id!==branch||
+    Number(part.total_delta_scenes)!==total)
+   throw Error('Действующая ветка изменилась во время восстановления checkpoint.');
+  if(!Array.isArray(part.rows)||part.rows.length!==Math.min(200,total-offset))
+   throw Error('Не все сцены после checkpoint загружены. Восстановление прекращено.');
+  scenes.push(...part.rows);
+ }
+ return {scenes,head,branch};
+}
+async function recoverCompanionFromCheckpoint(env,identity,id){
+ const selected=await selectVerifiedCheckpoint(env,identity,id);
+ const after=await collectCheckpointDelta(env,identity,id,selected);
+ const baselineState=await supabase(env,'/rest/v1/rpc/lw_bridge_v2_state',
+  {token:identity.token,body:{p_world:id}});
+ if(baselineState.branch?.id!==after.branch||baselineState.branch.head_scene_id!==after.head)
+  throw Error('Ветка изменилась при проверке checkpoint.');
+ const rebuilt=replayFromCheckpoint(selected.checkpoint,after.scenes,{
+  verified_source_head:true,expected_head:after.head,world_id:id,
+  baselines:baselineState.characters||[]
+ });
+ return {selected,after,rebuilt};
 }
 async function companionState(env,identity,id){
  const full=await loadFullWorldLineage(env,identity,id);
  const data=full.state,branch=data.branch;
- if(!full.complete)return {mode:'live',world_id:id,branch_id:branch.id,head_scene_id:branch.head_scene_id,complete:false,reason:full.reason};
+ if(!full.complete){
+  try{
+   const recovered=await recoverCompanionFromCheckpoint(env,identity,id);
+   const p=recovered.rebuilt;
+   return {mode:'live',world_id:id,branch_id:branch.id,
+    head_scene_id:branch.head_scene_id,complete:true,
+    recovered_from_checkpoint:true,
+    source_head:recovered.selected.checkpoint.source_head,
+    accounts:p.economy.accounts,items:p.economy.items,
+    new_characters:p.economy.new_characters,
+    audit:p.economy.audit.slice(-250),
+    issues:[...p.economy.issues,...p.data_quality.warnings],
+    scanned_scenes:p.scanned_world_scenes,
+    character_memory:p.characters.characters.map(c=>({
+     name:c.name,origin:c.origin,state:c.state,knowledge_count:c.knowledge.length,
+     belief_count:c.beliefs.length})),
+    character_warnings:p.characters.warnings,
+    causal_memory:causalSummary(p.causality),depth_memory:p.depth,
+    memory_provenance:{verified_source_head:true,
+     checkpoint:recovered.selected.doc.doc_key,
+     after_checkpoint_scenes:recovered.after.scenes.length,
+     unstructured_before_checkpoint:p.data_quality.missing_structured_at_checkpoint,
+     unstructured_after_checkpoint:p.data_quality.missing_structured_in_delta}};
+  }catch(error){
+   return {mode:'live',world_id:id,branch_id:branch.id,head_scene_id:branch.head_scene_id,
+    complete:false,reason:full.reason+' Checkpoint recovery: '+(error?.message||error)};
+  }
+ }
  const lineage=full.lineage,getDelta=s=>readSceneNote(s.prompt_note)?.delta||{};
  const projection=projectCompanion(lineage,{getDelta,strict:false});
  const people=projectCharacterMemory(data.characters||[],lineage,{getDelta});
  const causal=projectCausalMemory(lineage,{getDelta});
+ const depth=projectWorldDepth(lineage,{getDelta});
  return {mode:'live',world_id:id,branch_id:branch.id,head_scene_id:branch.head_scene_id,
   valid_scene_ids:lineage.map(s=>s.id),
   complete:true,accounts:projection.accounts,items:projection.items,new_characters:projection.new_characters,
   audit:projection.audit.slice(-250),total_transactions:projection.audit.length,
   issues:projection.issues,scanned_scenes:projection.scanned_scenes,
   character_memory:people.characters.map(c=>({name:c.name,origin:c.origin,state:c.state,knowledge_count:c.knowledge.length,belief_count:c.beliefs.length})),
-  character_warnings:people.warnings,causal_memory:causalSummary(causal)};
+  character_warnings:people.warnings,causal_memory:causalSummary(causal),depth_memory:depth};
 }
 async function getRevisionSource(env,identity,id,targetId){
  const full=await loadFullWorldLineage(env,identity,id);
@@ -900,6 +1107,13 @@ async function call(name,args,env,identity) {
     const doc=buildChatCheckpoint({world:full.state.world,branch:full.state.branch,
      lineage:hydrated,characters:full.state.characters||[],stage:activeStageOrDefault(stages),
      handoff_note:args.handoff_note||'',evidence_scene_ids:proofIds});
+    // A user-uploaded document with the same JSON shape must NOT be treated as a
+    // cryptographically verified state seed. Sign the server-built exact snapshot.
+    const attestation=await seal(env,'checkpoint-attestation-v1',{
+     world_id:id,branch_id:full.state.branch.id,source_head:head,
+     body_fingerprint:await fingerprint(doc.content)});
+    doc.content=JSON.stringify({...JSON.parse(doc.content),checkpoint_attestation:attestation});
+    if(doc.content.length>700000)throw Error('Подписанный checkpoint слишком большой: память нельзя незаметно обрезать.');
     await assertMemoryHead(env,identity,id,head,full.state.branch.id);
     const saved=await writeSystemArchive(env,identity,id,{
      key:doc.key,title:doc.title,category:'checkpoint',content:doc.content});
@@ -937,6 +1151,13 @@ async function call(name,args,env,identity) {
   }
   if(name==='get_resume_context'){
     if(!live)throw Error('В демо нет персональной истории.');
+    const fullCheck=await loadFullWorldLineage(env,identity,id);
+    if(!fullCheck.complete){
+     return {mode,world_id:id,complete:false,recovery_required:true,
+      reason:fullCheck.reason,
+      next_tool:'get_checkpoint_recovery',
+      instructions:'Для очень длинной истории используй get_checkpoint_recovery с чтением ВСЕХ страниц checkpoint и новых сцен. Потом get_recovered_state для подтверждённого структурированного состояния. Миграция supabase/checkpoint_recovery.sql должна быть установлена. До проверки checkpoint не создавай новую каноническую сцену.'};
+    }
     const {full,stages,head}=await fullMemoryState(env,identity,id);
     const docs=await sourceDocList(env,identity,id,{full:true});
     if(!docs.installed)throw Error('Библиотека документов недоступна: '+docs.message);
@@ -975,11 +1196,18 @@ async function call(name,args,env,identity) {
   }
   if(name==='get_story_scene'){
     if(!live)throw Error('Полные исторические сцены доступны в рабочем мире.');
-    const full=await loadFullWorldLineage(env,identity,id);
-    if(!full.complete)throw Error('Не удалось проверить действительную ветку: '+full.reason);
-    const target=checkId(args.scene_id);
-    if(!full.lineage.some(s=>s.id===target))
-     throw Error('Сцена не находится в действительной ветке или была отменена.');
+    const target=checkId(args.scene_id),full=await loadFullWorldLineage(env,identity,id);
+    if(full.complete){
+     if(!full.lineage.some(s=>s.id===target))
+      throw Error('Сцена не находится в действительной ветке или была отменена.');
+    }else{
+     // A large world cannot rely on the bounded complete-lineage projector.
+     // PostgreSQL proves target is a real ancestor of the current head.
+     const checked=await supabase(env,'/rest/v1/rpc/lw_bridge_v4_since_checkpoint',{
+      token:identity.token,body:{p_world:id,p_anchor:target,p_offset:0,p_limit:1}});
+     if(!checked?.verified||checked.checkpoint_head!==target)
+      throw Error('Нельзя подтвердить исходную сцену в действительной ветке.');
+    }
     const rows=await supabase(env,'/rest/v1/lw_scenes?world_id=eq.'+encodeURIComponent(id)+
      '&id=eq.'+target+'&select=id,body,world_time,prompt_note&limit=1',{token:identity.token});
     if(!Array.isArray(rows)||rows.length!==1)throw Error('Исходная сцена недоступна.');
@@ -993,16 +1221,58 @@ async function call(name,args,env,identity) {
   }
   if(name==='search_story_memories'){
     if(!live)throw Error('Поиск реальных воспоминаний доступен только в рабочем мире.');
-    const full=await loadFullWorldLineage(env,identity,id);
-    if(!full.complete)throw Error('Не удалось восстановить всю память: '+full.reason);
-    const query=String(args.query||'').trim().slice(0,200);
+    const query=String(args.query||'').trim().slice(0,150);
     if(!query)throw Error('Укажи слово, фразу или тему воспоминания.');
+    const full=await loadFullWorldLineage(env,identity,id);
+    if(!full.complete){
+     if(query.length<3)throw Error('Для долгой истории нужно хотя бы три символа запроса.');
+     const sql=await supabase(env,'/rest/v1/rpc/lw_bridge_v4_search_active_scenes',{
+      token:identity.token,body:{p_world:id,p_query:query,p_offset:0,p_limit:Math.min(50,args.limit??20)}});
+     if(!sql?.verified||sql.world_id!==id)throw Error('Поиск не подтвердил действительную ветку.');
+     const filtered=sql.rows.map(r=>({
+      scene_id:r.id,world_time:r.world_time,excerpt:r.excerpt,
+      kind:r.body_match?'original_scene_text':'structured_scene_note',
+      known_by:'not_established',open_full_scene_with:'get_story_scene'}));
+     const annotations=searchStoryMemories(sql.rows.map(r=>({
+      id:r.id,world_time:r.world_time,prompt_note:r.prompt_note})),{
+      query,actor_names:args.actor_names||[],kind:args.kind||null,limit:args.limit??20});
+     return {mode,world_id:id,query,verified_active_branch:true,
+      recovery_mode:'sql_active_ancestry_search',
+      active_branch_id:sql.active_branch_id,current_head:sql.current_head,
+      structured_memories:annotations,original_scene_matches:filtered,
+      matching_year_documents:[],reviewed_legacy_memories:{total:0,items:[]},
+      search_complete:sql.next_offset===null,next_offset:sql.next_offset,
+      total_matches:sql.match_total,
+      warning:'Больше 30 000 строк мира: поиск проверяет ТОЛЬКО действительную ветку через SQL. Старые Year Documents и отдельно аннотированные воспоминания при необходимости открывай по ключу; полная проверка всех них в этом ответе не выполнялась.'};
+    }
     const structured=searchStoryMemories(full.lineage,{query,actor_names:args.actor_names||[],
      kind:args.kind||null,limit:args.limit??20});
     const stages=await loadStageState(env,identity,id,full.lineage);
     const docs=await sourceDocList(env,identity,id,{full:true});
     const years=docs.installed?validStageYearDocs(docs.docs,stages.state,full.lineage,id)
      .filter(d=>stageYearMetadata(d)):[],tokens=[query,...(args.actor_names||[])];
+    const retroCandidates=docs.installed?searchRetroMemories(
+     activeRetroMemories(docs.docs,full.lineage.map(s=>s.id),id),
+     {query,actor_names:args.actor_names||[],limit:args.limit??20}):{total:0,items:[]};
+    const verifiedRetro=[],retroRejected=[],bodies=new Map();
+    for(const memory of retroCandidates.items){
+     let body=bodies.get(memory.scene_id);
+     if(body===undefined){
+      const original=await supabase(env,'/rest/v1/lw_scenes?world_id=eq.'+encodeURIComponent(id)+
+       '&id=eq.'+encodeURIComponent(memory.scene_id)+'&select=id,body&limit=1',
+       {token:identity.token});
+      body=Array.isArray(original)&&original.length===1?String(original[0].body||''):null;
+      bodies.set(memory.scene_id,body);
+     }
+     if(body&&memory.source_digest===await fingerprint(body)&&
+        body.includes(memory.evidence)&&(!memory.quote||body.includes(memory.quote))&&
+        (memory.known_by||[]).every(k=>body.includes(k.evidence))){
+      verifiedRetro.push({...memory,source_text_verified:true});
+     }else retroRejected.push({scene_id:memory.scene_id,id:memory.id,
+      code:'RETRO_SOURCE_MISMATCH'});
+    }
+    const retro={total:verifiedRetro.length,items:verifiedRetro,
+     rejected_count:retroRejected.length,source_validation:'original_text_sha256_and_literal_evidence'};
     const matching_years=years.flatMap(d=>{
       const excerpts=findDocExcerpts(d.content,tokens,{radius:400,max:3});
       return excerpts.length?[{doc_key:d.doc_key,revision:d.revision,title:d.title,
@@ -1029,6 +1299,7 @@ async function call(name,args,env,identity) {
      });
     }
     return {mode,world_id:id,query,structured_memories:structured,
+     reviewed_legacy_memories:retro,
      matching_year_documents:matching_years,original_scene_matches:raw,
      search_complete:!capped,warning:capped?'Поиск по исходным сценам ограничен первыми 120 совпадениями во всём мире; результат НЕ исчерпывающий. Уточни запрос.':null,
      knowledge_rule:'Вся информация о том, кто знает фразу, должна быть подтверждена сценой/learned. Участие не равно знанию всех секретов.'};
@@ -1087,6 +1358,199 @@ async function call(name,args,env,identity) {
     return {mode,world_id:id,branch_id:full.state.branch.id,complete:true,
       scanned_scenes:full.lineage.length,counts:memory.counts,
       ...searchCausalMemory(memory,{kind:args.kind??'fact',query:args.query??'',offset:args.offset??0,limit:args.limit??40})};
+  }
+  if(name==='get_world_depth'){
+   if(!live)throw Error('Психологическая память доступна только для действительной истории.');
+   const full=await loadFullWorldLineage(env,identity,id);
+   if(!full.complete)throw Error('Нет полной валидной ветки: '+full.reason);
+   const get=s=>readSceneNote(s.prompt_note)?.delta||{};
+   const depth=projectWorldDepth(full.lineage,{getDelta:get});
+   const names=(args.actor_names||[]).length?args.actor_names:depth.psychology.map(p=>p.name);
+   const selected=actorDepth(depth,names,{maxHistory:60});
+   return {mode,world_id:id,branch_id:full.state.branch.id,
+    source_head:full.state.branch.head_scene_id,scanned_scenes:depth.scanned_scenes,
+    ...selected,all_relationships_count:depth.relationships.length,
+    warning:'Интерпретации и противоречивые чувства остаются субъективными. Не называй их объективными фактами.'};
+  }
+  if(name==='get_npc_offscreen_brief'){
+   if(!live)throw Error('Нельзя строить жизнь NPC из демоданных.');
+   const full=await loadFullWorldLineage(env,identity,id);
+   if(!full.complete)throw Error('Не установлена валидная причинная история: '+full.reason);
+   const get=s=>readSceneNote(s.prompt_note)?.delta||{};
+   const depth=projectWorldDepth(full.lineage,{getDelta:get});
+   const people=projectCharacterMemory(full.state.characters||[],full.lineage,{getDelta:get});
+   const names=Array.isArray(args.actor_names)?args.actor_names:[];
+   const selected=actorDepth(depth,names,{maxHistory:45});
+   const brief=names.map(n=>{
+    const char=people.characters.find(p=>p.name.toLocaleLowerCase('ru')===n.toLocaleLowerCase('ru'));
+    return {name:n,exists:!!char,
+     confirmed_state:char?{role:char.initial?.role||'npc',location:char.state.location,
+      health:char.state.health,goals:char.state.goals,knowledge:char.knowledge,
+      beliefs:char.beliefs,recent_actions:char.history.slice(-20)}:null};
+   });
+   return {mode,world_id:id,source_head:full.state.branch.head_scene_id,
+    people:brief,psychology:selected.psychology,relationships:selected.relationships,
+    confirmed_offscreen:selected.confirmed_offscreen,
+    intended_not_yet_happened:selected.npc_intentions,
+    rules:['Учитывай реальные даты и расстояния','Не сообщай герою о неизвестных ему событиях',
+     'Не выдавай намерения NPC за события','Фиксируй совершившееся только если оно действительно прозвучало в валидной художественной сцене',
+     'У NPC есть свои цели, препятствия и возможность отказаться, даже если это неудобно сюжету']};
+  }
+  if(name==='get_memory_review_queue'){
+   if(!live)throw Error('Индексация старых сцен доступна только для твоего мира.');
+   const full=await loadFullWorldLineage(env,identity,id);
+   if(!full.complete)throw Error('Не удалось проверить действующую ветку: '+full.reason);
+   const docs=await sourceDocList(env,identity,id,{full:true});
+   if(!docs.installed)throw Error('Библиотека воспоминаний недоступна: '+docs.message);
+   const progress=retroIndexCoverage(full.lineage,docs.docs,id);
+   const offset=boundedInteger(args.offset??0,0,30000),limit=boundedInteger(args.limit??20,1,30);
+   return {mode,world_id:id,branch_id:full.state.branch.id,source_head:full.state.branch.head_scene_id,
+    source_scene_count:progress.source_scene_count,indexed_scene_count:progress.indexed_scene_count,
+    remaining_count:progress.remaining_count,
+    pending:progress.pending.slice(offset,offset+limit),next_offset:offset+limit<progress.remaining_count?offset+limit:null,
+    instructions:'Вызови get_story_scene для каждого ID, выдели ДОСЛОВНЫЕ цитаты и evidence, затем index_legacy_scene_memories. Если значимых воспоминаний нет, допустим пустой entries для пометки как проверенная сцена. Не изменяй исходный текст.'};
+  }
+  if(name==='index_legacy_scene_memories'){
+   if(!live||!writesEnabled(env))throw Error('Запись аннотаций недоступна.');
+   const authorization=await rpc('lw_bridge_v2_state',{p_world:id});
+   if(authorization.world?.genesis_choices?.document_upload_enabled!==true)
+    throw Error('Владелец ещё не разрешил импорт документов из ChatGPT. Включи его в настройках нужного мира.');
+   const sceneId=checkId(args.scene_id),expected=checkId(args.expected_head);
+   const full=await loadFullWorldLineage(env,identity,id);
+   if(!full.complete||full.state.branch.head_scene_id!==expected||
+      !full.lineage.some(s=>s.id===sceneId))
+    throw Error('Текущая ветка/последняя сцена поменялась или исходная сцена аннулирована.');
+   const rows=await supabase(env,'/rest/v1/lw_scenes?world_id=eq.'+encodeURIComponent(id)+
+    '&id=eq.'+sceneId+'&select=id,body,world_time,prompt_note&limit=1',{token:identity.token});
+   if(!Array.isArray(rows)||rows.length!==1)throw Error('Невозможно проверить полный текст исходной сцены.');
+   const original=rows[0],digest=await fingerprint(original.body);
+   const entry=makeRetroIndex({worldId:id,scene:original,head:expected,
+    entries:args.entries||[],digest});
+   await assertMemoryHead(env,identity,id,expected,full.state.branch.id);
+   const save=await writeSystemArchive(env,identity,id,{
+    key:entry.key,title:entry.title,category:entry.category,content:entry.content});
+   const checked=await assertMemoryHead(env,identity,id,expected,full.state.branch.id).then(()=>true).catch(()=>false);
+   return {mode,persisted:true,scene_id:sceneId,source_digest:digest,
+    source_text_unchanged:true,document_key:entry.key,revision:save.revision,
+    memories:entry.count,unchanged:!!save.unchanged,head_still_current:checked,
+    warning:checked?null:'Пока сохраняли индекс, ветка поменялась. Аннотация допустима только если исходная сцена осталась валидной; повторно проверь активную ветку.'};
+  }
+  if(name==='audit_scene_draft'){
+   const state=live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState();
+   const body=String(args.scene||''),time=String(args.world_time||'');
+   let parsed;
+   try{parsed=parseScenePackage(JSON.stringify({scene:body,world_time:time,changes:args.changes}));}
+   catch(error){
+    return {mode,world_id:id,passed:false,counts:{errors:1,warnings:0,information:0},
+     issues:[{code:'INVALID_SCENE_PACKET',severity:'error',detail:error.message}],
+     caveat:'Инструмент проверяет только явную структуру. Нельзя гарантировать все психологические нюансы автоматической проверкой.'};
+   }
+   const actors=state.characters||[];
+   const report=auditNarrativeScene({scene:parsed.scene,world_time:time,
+    previous_time:state.scenes?.at(-1)?.world_time||state.world?.genesis_choices?.current_period||'',
+    changes:parsed.changes,characters:actors});
+   if(live&&(parsed.changes.economy.length||parsed.changes.items.length)){
+    const current=await companionState(env,identity,id);
+    if(!current.complete)report.issues.push({code:'ASSETS_NOT_VERIFIABLE',severity:'error',detail:current.reason});
+    else{
+     try{validateNextEvents(current,parsed.changes,actors);}
+     catch(error){report.issues.push({code:'INVALID_ACCOUNT_OR_ITEM',severity:'error',detail:error.message});}
+    }
+   }
+   report.counts={errors:report.issues.filter(e=>e.severity==='error').length,
+    warnings:report.issues.filter(e=>e.severity==='warning').length,
+    information:report.issues.filter(e=>e.severity==='info').length};
+   report.passed=report.counts.errors===0;
+   return {mode,world_id:id,source_head:state.branch?.head_scene_id,audit:report,
+    note:'Это предварительный аудит, он ничего не сохраняет. Для сохранения всё равно нужны get_scene_preflight и save_scene_auto.'};
+  }
+  if(name==='compare_story_branches'){
+   if(!live)throw Error('Сравнение веток требует сохранённую историю.');
+   const other=checkId(args.other_branch_id),full=await loadFullWorldLineage(env,identity,id);
+   if(!full.complete)throw Error('В мире неполная цепочка: '+full.reason);
+   const rows=await supabase(env,'/rest/v1/lw_branches?world_id=eq.'+encodeURIComponent(id)+
+    '&id=eq.'+other+'&select=id,name,head_scene_id&limit=1',{token:identity.token});
+   if(!Array.isArray(rows)||rows.length!==1)throw Error('Другая ветка недоступна владельцу мира.');
+   const alt=activeLineage(full.all_rows,rows[0].head_scene_id),get=s=>readSceneNote(s.prompt_note)?.delta||{};
+   const diff=compareWorldBranches(alt,full.lineage,{getDelta:get});
+   const before=projectCompanion(alt,{getDelta:get}),after=projectCompanion(full.lineage,{getDelta:get});
+   const map=v=>new Map(v.map(x=>[x.id,x]));
+   const oldItems=map(before.items),newItems=map(after.items);
+   const item_differences=[...new Set([...oldItems.keys(),...newItems.keys()])].flatMap(k=>{
+    const was=oldItems.get(k)||null,now=newItems.get(k)||null;
+    return JSON.stringify(was)===JSON.stringify(now)?[]:[{item_id:k,old:was,new:now}];
+   });
+   const accountsKey=a=>JSON.stringify([a.person,a.currency,a.scale]);
+   const oldAccounts=new Map(before.accounts.map(a=>[accountsKey(a),a]));
+   const newAccounts=new Map(after.accounts.map(a=>[accountsKey(a),a]));
+   const account_differences=[...new Set([...oldAccounts.keys(),...newAccounts.keys()])].flatMap(k=>{
+    const was=oldAccounts.get(k),now=newAccounts.get(k);
+    const view=a=>a?{person:a.person,currency:a.currency,scale:a.scale,
+     known:a.known,balance:a.balance,observed_delta:a.observed_delta}:null;
+    return JSON.stringify(view(was))===JSON.stringify(view(now))?[]:
+     [{account:k,old:view(was),new:view(now)}];
+   });
+   return {mode,world_id:id,current_branch_id:full.state.branch.id,
+    compared_branch_id:other,compared_branch_title:rows[0].name,
+    current_head:full.state.branch.head_scene_id,other_head:rows[0].head_scene_id,
+    ...diff,account_differences:account_differences.slice(0,120),
+    account_differences_complete:account_differences.length<=120,
+    item_differences:item_differences.slice(0,150),
+    item_differences_complete:item_differences.length<=150,
+    warnings:[...before.issues,...after.issues].slice(-25),
+    warning:'Аннулированное прошлое читается ТОЛЬКО как материал сравнения, но не переносится в активную историю.'};
+  }
+  if(name==='get_checkpoint_recovery'){
+   if(!live)throw Error('Восстановление checkpoint доступно только владельцу мира.');
+   const selected=await selectVerifiedCheckpoint(env,identity,id);
+   const checkpoint_offset=boundedInteger(args.checkpoint_offset??0,0,700000);
+   const delta_offset=boundedInteger(args.delta_offset??0,0,100000);
+   const limit=boundedInteger(args.scene_limit??35,1,100);
+   const chunk=await supabase(env,'/rest/v1/rpc/lw_bridge_v4_since_checkpoint',{
+    token:identity.token,body:{p_world:id,p_anchor:selected.checkpoint.source_head,
+     p_offset:delta_offset,p_limit:limit}});
+   if(!chunk.verified||chunk.current_head!==selected.proof.current_head||
+       chunk.active_branch_id!==selected.proof.active_branch_id)
+    throw Error('Ветка сменилась после подтверждения checkpoint. Перечитай контекст.');
+   const full=selected.doc.content,part=full.slice(checkpoint_offset,checkpoint_offset+25000);
+   return {mode,world_id:id,validated_checkpoint:true,
+    source_head:selected.checkpoint.source_head,
+    current_head:chunk.current_head,active_branch_id:chunk.active_branch_id,
+    checkpoint:{doc_key:selected.doc.doc_key,revision:selected.doc.revision,
+     content:part,offset:checkpoint_offset,
+     total_length:full.length,next_offset:checkpoint_offset+part.length<full.length?
+      checkpoint_offset+part.length:null},
+    after_checkpoint:{source_head:chunk.checkpoint_head,
+     total_scenes:chunk.total_delta_scenes,offset:chunk.offset,
+     scenes:chunk.rows,next_offset:chunk.next_offset,complete:chunk.complete},
+    warning:'Нужно дочитать ВСЕ части checkpoint и все следующие сцены. Восстановление требует только подтверждённого SQL предка. Старые нюансы при необходимости ищи в Year Documents и оригинальных сценах.'};
+  }
+  if(name==='get_recovered_state'){
+   if(!live)throw Error('Восстановление из проверенного checkpoint недоступно в демо.');
+   const {selected,after,rebuilt}=await recoverCompanionFromCheckpoint(env,identity,id);
+   return {mode,world_id:id,recovered:true,
+    source_head:selected.checkpoint.source_head,head_scene_id:after.head,
+    current_branch_id:after.branch,checkpoint_revision:selected.doc.revision,
+    delta_scenes:after.scenes.length,scanned_world_scenes:rebuilt.scanned_world_scenes,
+    world_time:rebuilt.world_time,
+    accounts:rebuilt.economy.accounts.map(x=>({person:x.person,currency:x.currency,scale:x.scale,
+     known:x.known,balance:x.balance,observed_delta:x.observed_delta})),
+    items:rebuilt.economy.items.map(x=>({id:x.id,label:x.label,owner:x.owner,
+     holder:x.holder,location:x.location,condition:x.condition,exists:x.exists})),
+    people:rebuilt.characters.characters.map(x=>({name:x.name,state:x.state,knowledge:x.knowledge,
+     beliefs:x.beliefs,recent_updates:x.history.slice(-25)})),
+    open_threads:rebuilt.causality.open_threads,
+    closed_threads:rebuilt.causality.resolved_threads.slice(-70),
+    recent_facts:rebuilt.causality.facts.slice(-100),
+    psychology:rebuilt.depth.psychology.map(x=>({name:x.name,aspects:x.aspects,
+     recent_observations:x.observations.slice(-25)})),
+    relationships:rebuilt.depth.relationships.map(x=>({from:x.from,to:x.to,
+     dimensions:x.dimensions,recent_changes:x.history.slice(-25)})),
+    subjective_recollections:rebuilt.depth.recollections.slice(-80),
+    confirmed_offscreen:rebuilt.depth.confirmed_offscreen.slice(-60),
+    uncompleted_plans:rebuilt.depth.npc_intentions.slice(-60),
+    data_quality:rebuilt.data_quality,
+    warning:'Восстановлены структурированные факты с доказанной контрольной точки, не все нюансы непромаркированной прозы. При старых отсылках читай первичную сцену.'};
   }
   if(name==='get_sync_health'){
     const state=live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState();
@@ -1172,6 +1636,7 @@ async function call(name,args,env,identity) {
       resource_memory:{complete:assets.complete,issues:assets.issues||[]},
       causal_memory:assets.complete?assets.causal_memory:{complete:false,reason:assets.reason},
       character_memory:assets.complete?{complete:true,profiles:(assets.character_memory||[]).filter(p=>actors.some(name=>name.toLocaleLowerCase('ru')===p.name.toLocaleLowerCase('ru'))),warnings:assets.character_warnings||[]}:{complete:false,reason:assets.reason},
+      psychological_memory:assets.complete?{complete:true,...actorDepth(assets.depth_memory,actors)}:{complete:false,reason:assets.reason},
       documents:live?await sourcePreflight(env,identity,id,intent,actors,base,assets):{installed:false,ready:false},
       narrative_checks:['Хронология и точное время','Цели, характер и изменения отношений','Что каждый знает и каким каналом','Травмы, состояние, ресурсы и местонахождение','Какие сцены и ветки аннулированы','Правила, глоссарий и актуальные изменения']}
   }
@@ -1188,6 +1653,7 @@ async function call(name,args,env,identity) {
       companion_guidance:companionGuidance(companionSettings(base.world,base.branch?.head_scene_id,base.world_time)),
       companion:resources,causal_memory:assets.complete?assets.causal_memory:{complete:false,reason:assets.reason},
       character_memory:assets.complete?{complete:true,profiles:assets.character_memory,warnings:assets.character_warnings}:{complete:false,reason:assets.reason},
+      depth_summary:assets.complete?{relationships:assets.depth_memory.relationships.map(r=>({from:r.from,to:r.to,dimensions:r.dimensions})),actors:assets.depth_memory.psychology.map(p=>({name:p.name,aspects:p.aspects}))}:{complete:false,reason:assets.reason},
       reference_documents:refs};
   }
   if(name==='get_companion_state') return live?await companionState(env,identity,id):{mode:'demo',world_id:id,complete:true,...projectCompanion(demoState().scenes,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}})};
@@ -1453,7 +1919,7 @@ export default {async fetch(request,env={}){
       world_time:time,prompt_note:packSceneNote({facts:['Координаты маяка расшифрованы.']})}));
   }
   if(request.method==='GET' && path==='/health') return json({
-    service:'living-world-bridge',version:'3.0.0',
+    service:'living-world-bridge',version:'3.4.0',
     mode:env.BRIDGE_MODE==='live'?'live':'not-live',
     missing_configuration:['BRIDGE_PUBLIC_URL','SUPABASE_URL','SUPABASE_OAUTH_CLIENT_ID','BRIDGE_SUPABASE_USER_ID','SUPABASE_PUBLISHABLE_KEY','BRIDGE_SEAL_KEY'].filter(name=>!env[name]),
     writes_enabled:writesEnabled(env)

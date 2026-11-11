@@ -11,13 +11,15 @@ import {projectCausalMemory,searchCausalMemory} from './world-causality.mjs';
 import {persistWorldAutosave} from './world-autosave.mjs';
 import {projectCharacterMemory} from './world-character-memory.mjs';
 import {STAGE_CONTROL_KEY} from './story-memory.mjs';
+import {projectWorldDepth,compareWorldBranches} from './world-depth.mjs';
+import {renderWorldDepthView,renderBranchComparisonView} from './world-depth-ui.mjs';
 import {WORLD_TEXT_FIELDS,CHARACTER_TEXT_FIELDS,worldDraftPrompt,parseWorldDraft,worldDraftFieldFromJSON,characterDraftPrompt,parseCharacterDraft,characterDraftFieldFromJSON} from './gpt-prompts.mjs';
 import {companionSettings,mergeCompanionPreferences} from './companion-settings.mjs';
 import {companionHealth} from './companion-health.mjs';
 
 const app=document.getElementById('app');
 const cfgKey='lw_cloud_config_v03'; // Preserve the existing Supabase connection when upgrading.
-const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[],aiReady:false,aiReason:'Подключение ещё не проверено',assets:null,assetIssue:null,documents:[],documentsReady:null,documentsError:'',docSelected:null,docContent:null,characterLedger:null,causalLedger:null,memoryQuery:'',memoryKind:'fact',memoryOffset:0,worldContext:null,suppressWorldClickUntil:0,saveDiagnostic:null,autoSavePendingWorldId:null,autoSaveErrors:{},busyLabel:'',pendingView:null,lastSceneRefreshAt:null,activeLineage:[],yearDraft:null,gptWorldField:null,gptCharacterField:null,healthReport:null};
+const state={config:readConfig(),client:null,session:null,user:null,worlds:[],world:null,characters:[],branches:[],scenes:[],memoryScenes:[],view:'library',modal:null,revision:null,recentLimit:40,busy:false,storyMode:'story',sceneLength:'large',quickStep:0,quickAnswers:[],aiReady:false,aiReason:'Подключение ещё не проверено',assets:null,assetIssue:null,documents:[],documentsReady:null,documentsError:'',docSelected:null,docContent:null,characterLedger:null,causalLedger:null,memoryQuery:'',memoryKind:'fact',memoryOffset:0,worldContext:null,suppressWorldClickUntil:0,saveDiagnostic:null,autoSavePendingWorldId:null,autoSaveErrors:{},busyLabel:'',pendingView:null,lastSceneRefreshAt:null,activeLineage:[],yearDraft:null,gptWorldField:null,gptCharacterField:null,healthReport:null,depthLedger:null,depthQuery:'',branchComparison:null,allWorldRows:null};
 const x=v=>esc(v??'');
 // Historical start and current narrative period are separate; don't fabricate a date.
 const storyClock=(w=state.world)=>state.scenes.at(-1)?.world_time||w?.genesis_choices?.current_period||(w?.genesis_approved?'':w?.clock_start)||'';
@@ -64,7 +66,7 @@ async function clipboard(s){try{await navigator.clipboard.writeText(s);notify('�
 function render(){if(!state.config){renderSetup();return;}if(!state.session){renderLogin();return;}renderApp();}
 function renderSetup(){app.innerHTML=`<div class="auth"><div class="eyebrow">LIVING WORLD · CLOUD v1.0</div><h1>Приватный мир на iPhone</h1><p class="sub">Один раз подключи собственную облачную базу Supabase. Затем Mac больше не нужен.</p><div class="panel" style="margin-top:22px"><form id="setup-form" class="form">${f('url','Project URL','https://','text','Supabase → Project Settings → API → Project URL')}${f('key','Publishable key (не секретный)','', 'text','Можно использовать publishable / anon key. Никогда не вставляй secret или service_role key.')}<button class="btn gold full" type="submit">Подключить базу</button></form><div class="footnote">Если Supabase ещё не создан, открой инструкцию README из архива. База и сайт должны быть опубликованы один раз; потом всё управление доступно с телефона.</div></div></div>`;}
 function renderLogin(){app.innerHTML=`<div class="auth"><div class="eyebrow">✦ LIVING WORLD · v1.0</div><h1>Войти в свои вселенные</h1><p class="sub">Один пароль вместо писем и кодов. На iPhone вход сохраняется между запусками.</p><div class="panel" style="margin-top:22px"><form id="login-form" class="form">${f('email','Электронная почта',localStorage.getItem('lw_login_email')||'','email')}${f('password','Пароль','','password')}<button class="btn gold full" type="submit">Войти в LIVING WORLD</button></form><details class="login-help"><summary>Первый вход — откуда взять пароль?</summary><p>Если ты раньше пользовалась только ссылками из писем, у того аккаунта может ещё не быть пароля. Не угадывай его и не запрашивай новые письма.</p><p>Для новой личной учётной записи открой Supabase → Authentication → Users → Add user → Create new user. Введи свободный email и свой надёжный пароль; выбери Auto Confirm User. Если твой старый email уже занят, используй другой адрес или алиас, например <code>мойадрес+livingworld@gmail.com</code> (у Gmail он приходит в тот же ящик).</p><p><strong>Важно:</strong> другая учётная запись не увидит миры старой. Если уже есть сохранённые миры, не создавай новый аккаунт — сначала восстанови доступ к прежнему.</p><p>После настройки можно выключить публичную регистрацию в Authentication → Sign In / Providers.</p><a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer">Открыть Supabase (Authentication → Users)</a></details><div class="divider"></div>${btn('disconnect-db','Сменить подключение к базе','ghost full')}<div class="footnote">Пароль не сохраняется в настройках приложения. Supabase хранит защищённую сессию, поэтому повторный вход обычно не требуется.</div></div></div>`;}
-function shellNav(){const links=[['library','▦','Миры'],['builder','⚙','Мир'],['genesis','✦','Генезис'],['story','▤','История'],['memory','◈','Память'],['assets','▣','Активы'],['documents','▤','Документы'],['people','♙','Герои'],['history','⑂','Ветки'],['settings','⚑','Настройки']];return `<aside class="sidebar"><div class="brand"><span class="mark">✦</span><div>LIVING WORLD<small>PRIVATE UNIVERSES</small></div></div><div class="eyebrow">Библиотека</div><nav class="nav">${links.map(([v,i,l])=>`<button data-action="navigate" data-view="${v}" class="${state.view===v?'active':''}">${i} &nbsp;${l}</button>`).join('')}</nav><div class="sidebar-bottom">v2.0.0 · источник истины<br>Mac не требуется<br>${x(state.user?.email||'')}</div></aside>`;}
+function shellNav(){const links=[['library','▦','Миры'],['builder','⚙','Мир'],['genesis','✦','Генезис'],['story','▤','История'],['memory','◈','Память'],['assets','▣','Активы'],['documents','▤','Документы'],['people','♙','Герои'],['history','⑂','Ветки'],['settings','⚑','Настройки']];return `<aside class="sidebar"><div class="brand"><span class="mark">✦</span><div>LIVING WORLD<small>PRIVATE UNIVERSES</small></div></div><div class="eyebrow">Библиотека</div><nav class="nav">${links.map(([v,i,l])=>`<button data-action="navigate" data-view="${v}" class="${state.view===v?'active':''}">${i} &nbsp;${l}</button>`).join('')}</nav><div class="sidebar-bottom">v2.4.0 · источник истины<br>Mac не требуется<br>${x(state.user?.email||'')}</div></aside>`;}
 function mobileNav(){const l=[['library','▦','Миры'],['builder','⚙','Мир'],['genesis','✦','Генезис'],['story','▤','История'],['memory','◈','Память'],['people','♙','Люди']];return `<nav class="mobilebar" aria-label="Основные разделы">${l.map(([v,i,label])=>`<button data-action="navigate" data-view="${v}" class="${state.view===v?'active':''}"><span>${i}</span>${label}</button>`).join('')}</nav>`;}
 function renderApp(){let content='';switch(state.view){case 'world-setup':content=renderWorldSetup();break;case 'builder':content=renderBuilder();break;case 'genesis':content=renderGenesis();break;case 'people':content=renderPeople();break;case 'story':content=renderStory();break;case 'memory':content=renderMemory();break;case 'assets':content=renderAssets();break;case 'documents':content=renderDocuments();break;case 'history':content=renderHistory();break;case 'settings':content=renderSettings();break;default:content=renderLibrary();}app.innerHTML=`<div class="app">${shellNav()}<div class="mobiletop"><button data-action="navigate" data-view="library">✦ LIVING WORLD</button><div><button data-action="navigate" data-view="history" aria-label="Ветки">⑂</button><button data-action="navigate" data-view="settings" aria-label="Настройки">⚙</button></div></div><main class="main">${content}</main>${mobileNav()}</div>${renderWorldContextMenu()}${state.modal?renderModal():''}`;}
 function heading(k,title,subtitle,actions=''){return `<div class="head"><div><div class="eyebrow">${x(k)}</div><h1 class="page-title">${x(title)}</h1><p class="sub">${x(subtitle)}</p></div>${actions?`<div class="row">${actions}</div>`:''}</div>`;}
@@ -418,11 +420,35 @@ function renderMemory(){
  ${box('События вне кадра ('+m.counts.offscreen_events+')',`<ul>${m.offscreen_events.slice(-40).map(renderEvent).join('')||'<li>Пока не зафиксированы.</li>'}</ul>`)}
  </div>
  ${m.warnings.length?`<div class="attention">В журнале обнаружены ${m.warnings.length} закрытых линий без ранее найденного открытия. Проверь источник.</div>`:''}
+ ${renderWorldDepthView(state.depthLedger,{query:state.depthQuery})}
  ${renderCharacterMemory()}`;
 }
-function renderHistory(){if(!state.world)return needsWorld();return `${heading('Временные линии','Ветки реальности','Каждая правка сохраняет прежний вариант, но не переносит отменённые события.')}<div class="panel">${state.branches.map(b=>`<div class="listrow"><div><b>${x(b.name)}</b> ${b.id===state.world.active_branch_id?'<span class="tag">Действующая</span>':''}<p>Создана: ${x(new Date(b.created_at).toLocaleString('ru-RU'))}</p><p>Текущая сцена: ${x(b.head_scene_id||'нет')}</p></div>${b.id!==state.world.active_branch_id?`<button class="btn small" data-action="switch-branch" data-id="${x(b.id)}">Перейти</button>`:''}</div>`).join('')}</div><div class="well" style="margin-top:16px">Чтобы изменить прошлое, в разделе «История» нажми «На это» под нужной сценой. Новая ветка возникнет автоматически.</div>`;}
+function renderHistory(){
+ if(!state.world)return needsWorld();
+ const active=state.world.active_branch_id;
+ const alternatives=state.branches.filter(b=>b.id!==active);
+ const rows=state.branches.map(b=>`<div class="listrow"><div>
+ <b>${x(b.name)}</b> ${b.id===active?'<span class="tag">Действующая</span>':''}
+ <p>Создана: ${x(new Date(b.created_at).toLocaleString('ru-RU'))}</p>
+ <p>Последняя сцена: ${x(b.head_scene_id||'нет')}</p>
+ </div>${b.id!==active?`<button class="btn small" data-action="switch-branch" data-id="${x(b.id)}">Перейти</button>`:''}</div>`).join('');
+ const compare=alternatives.length?`<div class="panel"><h2 class="section-title">Машина времени: сравнить с другой веткой</h2>
+ <div class="field"><label for="compare-branch">Старая ветка</label>
+ <select id="compare-branch">${alternatives.map(b=>opt(b.id,b.name,alternatives[0].id)).join('')}</select></div>
+ <div class="row">${btn('compare-branches-local','Сравнить изменения','gold')}${btn('compare-branches-gpt','✦ Детальное сравнение через GPT')}</div>
+ <p class="hint">Разница рассчитывается по сценам каждого варианта; отменённая ветка не становится каноном.</p>
+ </div>`:''; 
+ return `${heading('Временные линии','Ветки реальности','Каждая правка сохраняет прежний вариант, но не переносит отменённые события.')}
+ <div class="panel">${rows}</div>${compare}
+ ${renderBranchComparisonView(state.branchComparison)}
+ <div class="well" style="margin-top:16px">Чтобы изменить прошлое, в разделе «История» нажми «На это» под нужной сценой. Новая ветка возникнет автоматически.</div>`;
+}
 function renderSettings(){const w=state.world,auto=w?.genesis_choices?.auto_save_enabled===true;
-return `${heading('Настройки','Моё приложение','Приватность, модели, резервное копирование и вход.')}<div class="panel stack">${renderSyncHealth()}${w?`<div class="ai-status"><b>Запись сцен из ChatGPT: ${auto?'автоматическое сохранение разрешено':'ручное подтверждение каждой сцены'}</b><p>Если включить, подключённый MCP-мост сможет записывать действительно сыгранные сцены в этот мир одним вызовом при правильной ветке и владельце. Это не включает платный API и не меняет модель ChatGPT.</p>${btn('goto-world-auto-save','Автосейв на карточках миров','gold')}</div>`:''}<details class="login-help"><summary>Дополнительно: самостоятельная генерация на сайте через отдельный API</summary><div class="ai-status"><b>Автоматический ИИ: ${state.aiReady?'Подключён':'Не подключён'}</b><p>${state.aiReady?'Кнопки Генезиса, сцен и ускорения вызывают OpenAI API через защищённый Worker.':'Для автоматической генерации добавь секрет OPENAI_API_KEY в Cloudflare Worker living-world-bridge-mcp и проверь подключение. '+x(state.aiReason)}</p>${btn('ai-refresh','Проверить AI-подключение')}</div></details>
+return `${heading('Настройки','Моё приложение','Приватность, модели, резервное копирование и вход.')}<div class="panel stack">${renderSyncHealth()}${w?`<div class="ai-status">
+<b>Импорт документов из ChatGPT: ${w.genesis_choices?.document_upload_enabled===true?'разрешён':'запрещён'}</b>
+<p>Разрешение действует только для этого мира. GPT сможет сохранять запрошенные тобой документы, например director_calibration, но не изменять валидные сцены.</p>
+${btn('toggle-document-import',w.genesis_choices?.document_upload_enabled===true?'Запретить импорт документов':'Разрешить импорт документов',w.genesis_choices?.document_upload_enabled===true?'':'gold')}
+</div>`:``}${w?`<div class="ai-status"><b>Запись сцен из ChatGPT: ${auto?'автоматическое сохранение разрешено':'ручное подтверждение каждой сцены'}</b><p>Если включить, подключённый MCP-мост сможет записывать действительно сыгранные сцены в этот мир одним вызовом при правильной ветке и владельце. Это не включает платный API и не меняет модель ChatGPT.</p>${btn('goto-world-auto-save','Автосейв на карточках миров','gold')}</div>`:''}<details class="login-help"><summary>Дополнительно: самостоятельная генерация на сайте через отдельный API</summary><div class="ai-status"><b>Автоматический ИИ: ${state.aiReady?'Подключён':'Не подключён'}</b><p>${state.aiReady?'Кнопки Генезиса, сцен и ускорения вызывают OpenAI API через защищённый Worker.':'Для автоматической генерации добавь секрет OPENAI_API_KEY в Cloudflare Worker living-world-bridge-mcp и проверь подключение. '+x(state.aiReason)}</p>${btn('ai-refresh','Проверить AI-подключение')}</div></details>
  <details class="login-help" open><summary>Диагностика настоящих сейвов</summary>
  <div class="panel"><p class="sub">Проверка через Cloudflare и Supabase: создать <b>отдельный временный технический мир</b>, сохранить сцену, повторить запрос с тем же ID, прочитать баланс и предмет, затем удалить временный мир. Твои миры и история Гарри не изменяются.</p>
  ${btn('run-save-diagnostic','Проверить сейвы в реальной базе','gold')}
@@ -522,7 +548,7 @@ async function loadAssets(refreshHead=true){
    .order('created_at',{ascending:true}).order('id',{ascending:true}).range(offset,offset+pageSize-1);
   const page=dataOrThrow(await res);
   if(all.length+page.length>maxRows){
-   state.assets=null;state.characterLedger=null;state.causalLedger=null;
+   state.assets=null;state.characterLedger=null;state.causalLedger=null;state.depthLedger=null;state.branchComparison=null;state.allWorldRows=null;
    throw Error('История содержит более 30 000 записей. Они не удалены, но полный пересчёт активов в приложении ограничен. Нужна проверка checkpoint.');
   }
   all.push(...page);
@@ -530,14 +556,16 @@ async function loadAssets(refreshHead=true){
  }
  const latestHead=dataOrThrow(await state.client.from('lw_branches').select('head_scene_id').eq('id',branch.id).single());
  if(latestHead.head_scene_id!==branch.head_scene_id){
-  state.assets=null;state.characterLedger=null;state.causalLedger=null;
+  state.assets=null;state.characterLedger=null;state.causalLedger=null;state.depthLedger=null;state.branchComparison=null;state.allWorldRows=null;
   throw Error('Ветка изменилась во время чтения истории. Перечитай её перед продолжением.');
  }
  const lineage=activeLineage(all,branch.head_scene_id);
  state.activeLineage=lineage;
+ state.allWorldRows=all;
  state.assets=projectCompanion(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{},strict:false});
  state.characterLedger=projectCharacterMemory(state.characters,lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
  state.causalLedger=projectCausalMemory(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
+ state.depthLedger=projectWorldDepth(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
  state.assetIssue=null;
 }
 
@@ -999,6 +1027,46 @@ case 'health-reload':await reloadSyncHealth();return;
 case 'navigate':await openSection(el.dataset.view);return;
 case 'goto-memory':await openSection('memory');return;
 case 'memory-reload':await reloadSceneData();return;
+case 'depth-search':state.depthQuery=document.getElementById('depth-query')?.value?.trim()||'';render();return;
+case 'depth-copy-retro':{
+ if(!state.world)throw Error('Сначала выбери мир.');
+ await clipboard('LIVING WORLD Bridge OAuth. В мире '+state.world.id+' вызови get_memory_review_queue, затем get_story_scene для одной или нескольких старых сцен. Извлеки не выдумывая только шутки, обещания, цитаты и личные воспоминания с дословной evidence из текста. Согласуй записи со мной и вызови index_legacy_scene_memories с настоящим expected_head. НИКОГДА не изменяй оригинальные сцены и не приписывай знания NPC без канала.');
+ return;
+}
+case 'depth-copy-npc':{
+ if(!state.world)throw Error('Сначала выбери мир.');
+ await clipboard('LIVING WORLD Bridge OAuth. Для мира '+state.world.id+' перед продолжением событий вне кадра получи get_npc_offscreen_brief с нужными actor_names, проверь цели, доступные знания, положение, ресурсы и уже подтверждённые события NPC. НЕ считай их планы состоявшимися. Сцену создавай только из причинно возможных действий. После сцены проверь изменения.');
+ return;
+}
+case 'depth-copy-audit':{
+ if(!state.world)throw Error('Сначала выбери мир.');
+ await clipboard('LIVING WORLD Bridge OAuth. Перед сохранением следующей сцены мира '+state.world.id+' выполни audit_scene_draft с её полным текстом, world_time и changes. Не сохраняй при ошибках. Предупреждения о знании, предметах и психологических интерпретациях проверь с оригинальными сценами. Далее get_scene_preflight и save_scene_auto с токеном и проверкой persisted:true.');
+ return;
+}
+case 'depth-copy-recovery':{
+ if(!state.world)throw Error('Сначала выбери мир.');
+ await clipboard('LIVING WORLD Bridge OAuth. Восстанови подтверждённое состояние мира '+state.world.id+' из последнего совместимого checkpoint командой get_recovered_state. Для следующего чата используй get_checkpoint_recovery, дочитывай все части checkpoint и дельты, сверяй с Year Documents. Если Supabase отвечает, что не установлена миграция checkpoint_recovery.sql, скажи мне об этом и НЕ делай вид, будто восстановление проверено.');
+ return;
+}
+case 'compare-branches-local':{
+ if(!state.world)throw Error('Сначала выбери мир.');
+ if(!state.allWorldRows||!state.activeLineage?.length)await loadAssets();
+ const otherId=document.getElementById('compare-branch')?.value;
+ const other=state.branches.find(b=>b.id===otherId);
+ if(!other?.head_scene_id||!state.allWorldRows)throw Error('Другая ветка не загружена.');
+ const previous=activeLineage(state.allWorldRows,other.head_scene_id);
+ state.branchComparison=compareWorldBranches(previous,state.activeLineage,{
+  getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}
+ });
+ render();return;
+}
+case 'compare-branches-gpt':{
+ if(!state.world)throw Error('Сначала выбери мир.');
+ const otherId=document.getElementById('compare-branch')?.value;
+ if(!otherId)throw Error('Выбери ветку.');
+ await clipboard('LIVING WORLD Bridge OAuth. В мире '+state.world.id+' сравни действующую ветку с '+otherId+' через compare_story_branches. Проверь различия персонажей, отношений, предметов, обещаний и отменённые события. Старую ветку не восстанавливай как канон.');
+ return;
+}
 case 'memory-search':state.memoryQuery=document.getElementById('memory-query')?.value?.trim()||'';state.memoryKind=document.getElementById('memory-kind')?.value||'fact';state.memoryOffset=0;render();return;
 case 'memory-prev':state.memoryOffset=Math.max(0,state.memoryOffset-40);render();return;
 case 'memory-next':state.memoryOffset+=40;render();return;

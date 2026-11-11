@@ -2,6 +2,7 @@ import {projectCompanion,formatAmount} from './world-ledger.mjs';
 import {projectCharacterMemory} from './world-character-memory.mjs';
 import {projectCausalMemory} from './world-causality.mjs';
 import {readSceneNote} from './continuity.mjs';
+import {projectWorldDepth} from './world-depth.mjs';
 
 export const STAGE_CONTROL_KEY='story-stage-control-v2';
 export const STAGE_CONTROL_FORMAT='LW_STAGE_CONTROL_V2';
@@ -143,8 +144,9 @@ function projectionAt(scenes,characters){
  const people=projectCharacterMemory(characters||[],scenes,{getDelta:read});
  const assets=projectCompanion(scenes,{getDelta:read,strict:false});
  const causal=projectCausalMemory(scenes,{getDelta:read});
+ const depth=projectWorldDepth(scenes,{getDelta:read});
  const issues=[...assets.issues,...people.warnings,...causal.warnings];
- return {people,assets,causal,issues};
+ return {people,assets,causal,depth,issues};
 }
 function sceneRecord(scene){
  const delta=read(scene);
@@ -152,13 +154,16 @@ function sceneRecord(scene){
   changes:{facts:arr(delta.facts),open_threads:arr(delta.open_threads),
    resolved_threads:arr(delta.resolved_threads),offscreen_events:arr(delta.offscreen_events),
    characters:arr(delta.characters),economy:arr(delta.economy),items:arr(delta.items),
-   new_characters:arr(delta.new_characters),memories:arr(delta.memories)}};
+   new_characters:arr(delta.new_characters),memories:arr(delta.memories),
+   psychology:arr(delta.psychology),relationships:arr(delta.relationships),
+   recollections:arr(delta.recollections),npc_offscreen:arr(delta.npc_offscreen),
+   npc_intentions:arr(delta.npc_intentions)}};
 }
 function makeSnapshot({world,branch,lineage,characters,stage,kind,handoff_note='',evidence_scene_ids=[]}){
  if(!world?.id||branch?.head_scene_id!==lineage.at(-1)?.id)throw Error('Снимок требует полную текущую ветку.');
  const selected=stageScenes(lineage,stage);
  if(!selected.length)throw Error('В текущем этапе нет сыгранных сцен.');
- const {people,assets,causal,issues}=projectionAt(lineage,characters);
+ const {people,assets,causal,depth,issues}=projectionAt(lineage,characters);
  const notes=str(handoff_note,20000);
  const proofs=arr(evidence_scene_ids);
  if(notes&&!proofs.length)throw Error('Для заметок перехода укажи ID сыгранных сцен, на которых они основаны.');
@@ -177,10 +182,14 @@ function makeSnapshot({world,branch,lineage,characters,stage,kind,handoff_note='
    start_after_scene_id:stage?.start_after_scene_id??null,scene_count:selected.length},
   scope:'Подтверждённая действующая цепочка, а не видимое окно текущего чата',
   source_scene_ids:selected.map(s=>s.id),
+  scanned_world_scenes:lineage.length,
+  causal_facts:causal.facts,causal_offscreen_events:causal.offscreen_events,
+  causal_warnings:causal.warnings,resource_warnings:assets.issues,
+  character_warnings:people.warnings,depth_warnings:depth.warnings,
   chronology:allScenes,
   open_threads:causal.open_threads,resolved_threads:causal.resolved_threads,
   characters:people.characters.map(c=>({
-   name:c.name,origin:c.origin,initial:c.initial,state:c.state,
+   name:c.name,origin:c.origin,initial:c.initial,state:c.state,introduced_scene_id:c.introduced_scene_id,
    knowledge:c.knowledge,beliefs:c.beliefs,history:c.history
   })),
   accounts:assets.accounts.map(a=>({person:a.person,currency:a.currency,scale:a.scale,
@@ -190,6 +199,11 @@ function makeSnapshot({world,branch,lineage,characters,stage,kind,handoff_note='
    location:i.location,condition:i.condition,exists:i.exists,history:i.history})),
   introduced_people:assets.new_characters,
   story_memories:indexStoryMemories(selected),
+  character_psychology:depth.psychology,
+  relationship_memory:depth.relationships,
+  subjective_recollections:depth.recollections,
+  confirmed_npc_offscreen:depth.confirmed_offscreen,
+  unfulfilled_npc_intentions:depth.npc_intentions,
   recent_full_scenes,
   handoff_note:notes?{text:notes,evidence_scene_ids:proofs,
    classification:'narrative_interpretation_verified_sources_not_an_independent_fact'}:null,
@@ -253,6 +267,21 @@ export function buildStoryYear({world,branch,lineage,characters=[],stage}={}){
    '\nПодтверждённые знания и каналы: '+JSON.stringify(c.knowledge)+
    '\nСубъективные убеждения: '+JSON.stringify(c.beliefs)+
    '\nИстория изменений с источниками: '+JSON.stringify(c.history)),
+  '',
+  '## Психология и внутренние противоречия',
+  ...snapshot.character_psychology.map(p=>'### '+str(p.name,120)+'\\nАктуальные аспекты: '+JSON.stringify(p.aspects)+'\\nИстория: '+JSON.stringify(p.observations)),
+  '',
+  '## Направленные отношения с несколькими одновременными чувствами',
+  ...snapshot.relationship_memory.map(r=>'### '+str(r.from,120)+' → '+str(r.to,120)+'\\nАспекты: '+JSON.stringify(r.dimensions)+'\\nСобытия: '+JSON.stringify(r.history)),
+  '',
+  '## Индивидуальное восприятие воспоминаний',
+  ...snapshot.subjective_recollections.map(r=>'- '+str(r.actor,120)+': '+JSON.stringify(r)),
+  '',
+  '## NPC: подтверждённые события вне кадра',
+  ...snapshot.confirmed_npc_offscreen.map(e=>'- '+JSON.stringify(e)),
+  '',
+  '## NPC: намерения, а не факты',
+  ...snapshot.unfulfilled_npc_intentions.map(e=>'- '+JSON.stringify(e)),
   '',
   '## Предметы и денежные ресурсы',
   ...snapshot.items.map(x=>'- '+str(x.label,150)+' ('+x.id+'): '+JSON.stringify(x)),

@@ -21,7 +21,7 @@ test('mobile bottom navigation fits exactly six actions in six columns',()=>{
  assert.match(css,/\.mobilebar button\{[^}]*min-height:58px/);
  assert.match(css,/#toast\{pointer-events:none;/);
  assert.match(html,/id="activity" role="status"/);
- assert.match(sw,/living-world-v2\.0\.0-shell/);
+ assert.match(sw,/living-world-v2\.4\.0-shell/);
 });
 
 test('Story, Assets and Memory expose live scene reload, without navigating away',()=>{
@@ -79,7 +79,8 @@ function mockStore(){
   readSceneNote(note){return note==='structured'?{delta:{items:[{id:'bun',label:'Булка'}],facts:['Гарри встретил Мэй']}}:null;},
   projectCompanion(rows,{getDelta}){return {scanned_scenes:rows.length,items:rows.flatMap(s=>getDelta(s).items||[]),new_characters:[],issues:[],audit:[]};},
   projectCharacterMemory(rows,lineage){return {scanned_scenes:lineage.length};},
-  projectCausalMemory(rows,{getDelta}){return {counts:{facts:rows.flatMap(s=>getDelta(s).facts||[]).length}};}
+  projectCausalMemory(rows,{getDelta}){return {counts:{facts:rows.flatMap(s=>getDelta(s).facts||[]).length}};},
+  projectWorldDepth(rows){return {complete:true,scanned_scenes:rows.length,psychology:[],relationships:[],recollections:[],confirmed_offscreen:[],npc_intentions:[]};}
  };
  vm.runInNewContext(slice('async function refreshWorldAndBranch(){','const SECTION_NAMES='),sandbox);
  return {state,reads,refresh:sandbox.refreshWorldAndBranch,loadScenes:sandbox.loadScenes,loadAssets:sandbox.loadAssets};
