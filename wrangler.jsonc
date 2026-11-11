@@ -18,6 +18,10 @@
   "previews": {
     "vars": {
       "BRIDGE_MODE": "demo",
+      "BRIDGE_PUBLIC_URL": "",
+      "SUPABASE_URL": "",
+      "SUPABASE_OAUTH_CLIENT_ID": "",
+      "BRIDGE_SUPABASE_USER_ID": "",
       "BRIDGE_WRITES_ENABLED": "false"
     }
   }
