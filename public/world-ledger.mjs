@@ -12,7 +12,8 @@ export function validateCompanionDelta(input={}){
   if(!input||typeof input!=='object'||Array.isArray(input))fail('Изменения ресурсов должны быть объектом.');
   const econ=input.economy??[],items=input.items??[], newcomers=input.new_characters??[];
   if(!Array.isArray(econ)||econ.length>35)fail('economy: до 35 операций в сцене.');
-  if(!Array.isArray(items)||items.length>40)fail('items: до 40 операций в сцене.');
+  if(!Array.isArray(items))fail('changes.items должен быть массивом операций именно этой сцены.');
+  if(items.length>40)fail(`changes.items: получено ${items.length} операций при лимите 40 на одну сцену. Передавай только новые события с предметами, не весь реестр мира или checkpoint; если событий не было, передавай []. Запись не выполнена.`);
   if(!Array.isArray(newcomers)||newcomers.length>15)fail('new_characters: до 15 персонажей в сцене.');
   const allIDs=new Set();
   const unique=id=>{if(!str(id,64)||!/^[a-z0-9][a-z0-9_-]*$/i.test(id))fail('У каждого события должен быть короткий id из букв, цифр, _ или -.');if(allIDs.has(id))fail('ID события в пределах сцены повторяется: '+id);allIDs.add(id);};
