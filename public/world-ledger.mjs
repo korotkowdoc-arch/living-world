@@ -12,7 +12,8 @@ export function validateCompanionDelta(input={}){
   if(!input||typeof input!=='object'||Array.isArray(input))fail('Изменения ресурсов должны быть объектом.');
   const econ=input.economy??[],items=input.items??[], newcomers=input.new_characters??[];
   if(!Array.isArray(econ)||econ.length>35)fail('economy: до 35 операций в сцене.');
-  if(!Array.isArray(items)||items.length>40)fail('items: до 40 операций в сцене.');
+  if(!Array.isArray(items))fail('changes.items должен быть массивом операций именно этой сцены.');
+  if(items.length>40)fail(`changes.items: получено ${items.length} операций при лимите 40 на одну сцену. Передавай только новые события с предметами, не весь реестр мира или checkpoint; если событий не было, передавай []. Запись не выполнена.`);
   if(!Array.isArray(newcomers)||newcomers.length>15)fail('new_characters: до 15 персонажей в сцене.');
   const allIDs=new Set();
   const unique=id=>{if(!str(id,64)||!/^[a-z0-9][a-z0-9_-]*$/i.test(id))fail('У каждого события должен быть короткий id из букв, цифр, _ или -.');if(allIDs.has(id))fail('ID события в пределах сцены повторяется: '+id);allIDs.add(id);};
@@ -194,25 +195,22 @@ export function validateNextEvents(current,delta,knownPeople=[]){
  const parsed=validateCompanionDelta(delta);
  const names=new Set([...knownPeople,...(current.new_characters||[])].map(p=>typeof p==='string'?p:p?.name).filter(Boolean).map(s=>s.toLocaleLowerCase('ru')));
  for(const p of parsed.new_characters)if(names.has(p.name.toLocaleLowerCase('ru')))throw Error('Новый NPC уже существует: '+p.name+'. Уточни его развитие, а не создавай заново.');
- const accounts=(current.accounts||[]).map((a,i)=>({
-  id:'base_acc_'+i,action:'opening',account:a.person,currency:a.currency,scale:a.scale,amount:a.known?a.balance:0,
-  reason:'Восстановление подтверждённого состояния перед проверкой',source:'Журнал действующей ветки'
- })).filter((e,i)=>(current.accounts||[])[i].known);
- const items=[];
- for(const [i,item] of (current.items||[]).entries()){
-  items.push({id:'base_item_'+i,action:'acquire',item_id:item.id,label:item.label,owner:item.owner,holder:item.holder||item.owner,
-   location:item.location||'',condition:item.condition||'',reason:'Восстановлен из журнала',source:'Действующая ветка'});
-  if(!item.exists)items.push({id:'base_destroy_'+i,action:'destroy',item_id:item.id,
-   reason:'Уже утрачен',source:'Действующая ветка'});
- }
+ // The current inventory is already a projected state, not a new scene delta.
+ // Replaying it as one synthetic 'baseline' scene incorrectly applies the
+ // per-scene 40-item operation limit to the entire world inventory.
+ if(!Array.isArray(current.accounts)||!Array.isArray(current.items)||!Array.isArray(current.new_characters))
+  throw Error('Неполное состояние ресурсов для проверки новой сцены.');
  const existing=new Set((current.accounts||[]).map(a=>JSON.stringify([a.person,a.currency,a.scale])));
  for(const op of parsed.economy){
   if(op.action==='opening'&&existing.has(JSON.stringify([op.account,op.currency,op.scale])))throw Error('Счёт уже существует: используй reconcile для подтверждённого нового остатка, а не opening.');
  }
  const projected=projectCompanion([
-  {id:'baseline',world_time:'previous',changes:{economy:accounts,items}},
   {id:'candidate',world_time:'candidate',changes:parsed}
- ],{strict:true});
+ ],{strict:true,seed:{
+  complete:true,accounts:current.accounts,items:current.items,
+  new_characters:current.new_characters,
+  scanned_scenes:Number.isSafeInteger(current.scanned_scenes)?current.scanned_scenes:0
+ }});
  return {ok:true,balances:projected.accounts.map(a=>({person:a.person,currency:a.currency,scale:a.scale,known:a.known,balance:a.balance})),
   items:projected.items.map(a=>({id:a.id,label:a.label,owner:a.owner,holder:a.holder,exists:a.exists})),
   new_characters:parsed.new_characters};
