@@ -105,6 +105,9 @@ test('inventory with 41 existing items does not count as 41 scene operations',()
  assert.equal(delta.items.length,0);
  const projected=projectCompanion([{id:'new-scene',parent_scene_id:null,world_time:'2014-11',changes:delta}],{seed:prior,strict:true});
  assert.equal(projected.items.length,41);
+ const checked=validateNextEvents({...prior,issues:[]},delta,['Гарри']);
+ assert.equal(checked.ok,true);
+ assert.equal(checked.items.length,41);
 });
 test('more than 40 actual scene item operations fail with actionable delta guidance',()=>{
  const items=Array.from({length:41},(_,n)=>i('new-'+n,'acquire','new-item-'+n,{label:'New item',owner:'Гарри'}));
