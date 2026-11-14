@@ -95,3 +95,18 @@ test('precommit blocks duplication of an existing NPC and item, and validates tr
  assert.throws(()=>validateNextEvents(current,changes([],[],[{name:'Рон',description:'Друг',causal_link:'Со школы',goals:'Играть',knowledge:'Знает школу'}]),[{name:'Рон'}]),/уже существует/);
  assert.equal(validateNextEvents(current,changes([],[i('loan','loan','cloak01',{holder:'Гарри',recipient:'Гермиона'})])).items.find(x=>x.id==='cloak01').holder,'Гермиона');
 });
+
+test('inventory with 41 existing items does not count as 41 scene operations',()=>{
+ const existing=Array.from({length:41},(_,n)=>({
+  id:'item-'+n,exists:true,label:'Existing item '+n,owner:'Гарри',holder:'Гарри',history:[]
+ }));
+ const prior={complete:true,accounts:[],items:existing,new_characters:[],scanned_scenes:1};
+ const delta=validateCompanionDelta({items:[],economy:[],new_characters:[]});
+ assert.equal(delta.items.length,0);
+ const projected=projectCompanion([{id:'new-scene',parent_scene_id:null,world_time:'2014-11',changes:delta}],{seed:prior,strict:true});
+ assert.equal(projected.items.length,41);
+});
+test('more than 40 actual scene item operations fail with actionable delta guidance',()=>{
+ const items=Array.from({length:41},(_,n)=>i('new-'+n,'acquire','new-item-'+n,{label:'New item',owner:'Гарри'}));
+ assert.throws(()=>validateCompanionDelta({items}),/получено 41 операций.*не весь реестр мира/);
+});
