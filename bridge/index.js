@@ -1,14 +1,14 @@
 import {handleAiRequest} from './ai.js';
 import {extractCompanionChanges,activeLineage,projectCompanion,validateNextEvents} from '../public/world-ledger.mjs';
 import {latestDocumentVersions,buildSourcePreflight,findDocExcerpts} from '../public/reference-documents.mjs';
-import {projectCharacterMemory,actorMemory} from '../public/world-character-memory.mjs';
-import {validateDepthDelta,depthSemanticWarnings,projectWorldDepth,actorDepth,compareWorldBranches,PSYCHOLOGY_ASPECTS,RELATION_DIMENSIONS} from '../public/world-depth.mjs';
+import {projectCharacterMemory,actorMemory,offscreenCandidateBrief} from '../public/world-character-memory.mjs';
+import {validateDepthDelta,validateOffscreenWindow,depthSemanticWarnings,projectWorldDepth,actorDepth,compareWorldBranches,PSYCHOLOGY_ASPECTS,RELATION_DIMENSIONS} from '../public/world-depth.mjs';
 import {RETRO_INDEX_KEY_PREFIX,retroKey,makeRetroIndex,activeRetroMemories,searchRetroMemories,retroIndexCoverage} from '../public/retrospective-index.mjs';
 import {auditNarrativeScene} from '../public/narrative-audit.mjs';
 import {isReplayableCheckpoint,replayFromCheckpoint} from '../public/checkpoint-replay.mjs';
 import {parseCheckpointDoc} from '../public/story-memory.mjs';
 import {savedSceneStatus} from '../public/save-receipt.mjs';
-import {projectCausalMemory,causalSummary,searchCausalMemory} from '../public/world-causality.mjs';
+import {projectCausalMemory,causalSummary,causalSceneBrief,searchCausalMemory} from '../public/world-causality.mjs';
 import {validStoryClock,isNondecreasingStoryTime} from '../public/continuity.mjs';
 import {yearArchiveMetadata,reconcileYearDocuments,buildYearArchive} from '../public/year-archive.mjs';
 import {companionSettings,companionGuidance} from '../public/companion-settings.mjs';
@@ -399,9 +399,11 @@ const subjectiveRecall=object({
 const offscreenEvent=object({
  id:{type:'string',maxLength:80},actor:{type:'string',maxLength:120},
  happened_at:{type:'string',maxLength:32},location:{type:'string',maxLength:200},
- event:{type:'string',maxLength:1200},basis:{type:'string',enum:['narrated','witnessed','reported']},
- evidence:evidenceProof,known_by:{type:'array',maxItems:20,items:{type:'string',maxLength:120}}
-},['id','actor','event','basis','evidence']);
+ event:{type:'string',maxLength:1200},basis:{type:'string',enum:['narrated','witnessed','reported','simulated']},
+ evidence:{type:'string',maxLength:700},causal_basis:{type:'string',maxLength:1200},
+ knowledge_channels:{type:'array',maxItems:20,items:object({person:{type:'string',maxLength:120},via:{type:'string',maxLength:400}},['person','via'])},
+ known_by:{type:'array',maxItems:20,items:{type:'string',maxLength:120}}
+},['id','actor','event','basis']);
 const npcIntention=object({
  id:{type:'string',maxLength:80},actor:{type:'string',maxLength:120},
  plan:{type:'string',maxLength:1100},motive:{type:'string',maxLength:900},
@@ -912,7 +914,8 @@ async function companionState(env,identity,id){
     scanned_scenes:p.scanned_world_scenes,
     character_memory:p.characters.characters.map(c=>({
      name:c.name,origin:c.origin,state:c.state,knowledge_count:c.knowledge.length,
-     belief_count:c.beliefs.length})),
+     belief_count:c.beliefs.length,initial_role:c.initial?.role||'npc',
+     last_recorded_time:c.history.at(-1)?.world_time||null,last_event_type:c.history.at(-1)?.type||null})),
     character_warnings:p.characters.warnings,
     causal_memory:causalSummary(p.causality),depth_memory:p.depth,
     memory_provenance:{verified_source_head:true,
@@ -935,7 +938,9 @@ async function companionState(env,identity,id){
   complete:true,accounts:projection.accounts,items:projection.items,new_characters:projection.new_characters,
   audit:projection.audit.slice(-250),total_transactions:projection.audit.length,
   issues:projection.issues,scanned_scenes:projection.scanned_scenes,
-  character_memory:people.characters.map(c=>({name:c.name,origin:c.origin,state:c.state,knowledge_count:c.knowledge.length,belief_count:c.beliefs.length})),
+  character_memory:people.characters.map(c=>({name:c.name,origin:c.origin,state:c.state,knowledge_count:c.knowledge.length,belief_count:c.beliefs.length,
+   initial_role:c.initial?.role||'npc',last_recorded_time:c.history.at(-1)?.world_time||null,
+   last_event_type:c.history.at(-1)?.type||null})),
   character_warnings:people.warnings,causal_memory:causalSummary(causal),depth_memory:depth};
 }
 async function getRevisionSource(env,identity,id,targetId){
@@ -1034,6 +1039,14 @@ async function appendSceneWithReceipt(env,identity,body,expected){
 async function verifySceneBeforeCommit(env,identity,id,stamp,delta,state){
  const previous=state.scenes?.at(-1)?.world_time||state.world?.genesis_choices?.current_period||null;
  if(previous&&!isNondecreasingStoryTime(previous,stamp))throw Error('Новая сцена откатывает время назад без валидной режиссёрской правки.');
+ validateOffscreenWindow(delta,previous,stamp);
+ if((delta.npc_offscreen||[]).some(e=>e.basis==='simulated')){
+  const full=await companionState(env,identity,id);
+  if(!full.complete)throw Error('Нельзя проверить жизнь NPC: память мира неполна.');
+  const known=new Set([...(full.character_memory||[]).map(c=>String(c.name||'').toLocaleLowerCase('ru')),...(delta.new_characters||[]).map(c=>String(c.name||'').toLocaleLowerCase('ru'))]);
+  for(const e of delta.npc_offscreen){if(e.basis==='simulated'&&!known.has(e.actor.toLocaleLowerCase('ru')))
+   throw Error('Нельзя симулировать неизвестного NPC задним числом: '+e.actor+'. Сначала введи персонажа причинно.');}
+ }
  if((delta.economy||[]).length||(delta.items||[]).length||(delta.new_characters||[]).length){
   const current=await companionState(env,identity,id);
   if(!current.complete)throw Error('Нельзя проверить операции: архив ресурсов неполон. '+(current.reason||''));
@@ -1393,7 +1406,7 @@ async function call(name,args,env,identity) {
     confirmed_offscreen:selected.confirmed_offscreen,
     intended_not_yet_happened:selected.npc_intentions,
     rules:['Учитывай реальные даты и расстояния','Не сообщай герою о неизвестных ему событиях',
-     'Не выдавай намерения NPC за события','Фиксируй совершившееся только если оно действительно прозвучало в валидной художественной сцене',
+     'Не выдавай намерения NPC за события','Новые события NPC, произошедшие между сценами, оформляй как npc_offscreen с basis=simulated, временем, местом, причинной опорой и каналами знания; они не обязаны появляться в художественном тексте',
      'У NPC есть свои цели, препятствия и возможность отказаться, даже если это неудобно сюжету']};
   }
   if(name==='get_memory_review_queue'){
@@ -1634,9 +1647,12 @@ async function call(name,args,env,identity) {
       companion_settings:companionSettings(base.world,base.branch?.head_scene_id,base.world_time),
       companion_guidance:companionGuidance(companionSettings(base.world,base.branch?.head_scene_id,base.world_time)),
       resource_memory:{complete:assets.complete,issues:assets.issues||[]},
-      causal_memory:assets.complete?assets.causal_memory:{complete:false,reason:assets.reason},
+      causal_memory:assets.complete?causalSceneBrief(assets.causal_memory,{actorNames:actors}):{complete:false,reason:assets.reason},
       character_memory:assets.complete?{complete:true,profiles:(assets.character_memory||[]).filter(p=>actors.some(name=>name.toLocaleLowerCase('ru')===p.name.toLocaleLowerCase('ru'))),warnings:assets.character_warnings||[]}:{complete:false,reason:assets.reason},
       psychological_memory:assets.complete?{complete:true,...actorDepth(assets.depth_memory,actors)}:{complete:false,reason:assets.reason},
+      npc_autonomy:assets.complete?{complete:true,
+       candidates:offscreenCandidateBrief({characters:assets.character_memory||[]},{recentScenes:(base.recent_scenes||[]).slice(-5),exclude:actors,limit:14}),
+       rule:'Кандидаты — только повод проверить доступное время, цели и обстоятельства NPC, а не доказательство событий. Между двумя сценами живущие вне кадра персонажи вправе реально действовать, ошибаться, встречаться, узнавать новое. Если событие причинно состоялось, внеси npc_offscreen basis=simulated и изменения конкретных NPC в changes.characters с каналами знания; не приписывай Гарри невидимые события. Не создавай событий из прошлого уже сыгранных сцен.'}:{complete:false,reason:assets.reason},
       documents:live?await sourcePreflight(env,identity,id,intent,actors,base,assets):{installed:false,ready:false},
       narrative_checks:['Хронология и точное время','Цели, характер и изменения отношений','Что каждый знает и каким каналом','Травмы, состояние, ресурсы и местонахождение','Какие сцены и ветки аннулированы','Правила, глоссарий и актуальные изменения']}
   }
@@ -1651,7 +1667,7 @@ async function call(name,args,env,identity) {
     const refs=live?await sourcePreflight(env,identity,id,'',[],base,assets):{installed:false,ready:false};
     return {...base,companion_settings:companionSettings(base.world,base.branch?.head_scene_id,base.world_time),
       companion_guidance:companionGuidance(companionSettings(base.world,base.branch?.head_scene_id,base.world_time)),
-      companion:resources,causal_memory:assets.complete?assets.causal_memory:{complete:false,reason:assets.reason},
+      companion:resources,causal_memory:assets.complete?causalSceneBrief(assets.causal_memory):{complete:false,reason:assets.reason},
       character_memory:assets.complete?{complete:true,profiles:assets.character_memory,warnings:assets.character_warnings}:{complete:false,reason:assets.reason},
       depth_summary:assets.complete?{relationships:assets.depth_memory.relationships.map(r=>({from:r.from,to:r.to,dimensions:r.dimensions})),actors:assets.depth_memory.psychology.map(p=>({name:p.name,aspects:p.aspects}))}:{complete:false,reason:assets.reason},
       reference_documents:refs};
@@ -1663,7 +1679,7 @@ async function call(name,args,env,identity) {
     const sources=live?await sourcePreflight(env,identity,id,'',[],base,assets):{installed:false,ready:false};
     return {...base,companion_settings:companionSettings(base.world,base.branch?.head_scene_id,base.world_time),
       companion_guidance:companionGuidance(companionSettings(base.world,base.branch?.head_scene_id,base.world_time)),
-      causal_memory:assets.complete?assets.causal_memory:{complete:false,reason:assets.reason},
+      causal_memory:assets.complete?causalSceneBrief(assets.causal_memory):{complete:false,reason:assets.reason},
       resource_summary:assets.complete?{complete:true,accounts:assets.accounts.map(a=>({person:a.person,currency:a.currency,scale:a.scale,known:a.known,balance:a.balance})),items:assets.items.map(i=>({id:i.id,label:i.label,owner:i.owner,holder:i.holder,exists:i.exists})),new_characters:assets.new_characters,issues:assets.issues}:{complete:false,reason:assets.reason},reference_documents:sources};
   }
   if(name==='get_branch_history') {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateDepthDelta,projectWorldDepth,actorDepth,depthSemanticWarnings,compareWorldBranches} from '../public/world-depth.mjs';
+import {validateDepthDelta,validateOffscreenWindow,projectWorldDepth,actorDepth,depthSemanticWarnings,compareWorldBranches} from '../public/world-depth.mjs';
 import {packSceneNote,parseScenePackage} from '../public/continuity.mjs';
 
 const quote='Гарри долго смотрел на Лию и ответил: «Помню ту книгу».';
@@ -71,4 +71,28 @@ test('scene packet importer preserves full structured depth memory',()=>{
  assert.equal(packet.changes.recollections.length,1);
  assert.equal(packet.changes.npc_intentions[0].status,'intention_not_completed');
  assert.ok(packSceneNote(packet.changes));
+});
+
+
+test('new offscreen NPC event is canonical without being in the reader-facing scene',()=>{
+ const delta=validateDepthDelta({npc_offscreen:[{
+  id:'draco-fam-1',actor:'Драко Малфой',happened_at:'2015-04-02',
+  location:'Поместье Малфоев',event:'Драко отказался выполнить требование отца.',
+  basis:'simulated',causal_basis:'Уже установлен конфликт личного выбора Драко и семейных обязательств.',
+  known_by:['Драко Малфой']}]},'Гарри играл в карты и не знал о разговоре.');
+ assert.equal(delta.npc_offscreen[0].basis,'simulated');
+ assert.equal(delta.npc_offscreen[0].evidence,'');
+ assert.equal(validateOffscreenWindow(delta,'2015-03-31T18:40:00','2015-04-04T12:00:00'),true);
+ const depth=projectWorldDepth([{id:'x',world_time:'2015-04-04',changes:delta}]);
+ assert.equal(depth.confirmed_offscreen.length,1);
+ assert.throws(()=>validateOffscreenWindow(delta,'2015-04-03','2015-04-04'),/задним числом/);
+ assert.throws(()=>validateOffscreenWindow(delta,'2015-03-31','2015-04-01'),/будущем/);
+});
+test('NPC simulation never leaks secret knowledge without a channel',()=>{
+ const base={id:'secret',actor:'Драко Малфой',happened_at:'2015-04-03',event:'Получил письмо от отца.',
+  basis:'simulated',causal_basis:'У отца уже есть причина требовать ответа.',
+  known_by:['Драко Малфой','Гарри Поттер']};
+ assert.throws(()=>validateDepthDelta({npc_offscreen:[base]},'Гарри ничего не узнал.'),/knowledge_channels/);
+ const valid=validateDepthDelta({npc_offscreen:[{...base,knowledge_channels:[{person:'Гарри Поттер',via:'Драко переслал письмо Гарри'}]}]},'Гарри ничего не узнал.');
+ assert.equal(valid.npc_offscreen[0].knowledge_channels[0].via,'Драко переслал письмо Гарри');
 });

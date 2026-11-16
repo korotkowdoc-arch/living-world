@@ -10,6 +10,7 @@ test('copied GPT scene-packet prompt contains exactly one syntactically valid JS
  for(const field of ['memories','psychology','relationships','recollections','npc_offscreen','npc_intentions','economy','items','characters'])
   assert.ok(Array.isArray(obj.changes[field]),field);
  assert.equal(obj.changes.psychology[0].certainty,'interpretation');
- assert.equal(obj.changes.npc_offscreen[0].basis,'narrated');
+ assert.equal(obj.changes.npc_offscreen[0].basis,'simulated');
+ assert.match(prompt,/дата.*NPC|npc_offscreen.*simulated/s);
  assert.ok(!match[1].includes(String.raw`\\n`),'Example must use real line breaks, not escaped literal newline text');
 });

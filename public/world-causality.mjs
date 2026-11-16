@@ -48,6 +48,15 @@ export function projectCausalMemory(scenes=[],{getDelta,seed=null}={}){
   for(const value of Array.isArray(c.offscreen_events)?c.offscreen_events:[]){
    if(trim(value))offscreen_events.push(event(value.trim(),'offscreen'));
   }
+  // Structured NPC events are canonical offscreen events too. In the past they
+  // were stored in depth memory only, leaving the causal/offscreen index empty.
+  for(const off of Array.isArray(c.npc_offscreen)?c.npc_offscreen:[]){
+   if(!trim(off?.actor)||!trim(off?.event))continue;
+   offscreen_events.push({...event(off.actor+': '+off.event,'offscreen'),
+    event_id:off.id||null,actor:off.actor,happened_at:off.happened_at||scene.world_time,
+    basis:off.basis||'narrated',known_by:Array.isArray(off.known_by)?off.known_by:[],
+    causal_basis:off.causal_basis||''});
+  }
  }
  const active=Array.from(threads.values()).filter(t=>t.status==='open');
  const resolved=Array.from(threads.values()).filter(t=>t.status==='resolved');
@@ -65,6 +74,25 @@ export function causalSummary(memory,{recentFacts=80,recentOffscreen=40,openThre
   open_threads:memory.open_threads.slice(-openThreads),
   unshown_open_threads:Math.max(0,memory.open_threads.length-openThreads),
   warnings:memory.warnings.slice(-30)};
+}
+/** Bounded default context, without losing anything in the searchable full archive.
+ * Old but relevant threads can be fetched on demand via get_causal_memory.
+ */
+export function causalSceneBrief(memory,{actorNames=[],maxOpen=32,maxFacts=24,maxOffscreen=14}={}){
+ if(!memory?.complete)return memory;
+ const open=Array.isArray(memory.open_threads)?memory.open_threads:[];
+ const names=actorNames.map(normalized).filter(Boolean);
+ const relevant=open.filter(e=>names.some(n=>normalized(e.text).includes(n))).slice(-12);
+ const selected=[...relevant,...open.slice(-maxOpen)];
+ const seen=new Set(),chosen=[];
+ for(const e of selected){const k=normalized(e.text);if(k&&!seen.has(k)){seen.add(k);chosen.push(e);}}
+ const total=memory.counts?.open_threads??(open.length+(memory.unshown_open_threads||0));
+ return {...memory,
+  facts:(memory.facts||[]).slice(-maxFacts),
+  offscreen_events:(memory.offscreen_events||[]).slice(-maxOffscreen),
+  open_threads:chosen.slice(-maxOpen),
+  unshown_open_threads:Math.max(0,total-Math.min(total,chosen.length)),
+  retrieval_note:'Это ограниченная выдача для экономии контекста. Полный журнал, включая старые открытые линии, доступен через get_causal_memory; отсутствие строки здесь не означает закрытие или отсутствие события.'};
 }
 export function searchCausalMemory(memory,{kind='fact',query='',offset=0,limit=40}={}){
  if(!memory?.complete)throw Error('История не восстановлена полностью.');
