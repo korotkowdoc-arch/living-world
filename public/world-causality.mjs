@@ -46,6 +46,7 @@ export function validateThreadUpdates(value,sceneText='',npcOffscreen=[]){
     throw Error(ref+': для изменения за кадром требуется id фактического npc_offscreen той же сцены.');
    source_ref=raw.source_ref;
   }else{
+   if(raw.action!=='open')throw Error(ref+': календарный Anchor может запустить известную линию, но не заменяет сыгранное развитие.');
    if(!/^Y[1-7]-[0-9]{2}$/.test(raw.source_ref||''))
     throw Error(ref+': требуется конкретный ID проектного Year Anchor.');
    source_ref=raw.source_ref;
@@ -75,6 +76,8 @@ export function validateThreadTransitions(existing=[],updates=[]){
   }
   if(['resolved','archived'].includes(before))
    throw Error('Нельзя развивать завершённую линию '+u.id+' без явного reopen.');
+  if(u.action==='advance'&&before==='paused')
+   throw Error('Приостановленную линию сначала нужно возобновить через resume: '+u.id);
   if(u.action==='resume'&&before!=='paused')
    throw Error('resume только для приостановленной линии '+u.id);
   if(u.action==='pause'&&before!=='active')
@@ -189,7 +192,7 @@ export function causalSummary(memory,{recentFacts=80,recentOffscreen=40,openThre
   facts:memory.facts.slice(-recentFacts),
   offscreen_events:memory.offscreen_events.slice(-recentOffscreen),
   open_threads:memory.open_threads.slice(-openThreads),
-  managed_threads:(memory.managed_threads||[]).slice(-100),
+  managed_threads:memory.managed_threads||[],
   unshown_open_threads:Math.max(0,memory.open_threads.length-openThreads),
   warnings:memory.warnings.slice(-30)};
 }
@@ -202,7 +205,10 @@ export function causalSceneBrief(memory,{actorNames=[],maxOpen=24,maxFacts=24,ma
  const names=actorNames.map(normalized).filter(Boolean);
  const live=all.filter(t=>t.status==='active');
  const relevant=live.filter(t=>names.some(n=>normalized(t.title+' '+t.summary).includes(n)));
- const chosen=[...relevant,...live.filter(t=>!relevant.includes(t))].slice(0,maxOpen);
+ const paused=all.filter(t=>t.status==='paused');
+ const pausedRelevant=paused.filter(t=>names.some(n=>normalized(t.title+' '+t.summary).includes(n))).slice(-4);
+ const selected=[...relevant,...live.filter(t=>!relevant.includes(t))].slice(0,Math.max(0,maxOpen-pausedRelevant.length));
+ const chosen=[...selected,...pausedRelevant];
  return {...memory,
   facts:(memory.facts||[]).slice(-maxFacts),
   offscreen_events:(memory.offscreen_events||[]).slice(-maxOffscreen),
@@ -210,7 +216,7 @@ export function causalSceneBrief(memory,{actorNames=[],maxOpen=24,maxFacts=24,ma
   // Legacy uncurated notes are not 405 obligations to resume the plot.
   open_threads:[],
   unshown_open_threads:memory.counts?.legacy_unreviewed??memory.unshown_open_threads??0,
-  retrieval_note:'В контексте только подтверждённые активные сюжетные процессы со стабильными ID. Исторические open_threads — необработанные заметки, а НЕ задачи автора или обязанности Гарри; доступны через get_causal_memory для точечной проверки. Нельзя автоматически закрывать их или объявлять несуществовавшими.'};
+  retrieval_note:'В контексте подтверждённые активные сюжетные процессы и отдельные релевантные приостановленные линии со стабильными ID. Исторические open_threads — необработанные заметки, а НЕ задачи автора или обязанности Гарри; доступны через get_causal_memory для точечной проверки. Нельзя автоматически закрывать их или объявлять несуществовавшими.'};
 }
 export function searchCausalMemory(memory,{kind='fact',query='',offset=0,limit=40}={}){
  if(!memory?.complete)throw Error('История не восстановлена полностью.');
