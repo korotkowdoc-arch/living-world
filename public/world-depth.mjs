@@ -106,7 +106,7 @@ export function validateDepthDelta(changes={},sceneText=''){
   });
   if(channels.length>20)throw Error(ref+': слишком много каналов знания.');
   if(basis==='simulated'){
-   if(!/^\\d{4}-\\d{2}-\\d{2}/.test(happened_at))
+   if(!/^[0-9]{4}-[0-9]{2}-[0-9]{2}/.test(happened_at))
     throw Error(ref+': автономное событие должно иметь подтверждённую дату (не только месяц).');
    requireText(r.causal_basis,ref+'.causal_basis',1200);
    for(const observer of known_by){
@@ -139,7 +139,7 @@ export function validateOffscreenWindow(delta={},previousTime='',currentTime='')
  const events=safeArray(delta.npc_offscreen).filter(e=>e?.basis==='simulated');
  for(const e of events){
   const date=e.happened_at;
-  if(!/^\\d{4}-\\d{2}-\\d{2}/.test(date))
+  if(!/^[0-9]{4}-[0-9]{2}-[0-9]{2}/.test(date))
    throw Error('Автономное событие '+e.id+': требуется дата события.');
   if(previousTime&&date.slice(0,10)<String(previousTime).slice(0,10))
    throw Error('Автономное событие '+e.id+': нельзя задним числом изменять уже сыгранный период.');
