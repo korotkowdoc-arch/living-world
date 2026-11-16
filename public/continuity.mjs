@@ -47,6 +47,8 @@ export function parseScenePackage(raw) {
   if(result.world_time !== undefined && !validStoryClock(result.world_time)) throw Error('Время: YYYY-MM, YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS. Не придумывай неизвестный день или час.');
   const c=result.changes;
   if(!c || typeof c !== 'object' || Array.isArray(c)) throw Error('Добавь объект changes для отслеживания последствий.');
+  if(Array.isArray(c.open_threads)&&c.open_threads.length)
+   throw Error('Нельзя больше открывать свободные текстовые open_threads. Для настоящей сюжетной линии используй thread_updates с устойчивым id, целью и ставками; мелкое обстоятельство запиши в facts/characters.');
   const changes={
     facts:textArray(c.facts,'changes.facts'),
     open_threads:textArray(c.open_threads,'changes.open_threads'),
