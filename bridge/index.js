@@ -914,7 +914,8 @@ async function companionState(env,identity,id){
     scanned_scenes:p.scanned_world_scenes,
     character_memory:p.characters.characters.map(c=>({
      name:c.name,origin:c.origin,state:c.state,knowledge_count:c.knowledge.length,
-     belief_count:c.beliefs.length})),
+     belief_count:c.beliefs.length,initial_role:c.initial?.role||'npc',
+     last_recorded_time:c.history.at(-1)?.world_time||null,last_event_type:c.history.at(-1)?.type||null})),
     character_warnings:p.characters.warnings,
     causal_memory:causalSummary(p.causality),depth_memory:p.depth,
     memory_provenance:{verified_source_head:true,
@@ -937,7 +938,9 @@ async function companionState(env,identity,id){
   complete:true,accounts:projection.accounts,items:projection.items,new_characters:projection.new_characters,
   audit:projection.audit.slice(-250),total_transactions:projection.audit.length,
   issues:projection.issues,scanned_scenes:projection.scanned_scenes,
-  character_memory:people.characters.map(c=>({name:c.name,origin:c.origin,state:c.state,knowledge_count:c.knowledge.length,belief_count:c.beliefs.length})),
+  character_memory:people.characters.map(c=>({name:c.name,origin:c.origin,state:c.state,knowledge_count:c.knowledge.length,belief_count:c.beliefs.length,
+   initial_role:c.initial?.role||'npc',last_recorded_time:c.history.at(-1)?.world_time||null,
+   last_event_type:c.history.at(-1)?.type||null})),
   character_warnings:people.warnings,causal_memory:causalSummary(causal),depth_memory:depth};
 }
 async function getRevisionSource(env,identity,id,targetId){
