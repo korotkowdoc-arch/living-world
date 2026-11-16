@@ -1,7 +1,7 @@
 import {extractCompanionChanges} from './world-ledger.mjs';
 import {validateSceneMemories} from './story-memory.mjs';
 import {validateDepthDelta} from './world-depth.mjs';
-import {validateThreadUpdates} from './world-causality.mjs';
+import {validateThreadUpdates,projectCausalMemory} from './world-causality.mjs';
 /** LIVING WORLD v0.5: structured continuity records attached to active scene ancestry.
  * No server migration: scene.prompt_note carries the optional LWSTATE1 record.
  */
@@ -134,10 +134,12 @@ export function makeContinuity(characters=[],scenes=[]) {
       uniqAppend(current.beliefs,changeChar.beliefs||[],100);
     }
   }
+  const ledger=projectCausalMemory(scenes,{getDelta:scene=>readSceneNote(scene.prompt_note)?.delta||{}});
+  memory.managed_threads=ledger.managed_threads.filter(t=>['active','paused'].includes(t.status));
   return memory;
 }
 export function compactMemory(memory) {
-  return {facts:memory.facts.slice(-80),open_threads:memory.open_threads.slice(-50),offscreen_events:memory.offscreen_events.slice(-30),characters:Object.values(memory.characters).map(c=>({name:c.name,description:c.description,personality:c.personality,goals:c.goals,relationships:c.relationships,knowledge_at_genesis:c.knowledge,learned:(c.learned||[]).slice(-30),beliefs:(c.beliefs||[]).slice(-25),location:c.location,health:c.health,mood:c.mood,status:c.status,inventory:c.inventory}))};
+  return {facts:memory.facts.slice(-80),open_threads:[],legacy_unreviewed_count:memory.open_threads.length,managed_threads:(memory.managed_threads||[]).slice(-24),offscreen_events:memory.offscreen_events.slice(-30),characters:Object.values(memory.characters).map(c=>({name:c.name,description:c.description,personality:c.personality,goals:c.goals,relationships:c.relationships,knowledge_at_genesis:c.knowledge,learned:(c.learned||[]).slice(-30),beliefs:(c.beliefs||[]).slice(-25),location:c.location,health:c.health,mood:c.mood,status:c.status,inventory:c.inventory}))};
 }
 export function scenePackagePrompt(narrativePrompt,memory,clock) {
   const state=compactMemory(memory);
