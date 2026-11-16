@@ -67,3 +67,22 @@ test('Draco changes offscreen after a long absence without granting Harry his se
  const candidates=offscreenCandidateBrief(ledger,{recentScenes:['Гарри с Лией гуляли.']});
  assert.ok(candidates.some(c=>c.name==='Драко Малфой'));
 });
+
+test('preflight shortlist favors persistent cast over 2010 one-offs and rotates dormant names',()=>{
+ const old=Array.from({length:25},(_,i)=>({
+  name:'Прохожий '+String(i).padStart(2,'0'),origin:'scene',
+  state:{goals:'Обычные дела',location:'Лондон'},last_recorded_time:'2010-08-01',
+  history_count:1}));
+ const core={name:'Драко Малфой',origin:'baseline',state:{goals:'Отстоять свои решения'},
+  last_recorded_time:'2015-03-17',history_count:8};
+ const active={name:'Уилл Кинкейд',origin:'scene',state:{goals:'Играть и учиться'},
+  last_recorded_time:'2015-02-01',history_count:5};
+ const data={characters:[...old,core,active]};
+ const a=offscreenCandidateBrief(data,{currentTime:'2015-03-31',limit:8,cycle:0});
+ const b=offscreenCandidateBrief(data,{currentTime:'2015-03-31',limit:8,cycle:1});
+ assert.ok(a.some(x=>x.name==='Драко Малфой'));
+ assert.ok(a.some(x=>x.name==='Уилл Кинкейд'));
+ assert.ok(a.some(x=>x.name.startsWith('Прохожий')));
+ assert.notDeepEqual(a.filter(x=>x.name.startsWith('Прохожий')).map(x=>x.name),
+  b.filter(x=>x.name.startsWith('Прохожий')).map(x=>x.name));
+});
