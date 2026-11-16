@@ -382,15 +382,18 @@ const psychEvent=object({
  id:{type:'string',maxLength:80},character:{type:'string',maxLength:120},
  aspect:{type:'string',enum:PSYCHOLOGY_ASPECTS},observation:{type:'string',maxLength:1500},
  interpretation:{type:'string',maxLength:1400},certainty:{type:'string',enum:['explicit','interpretation']},
- evidence:evidenceProof,tension_with:{type:'string',maxLength:600}
-},['id','character','aspect','observation','certainty','evidence']);
+ evidence:{type:'string',maxLength:700},basis:{type:'string',enum:['narrated','simulated']},
+ related_offscreen_id:{type:'string',maxLength:80},tension_with:{type:'string',maxLength:600}
+},['id','character','aspect','observation','certainty']);
 const relationshipEvent=object({
  id:{type:'string',maxLength:80},from:{type:'string',maxLength:120},
  to:{type:'string',maxLength:120},dimension:{type:'string',enum:RELATION_DIMENSIONS},
  shift:{type:'string',enum:['increased','decreased','unchanged','ambivalent','emerged']},
  interpretation:{type:'string',enum:['explicit','interpretation']},
- rationale:{type:'string',maxLength:1500},evidence:evidenceProof,unresolved:{type:'boolean'}
-},['id','from','to','dimension','shift','interpretation','rationale','evidence']);
+ rationale:{type:'string',maxLength:1500},evidence:{type:'string',maxLength:700},
+ basis:{type:'string',enum:['narrated','simulated']},related_offscreen_id:{type:'string',maxLength:80},
+ unresolved:{type:'boolean'}
+},['id','from','to','dimension','shift','interpretation','rationale']);
 const subjectiveRecall=object({
  id:{type:'string',maxLength:80},actor:{type:'string',maxLength:120},
  memory_id:{type:'string',maxLength:80},meaning:{type:'string',maxLength:1500},
