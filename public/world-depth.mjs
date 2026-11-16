@@ -9,7 +9,7 @@ export const PSYCHOLOGY_ASPECTS=Object.freeze(['trait','value','fear','desire','
 export const RELATION_DIMENSIONS=Object.freeze(['trust','respect','affection','irritation','fear','attraction','loyalty','resentment','comfort','jealousy','solidarity','distance']);
 export const RELATION_SHIFTS=Object.freeze(['increased','decreased','unchanged','ambivalent','emerged']);
 export const INTERPRETATION_TYPES=Object.freeze(['explicit','interpretation']);
-const OFFSCREEN_STATUSES=Object.freeze(['narrated','witnessed','reported']);
+const OFFSCREEN_STATUSES=Object.freeze(['narrated','witnessed','reported','simulated']);
 const field=(value,max=1000)=>typeof value==='string'?value.trim().slice(0,max):'';
 const name=value=>field(value,120);
 const key=value=>field(value).normalize('NFC').toLocaleLowerCase('ru').replace(/ё/g,'е').replace(/\s+/g,' ');
@@ -96,13 +96,29 @@ export function validateDepthDelta(changes={},sceneText=''){
  });
  const npc_offscreen=uniqueRecords(changes.npc_offscreen,'npc_offscreen',15).map((r,i)=>{
   const ref='npc_offscreen['+i+']';
-  return {id:r.id,actor:requireText(r.actor,ref+'.actor',120),
-   happened_at:maybeAt(r.happened_at),
-   location:field(r.location,200),
-   event:requireText(r.event,ref+'.event',1200),
-   basis:requireEnum(r.basis,OFFSCREEN_STATUSES,ref+'.basis'),
-   evidence:proof(sceneText,r.evidence,ref),
-   known_by:allShort(r.known_by,ref+'.known_by')};
+  const actor=requireText(r.actor,ref+'.actor',120);
+  const basis=requireEnum(r.basis,OFFSCREEN_STATUSES,ref+'.basis');
+  const happened_at=maybeAt(r.happened_at),known_by=allShort(r.known_by,ref+'.known_by');
+  const channels=safeArray(r.knowledge_channels).map((c,j)=>{
+   if(!isObject(c))throw Error(ref+'.knowledge_channels['+j+']: нужен объект.');
+   return {person:requireText(c.person,ref+'.knowledge_channels.person',120),
+    via:requireText(c.via,ref+'.knowledge_channels.via',400)};
+  });
+  if(channels.length>20)throw Error(ref+': слишком много каналов знания.');
+  if(basis==='simulated'){
+   if(!/^\\d{4}-\\d{2}-\\d{2}/.test(happened_at))
+    throw Error(ref+': автономное событие должно иметь подтверждённую дату (не только месяц).');
+   requireText(r.causal_basis,ref+'.causal_basis',1200);
+   for(const observer of known_by){
+    if(key(observer)!==key(actor)&&!channels.some(c=>key(c.person)===key(observer)))
+     throw Error(ref+': для знания другого NPC нужен реальный knowledge_channels.');
+   }
+  }
+  return {id:r.id,actor,happened_at,location:field(r.location,200),
+   event:requireText(r.event,ref+'.event',1200),basis,
+   evidence:basis==='simulated'?field(r.evidence,700):proof(sceneText,r.evidence,ref),
+   causal_basis:basis==='simulated'?requireText(r.causal_basis,ref+'.causal_basis',1200):field(r.causal_basis,1200),
+   known_by,knowledge_channels:channels};
  });
  const npc_intentions=uniqueRecords(changes.npc_intentions,'npc_intentions',20).map((r,i)=>{
   const ref='npc_intentions['+i+']';
@@ -114,6 +130,23 @@ export function validateDepthDelta(changes={},sceneText=''){
    status:'intention_not_completed'};
  });
  return {psychology,relationships,recollections,npc_offscreen,npc_intentions};
+}
+
+/** Simulated events advance only the current new interval, not already-played history.
+ * Reported or narrated older events retain their original evidentiary rules.
+ */
+export function validateOffscreenWindow(delta={},previousTime='',currentTime=''){
+ const events=safeArray(delta.npc_offscreen).filter(e=>e?.basis==='simulated');
+ for(const e of events){
+  const date=e.happened_at;
+  if(!/^\\d{4}-\\d{2}-\\d{2}/.test(date))
+   throw Error('Автономное событие '+e.id+': требуется дата события.');
+  if(previousTime&&date.slice(0,10)<String(previousTime).slice(0,10))
+   throw Error('Автономное событие '+e.id+': нельзя задним числом изменять уже сыгранный период.');
+  if(currentTime&&date.slice(0,10)>String(currentTime).slice(0,10))
+   throw Error('Автономное событие '+e.id+': событие находится в будущем относительно главы.');
+ }
+ return true;
 }
 export function depthSemanticWarnings(delta={},priorMemoryIds=[]){
  const warnings=[],known=new Set(priorMemoryIds);
