@@ -118,24 +118,45 @@ export function knowledgeHas(ledger,actor,fact){
  * This never claims that an unseen event already happened. A model must record
  * each new event separately with provenance before it enters canonical memory.
  */
-export function offscreenCandidateBrief(ledger,{recentScenes=[],exclude=[],limit=12}={}){
+export function offscreenCandidateBrief(ledger,{recentScenes=[],exclude=[],limit=14,currentTime='',cycle=0}={}){
  const blocked=new Set(exclude.map(key));
  const recent=recentScenes.map(s=>typeof s==='string'?s:String(s?.body||'')).join('\n').toLocaleLowerCase('ru');
- const candidates=(ledger?.characters||[]).filter(c=>{
-  if(!c?.name||blocked.has(key(c.name))||(c.initial?.role||c.initial_role)==='hero')return false;
-  const marker=c.name.toLocaleLowerCase('ru');
-  return !recent.includes(marker)&&!!(c.state?.goals||c.initial?.goals||c.history?.length);
- }).map(c=>{
+ const year=Number(String(currentTime).slice(0,4))||null;
+ const cap=Math.max(0,Math.min(20,Number.isInteger(limit)?limit:14));
+ const all=(ledger?.characters||[]).filter(c=>c?.name&&!blocked.has(key(c.name))&&
+  (c.initial?.role||c.initial_role)!=='hero'&&
+  !!(c.state?.goals||c.initial?.goals||c.history?.length)).map(c=>{
   const history=Array.isArray(c.history)?c.history:[];
   const last=history.at(-1);
+  const stamp=last?.world_time||c.last_recorded_time||null;
+  const tokens=c.name.toLocaleLowerCase('ru').split(/\s+/).filter(x=>x.length>=4);
+  const mentioned=tokens.some(t=>recent.includes(t));
+  const origin=c.origin||'first_appearance';
+  const entries=history.length||c.history_count||0;
   return {name:c.name,location:c.state?.location||'не уточнено',
    goals:c.state?.goals||c.initial?.goals||'не уточнены',
-   last_recorded_time:last?.world_time||c.last_recorded_time||null,
-   latest_event:last?.type||c.last_event_type||null,
-   knowledge_count:c.knowledge?.length??c.knowledge_count??0,belief_count:c.beliefs?.length??c.belief_count??0};
+   last_recorded_time:stamp,latest_event:last?.type||c.last_event_type||null,
+   knowledge_count:c.knowledge?.length??c.knowledge_count??0,
+   belief_count:c.beliefs?.length??c.belief_count??0,
+   origin,recently_mentioned:mentioned,history_count:entries};
  });
- // Stale records are candidates for attention, not proof of new actions.
- candidates.sort((a,b)=>(a.last_recorded_time||'').localeCompare(b.last_recorded_time||'')||
-  a.name.localeCompare(b.name,'ru'));
- return candidates.slice(0,Math.max(0,Math.min(20,Number.isInteger(limit)?limit:12)));
+ const core=all.filter(x=>x.origin==='baseline');
+ const recentCast=all.filter(x=>x.origin!=='baseline'&&x.last_recorded_time&&
+  (!year||Number(x.last_recorded_time.slice(0,4))>=year-1));
+ const older=all.filter(x=>!core.includes(x)&&!recentCast.includes(x));
+ core.sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+ recentCast.sort((a,b)=>(b.last_recorded_time||'').localeCompare(a.last_recorded_time||'')||
+  b.history_count-a.history_count);
+ older.sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+ // Two rotating older NPCs keep long-absent cast from being permanently hidden,
+ // but the shortlist itself never declares that anything happened.
+ const rotationSlots=Math.min(2,Math.max(0,cap-core.length));
+ const rotation=[];
+ for(let i=0;i<rotationSlots&&i<older.length;i++)rotation.push(older[(Math.max(0,cycle)*rotationSlots+i)%older.length]);
+ const used=new Set([...core,...rotation].map(x=>x.name));
+ const result=[...core.slice(0,cap)];
+ for(const c of recentCast)if(result.length<cap-rotation.length&&!used.has(c.name)){result.push(c);used.add(c.name);}
+ for(const c of rotation)if(result.length<cap){result.push(c);used.add(c.name);}
+ for(const c of older)if(result.length<cap&&!used.has(c.name)){result.push(c);used.add(c.name);}
+ return result.slice(0,cap);
 }
