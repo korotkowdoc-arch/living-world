@@ -88,9 +88,10 @@ export function validateThreadTransitions(existing=[],updates=[]){
  return true;
 }
 
-export function projectCausalMemory(scenes=[],{getDelta,seed=null}={}){
+export function projectCausalMemory(scenes=[],{getDelta,seed=null,legacyAudit=null}={}){
  const read=getDelta??(s=>s.changes??s.delta??{});
  const facts=[],offscreen_events=[],threads=new Map(),managed=new Map(),warnings=[];
+ let legacyReview=seed?.legacy_review||null;
  if(seed){
   if(seed.complete!==true||!Array.isArray(seed.facts)||!Array.isArray(seed.offscreen_events)||
     !Array.isArray(seed.open_threads)||!Array.isArray(seed.resolved_threads)||
@@ -157,6 +158,43 @@ export function projectCausalMemory(scenes=[],{getDelta,seed=null}={}){
      last_at:scene.world_time??null,history:[...old.history,note]});
    }
   }
+  // Derived, evidence-checked migration at the exact historical head. Existing
+  // chapters are untouched, and future thread_updates work against these IDs.
+  if(legacyAudit?.base_head_scene_id===scene.id&&!legacyReview){
+   const rows=legacyAudit.entries||[],active=[...threads.values()].filter(t=>t.status==='open');
+   const ids=new Set(scenes.map(s=>s.id));
+   const valid=legacyAudit.source_legacy_count===405&&rows.length===405&&active.length===405&&
+    (legacyAudit.curated_arcs||[]).every(a=>ids.has(a.provenance?.scene_id)&&
+      facts.some(f=>f.scene_id===a.provenance.scene_id&&f.text===a.provenance.fact))&&
+    rows.every(e=>{
+     const found=threads.get(normalized(e.original_text));
+     if(!found||found.status!=='open'||found.opened_scene_id!==e.opened_scene_id||
+        !ids.has(e.opened_scene_id))return false;
+     const ref=e.decision?.evidence;
+     return !ref||facts.some(f=>f.scene_id===ref.scene_id&&f.text===ref.fact);
+    });
+   if(!valid)warnings.push({code:'LEGACY_AUDIT_SOURCE_MISMATCH',scene_id:scene.id,
+    detail:'Миграция не применена: 405 записей или цитаты поздних сцен отличаются от проверенного снимка.'});
+   else{
+    for(const a of legacyAudit.curated_arcs){
+     if(managed.has(a.id))throw Error('Конфликт миграции: сюжетная линия '+a.id+' уже создана.');
+     managed.set(a.id,{id:a.id,title:a.title,kind:a.kind,status:a.status,
+      objective:a.objective,stakes:a.stakes,summary:a.summary,migrated:true,
+      migration_base_head:scene.id,opened_scene_id:a.provenance.scene_id,
+      opened_at:a.provenance.world_time,last_scene_id:scene.id,
+      last_at:scene.world_time,history:[{action:'migrated',scene_id:scene.id,
+       evidence_scene_id:a.provenance.scene_id,world_time:scene.world_time,
+       summary:a.summary,reason:'Классификация ранее сыгранного процесса без изменения сцен.',
+       evidence:a.provenance.fact,source_kind:'migration'}]});
+    }
+    const classCounts={};
+    for(const e of rows){const type=e.decision.classification;classCounts[type]=(classCounts[type]||0)+1;}
+    legacyReview={version:legacyAudit.schema_version,source_head:scene.id,total:rows.length,
+     classified:rows.length,counts:classCounts,
+     evidence_pending:(classCounts.needs_evidence||0)+(classCounts.uncertain_unresolved||0),
+     evidence_supported:rows.filter(e=>!!e.decision.evidence).length};
+   }
+  }
   for(const value of Array.isArray(c.offscreen_events)?c.offscreen_events:[]){
    if(trim(value))offscreen_events.push(event(value.trim(),'offscreen'));
   }
@@ -179,9 +217,13 @@ export function projectCausalMemory(scenes=[],{getDelta,seed=null}={}){
  const resolved=Array.from(threads.values()).filter(t=>t.status==='resolved');
  return {complete:true,scanned_scenes:(seed?.scanned_scenes||0)+scenes.length,facts,offscreen_events,
   open_threads:active,resolved_threads:resolved,managed_threads:tracked,warnings,
+  legacy_review:legacyReview,legacy_audit_entries:legacyReview&&legacyAudit?.entries||[],
   counts:{facts:facts.length,offscreen_events:offscreen_events.length,
     open_threads:active.length,resolved_threads:resolved.length,
-    legacy_unreviewed:active.length,tracked_active:trackedCounts.active,
+    legacy_unreviewed:legacyReview?0:active.length,
+    legacy_total:active.length,legacy_reviewed:legacyReview?.classified||0,
+    legacy_evidence_pending:legacyReview?.evidence_pending??active.length,
+    tracked_active:trackedCounts.active,
     tracked_paused:trackedCounts.paused,tracked_resolved:trackedCounts.resolved,
     tracked_archived:trackedCounts.archived}};
 }
@@ -193,6 +235,7 @@ export function causalSummary(memory,{recentFacts=80,recentOffscreen=40,openThre
   offscreen_events:memory.offscreen_events.slice(-recentOffscreen),
   open_threads:memory.open_threads.slice(-openThreads),
   managed_threads:memory.managed_threads||[],
+  legacy_review:memory.legacy_review||null,
   unshown_open_threads:Math.max(0,memory.open_threads.length-openThreads),
   warnings:memory.warnings.slice(-30)};
 }
@@ -220,13 +263,14 @@ export function causalSceneBrief(memory,{actorNames=[],maxOpen=24,maxFacts=24,ma
 }
 export function searchCausalMemory(memory,{kind='fact',query='',offset=0,limit=40}={}){
  if(!memory?.complete)throw Error('История не восстановлена полностью.');
- if(!['fact','open_thread','resolved_thread','offscreen','storyline'].includes(kind))throw Error('Неизвестный тип причинной памяти.');
+ if(!['fact','open_thread','resolved_thread','offscreen','storyline','legacy_audit'].includes(kind))throw Error('Неизвестный тип причинной памяти.');
  if(!Number.isInteger(offset)||offset<0||offset>1000000||!Number.isInteger(limit)||limit<1||limit>100)
   throw Error('Некорректная страница причинной памяти.');
  const list=kind==='fact'?memory.facts:kind==='open_thread'?memory.open_threads:
-  kind==='resolved_thread'?memory.resolved_threads:kind==='storyline'?(memory.managed_threads||[]):memory.offscreen_events;
+  kind==='resolved_thread'?memory.resolved_threads:kind==='storyline'?(memory.managed_threads||[]):
+  kind==='legacy_audit'?(memory.legacy_audit_entries||[]):memory.offscreen_events;
  const q=normalized(query);
- const filtered=q?list.filter(e=>normalized([e.text,e.title,e.summary,e.id].filter(Boolean).join(' ')).includes(q)):list;
+ const filtered=q?list.filter(e=>normalized([e.text,e.original_text,e.title,e.summary,e.id,e.decision?.classification,e.decision?.arc_id].filter(Boolean).join(' ')).includes(q)):list;
  const page=filtered.slice(offset,offset+limit);
  return {kind,query,offset,total:filtered.length,items:page,
    next_offset:offset+limit<filtered.length?offset+limit:null};

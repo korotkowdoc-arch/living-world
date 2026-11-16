@@ -8,6 +8,7 @@ import {validateNewWorldSetup,latestReusableDocs} from './world-setup.mjs';
 import {WORLD_LONG_PRESS_MS,WORLD_CLICK_SUPPRESS_MS,worldMenuPosition,suppressWorldOpen} from './world-context.mjs';
 import {WORLD_BACKUP_FORMAT,sealWorldBackup,validateWorldBackup} from './world-backup.mjs';
 import {projectCausalMemory,searchCausalMemory} from './world-causality.mjs';
+import {LEGACY_405_AUDIT} from './legacy-405-audit.mjs';
 import {persistWorldAutosave} from './world-autosave.mjs';
 import {projectCharacterMemory} from './world-character-memory.mjs';
 import {STAGE_CONTROL_KEY} from './story-memory.mjs';
@@ -404,21 +405,21 @@ function renderMemory(){
  const m=state.causalLedger;
  if(!m)return heading('Причинная память','Сыгранные факты','История хранится по действующей ветке, а не как пересказ последних сообщений.')+
   '<div class="attention">Полный журнал ещё не пересчитан. Не считай пустой экран доказательством отсутствия фактов.</div>'+btn('memory-reload','Загрузить всю память','gold');
- const kinds=[['fact','Факты'],['storyline','Сюжетные линии с жизненным циклом'],['open_thread','Исторические заметки на разбор'],['resolved_thread','Старые закрытые заметки'],['offscreen','Вне кадра']];
+ const kinds=[['fact','Факты'],['storyline','Сюжетные линии с жизненным циклом'],['legacy_audit','Разбор 405 записей'],['open_thread','Исторические заметки на разбор'],['resolved_thread','Старые закрытые заметки'],['offscreen','Вне кадра']];
  const page=searchCausalMemory(m,{kind:state.memoryKind,query:state.memoryQuery,offset:state.memoryOffset,limit:40});
- const renderEvent=e=>`<li><b>${x(e.title||e.text)}</b>${e.status?`<span class="tag">${x(e.status)}</span>`:''}${e.summary?`<p>${x(e.summary)}</p>`:''}<p class="hint">Сцена: ${x(e.scene_id||e.last_scene_id||e.opened_scene_id||'неизвестно')} · ${x(e.world_time||e.last_at||'время не зафиксировано')}</p></li>`;
+ const renderEvent=e=>`<li><b>${x(e.title||e.text||e.original_text)}</b>${e.status?`<span class="tag">${x(e.status)}</span>`:''}${e.decision?`<span class="tag">${x(e.decision.classification)}</span><p class="hint">${x(e.decision.reason)}${e.decision.arc_id?` · линия ${x(e.decision.arc_id)}`:''}</p>`:''}${e.summary?`<p>${x(e.summary)}</p>`:''}<p class="hint">Сцена: ${x(e.scene_id||e.last_scene_id||e.opened_scene_id||'неизвестно')} · ${x(e.world_time||e.opened_at||e.last_at||'время не зафиксировано')}</p>${e.decision?.evidence?`<p class="hint">Подтверждение: глава ${x(e.decision.evidence.chapter)}, ID ${x(e.decision.evidence.scene_id)} — ${x(e.decision.evidence.fact)}</p>`:''}</li>`;
  const managed=m.managed_threads||[];
  const active=managed.filter(t=>t.status==='active').map(e=>`<li><b>${x(e.title)}</b><p class="hint">${x(e.kind)} · ${x(e.summary)}</p></li>`).join('');
  const paused=managed.filter(t=>t.status==='paused').map(e=>`<li><b>${x(e.title)}</b><p class="hint">Пауза: ${x(e.summary)}</p></li>`).join('');
  const box=(title,body)=>`<div class="panel stack"><h2 class="section-title">${x(title)}</h2>${body}</div>`;
  return `${heading('Действующая ветка','Причинная память','Восстановлена по всей действующей цепочке. Старые обещания и события доступны через поиск.',btn('memory-reload','Обновить из Supabase'))}
- <div class="panel"><div class="row between"><b>Сцен проанализировано: ${m.scanned_scenes}</b><span class="tag">${m.counts.facts} фактов · ${m.counts.tracked_active||0} активных линий · ${m.counts.legacy_unreviewed??m.counts.open_threads} архивных заметок</span></div>
+ <div class="panel"><div class="row between"><b>Сцен проанализировано: ${m.scanned_scenes}</b><span class="tag">${m.counts.facts} фактов · ${m.counts.tracked_active||0} активных · ${m.counts.tracked_paused||0} на паузе · ${m.counts.legacy_reviewed||0}/${m.counts.legacy_total??m.counts.open_threads} проверено</span></div>
  <div class="form two" style="margin-top:15px"><div class="field"><label for="memory-kind">Тип сведений</label><select id="memory-kind">${kinds.map(([value,label])=>opt(value,label,state.memoryKind)).join('')}</select></div>
  <div class="field"><label for="memory-query">Найти старый факт, обещание или событие</label><input id="memory-query" class="input" value="${x(state.memoryQuery)}" placeholder="Например, наследство, мантия, обещал"></div></div>
  <div class="row" style="margin-top:12px">${btn('memory-search','Искать по всей ветке')}</div></div>
  ${box('Результаты ('+page.total+')',`<ul>${page.items.map(renderEvent).join('')||'<li>По этому запросу ничего не найдено.</li>'}</ul><div class="row">${state.memoryOffset>0?btn('memory-prev','Предыдущие'):''}${page.next_offset!==null?btn('memory-next','Следующие'):''}</div>`)}
  <div class="grid">
- ${box('Действующие арки ('+(m.counts.tracked_active||0)+')',`<ul>${active||'<li>Новые структурированные линии ещё не зарегистрированы. Это НЕ означает, что в истории нет текущих угроз: старые записи требуют пересмотра.</li>'}</ul><p class="hint">На паузе: ${m.counts.tracked_paused||0}, завершено: ${m.counts.tracked_resolved||0}, выведено в архив: ${m.counts.tracked_archived||0}.</p>${paused?`<details><summary>На паузе</summary><ul>${paused}</ul></details>`:''}<p class="hint">Исторических незакрытых заметок: ${m.counts.legacy_unreviewed??m.counts.open_threads}. Это не равно числу реальных сюжетных арок. Они сохранены для проверки и поиска, не считаются обязательными заданиями.</p>`)}
+ ${box('Действующие арки ('+(m.counts.tracked_active||0)+')',`<ul>${active||'<li>Новые структурированные линии ещё не зарегистрированы. Это НЕ означает, что в истории нет текущих угроз: старые записи требуют пересмотра.</li>'}</ul><p class="hint">На паузе: ${m.counts.tracked_paused||0}, завершено: ${m.counts.tracked_resolved||0}, выведено в архив: ${m.counts.tracked_archived||0}.</p>${paused?`<details><summary>На паузе</summary><ul>${paused}</ul></details>`:''}<p class="hint">Исторических исходных записей: ${m.counts.legacy_total??m.counts.open_threads}, разобрано: ${m.counts.legacy_reviewed||0}, требуют дополнительных доказательств: ${m.counts.legacy_evidence_pending??m.counts.open_threads}. Все оригиналы остаются в поиске, но не являются 405 активными задачами.</p>`)}
  ${box('События вне кадра ('+m.counts.offscreen_events+')',`<ul>${m.offscreen_events.slice(-40).map(renderEvent).join('')||'<li>Пока не зафиксированы.</li>'}</ul>`)}
  </div>
  ${m.warnings.length?`<div class="attention">В журнале обнаружены ${m.warnings.length} закрытых линий без ранее найденного открытия. Проверь источник.</div>`:''}
@@ -566,7 +567,11 @@ async function loadAssets(refreshHead=true){
  state.allWorldRows=all;
  state.assets=projectCompanion(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{},strict:false});
  state.characterLedger=projectCharacterMemory(state.characters,lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
- state.causalLedger=projectCausalMemory(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
+ const knownAudit=typeof LEGACY_405_AUDIT==='undefined'?null:LEGACY_405_AUDIT;
+ const applicableAudit=knownAudit&&state.world?.id===knownAudit.world_id&&branch.id===knownAudit.branch_id&&
+  lineage.some(s=>s.id===knownAudit.base_head_scene_id)?knownAudit:null;
+ state.legacyAudit=applicableAudit;
+ state.causalLedger=projectCausalMemory(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{},legacyAudit:applicableAudit});
  state.depthLedger=projectWorldDepth(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
  state.assetIssue=null;
 }
@@ -1332,7 +1337,7 @@ case 'sim-copy':{
  const decision=selected?selected.label+'. '+selected.description:'';
  const clock=document.getElementById('story-clock')?.value||storyClock(w);
  if(!validStoryClock(clock))throw Error('Укажи игровую дату.');
- const memory=compactMemory(makeContinuity(state.characters,state.memoryScenes));
+ const memory=compactMemory(makeContinuity(state.characters,state.memoryScenes,state.legacyAudit||null));
  const prompt=simulationPrompt(w,state.characters,memory,state.scenes,{kind,span,decision,clock});
  await clipboard(prompt);
  notify('Запрос симуляции скопирован. В ChatGPT получи JSON, затем вставь через «Сцена + последствия».');return;
@@ -1357,8 +1362,8 @@ case 'sim-auto':{
  await openWorld(w.id);state.view='story';render();
  notify('Время продвинулось до '+result.world_time+'. Сцена и последствия сохранены.');return;
 }
-case 'copy-scene-prompt':if(!state.world)throw Error('Нет мира');if(!validStoryClock(document.getElementById('story-clock')?.value||storyClock()))throw Error('Сначала установи текущий период в разделе «Мир» (например, 1999-06).');await clipboard(scenePrompt(state.world,state.characters,state.scenes,state.storyMode||'story',document.getElementById('story-note')?.value||'',document.getElementById('scene-length')?.value||state.sceneLength)+'\n\nАКТУАЛЬНАЯ ПАМЯТЬ ВЕТКИ (собственные знания каждого отделяй от общих):\n'+JSON.stringify(compactMemory(makeContinuity(state.characters,state.memoryScenes)),null,2));return;
-case 'copy-scene-packet':{if(!state.world)throw Error('Нет мира');const basic=scenePrompt(state.world,state.characters,state.scenes,state.storyMode||'story',document.getElementById('story-note')?.value||'',document.getElementById('scene-length')?.value||state.sceneLength);const clock=document.getElementById('story-clock')?.value||storyClock();if(!validStoryClock(clock))throw Error('Сначала установи текущий период в разделе «Мир» (например, 1999-06).');await clipboard(scenePackagePrompt(basic,makeContinuity(state.characters,state.memoryScenes),clock));return;}
+case 'copy-scene-prompt':if(!state.world)throw Error('Нет мира');if(!validStoryClock(document.getElementById('story-clock')?.value||storyClock()))throw Error('Сначала установи текущий период в разделе «Мир» (например, 1999-06).');await clipboard(scenePrompt(state.world,state.characters,state.scenes,state.storyMode||'story',document.getElementById('story-note')?.value||'',document.getElementById('scene-length')?.value||state.sceneLength)+'\n\nАКТУАЛЬНАЯ ПАМЯТЬ ВЕТКИ (собственные знания каждого отделяй от общих):\n'+JSON.stringify(compactMemory(makeContinuity(state.characters,state.memoryScenes,state.legacyAudit||null)),null,2));return;
+case 'copy-scene-packet':{if(!state.world)throw Error('Нет мира');const basic=scenePrompt(state.world,state.characters,state.scenes,state.storyMode||'story',document.getElementById('story-note')?.value||'',document.getElementById('scene-length')?.value||state.sceneLength);const clock=document.getElementById('story-clock')?.value||storyClock();if(!validStoryClock(clock))throw Error('Сначала установи текущий период в разделе «Мир» (например, 1999-06).');await clipboard(scenePackagePrompt(basic,makeContinuity(state.characters,state.memoryScenes,state.legacyAudit||null),clock));return;}
 case 'demo-scene':await appendScene(demoScene(state.world,state.characters,state.scenes.length),'demo');return;
 case 'revise':{const scene=state.scenes.find(s=>s.id===el.dataset.id);if(!scene)throw Error('Сцена не найдена');state.revision={scene,prefix:'',note:''};state.modal={type:'revision',scene};render();return;}
 case 'revision-mark':markRevision();return;

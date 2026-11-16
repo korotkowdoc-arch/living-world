@@ -111,7 +111,7 @@ export function readSceneNote(value) {
   try { const obj=JSON.parse(value.slice(NOTE_PREFIX.length)); return obj?.v===1 && obj.delta ? obj : null; }
   catch { return null; }
 }
-export function makeContinuity(characters=[],scenes=[]) {
+export function makeContinuity(characters=[],scenes=[],legacyAudit=null) {
   const memory={facts:[],open_threads:[],offscreen_events:[],characters:{},tracked_scenes:0,scanned_scenes:scenes.length};
   for(const ch of characters) memory.characters[ch.name]={name:ch.name,role:ch.role,description:ch.description,personality:ch.personality,goals:ch.goals,relationships:ch.relationships,knowledge:ch.knowledge,location:ch.location,health:ch.health,mood:ch.mood,status:ch.status,inventory:ch.inventory,learned:[],beliefs:[]};
   for(const scene of scenes) {
@@ -134,12 +134,13 @@ export function makeContinuity(characters=[],scenes=[]) {
       uniqAppend(current.beliefs,changeChar.beliefs||[],100);
     }
   }
-  const ledger=projectCausalMemory(scenes,{getDelta:scene=>readSceneNote(scene.prompt_note)?.delta||{}});
+  const ledger=projectCausalMemory(scenes,{getDelta:scene=>readSceneNote(scene.prompt_note)?.delta||{},legacyAudit});
   memory.managed_threads=ledger.managed_threads.filter(t=>['active','paused'].includes(t.status));
+  memory.legacy_review=ledger.legacy_review;
   return memory;
 }
 export function compactMemory(memory) {
-  return {facts:memory.facts.slice(-80),open_threads:[],legacy_unreviewed_count:memory.open_threads.length,managed_threads:(memory.managed_threads||[]).slice(-24),offscreen_events:memory.offscreen_events.slice(-30),characters:Object.values(memory.characters).map(c=>({name:c.name,description:c.description,personality:c.personality,goals:c.goals,relationships:c.relationships,knowledge_at_genesis:c.knowledge,learned:(c.learned||[]).slice(-30),beliefs:(c.beliefs||[]).slice(-25),location:c.location,health:c.health,mood:c.mood,status:c.status,inventory:c.inventory}))};
+  return {facts:memory.facts.slice(-80),open_threads:[],legacy_unreviewed_count:memory.legacy_review?.evidence_pending??memory.open_threads.length,managed_threads:(memory.managed_threads||[]).slice(-24),offscreen_events:memory.offscreen_events.slice(-30),characters:Object.values(memory.characters).map(c=>({name:c.name,description:c.description,personality:c.personality,goals:c.goals,relationships:c.relationships,knowledge_at_genesis:c.knowledge,learned:(c.learned||[]).slice(-30),beliefs:(c.beliefs||[]).slice(-25),location:c.location,health:c.health,mood:c.mood,status:c.status,inventory:c.inventory}))};
 }
 export function scenePackagePrompt(narrativePrompt,memory,clock) {
   const state=compactMemory(memory);
