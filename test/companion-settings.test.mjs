@@ -79,3 +79,13 @@ test('PWA syncs to Supabase; OAuth preflight and world state return those settin
  assert.match(bridge,/decisions:decisionSchema/);
  assert.match(bridge,/packSceneNote\(packet\.changes,'',packet\.decisions\)/);
 });
+
+
+test('guidance protects actual autonomous offscreen life and preserves yearly main threat',()=>{
+ const guidance=companionGuidance(companionSettings(world,sceneId,'2015-03-31'));
+ assert.match(guidance.autonomous_npc_simulation,/npc_offscreen/);
+ assert.match(guidance.main_arc,/противники/);
+ assert.match(guidance.everyday_life,/свободы/);
+ assert.match(guidance.y1_current_focus,/Философский камень/);
+ assert.match(guidance.institutional_boundaries,/Студенты/);
+});
