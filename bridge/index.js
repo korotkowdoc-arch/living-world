@@ -8,7 +8,7 @@ import {auditNarrativeScene} from '../public/narrative-audit.mjs';
 import {isReplayableCheckpoint,replayFromCheckpoint} from '../public/checkpoint-replay.mjs';
 import {parseCheckpointDoc} from '../public/story-memory.mjs';
 import {savedSceneStatus} from '../public/save-receipt.mjs';
-import {projectCausalMemory,causalSummary,searchCausalMemory} from '../public/world-causality.mjs';
+import {projectCausalMemory,causalSummary,causalSceneBrief,searchCausalMemory} from '../public/world-causality.mjs';
 import {validStoryClock,isNondecreasingStoryTime} from '../public/continuity.mjs';
 import {yearArchiveMetadata,reconcileYearDocuments,buildYearArchive} from '../public/year-archive.mjs';
 import {companionSettings,companionGuidance} from '../public/companion-settings.mjs';
@@ -1647,7 +1647,7 @@ async function call(name,args,env,identity) {
       companion_settings:companionSettings(base.world,base.branch?.head_scene_id,base.world_time),
       companion_guidance:companionGuidance(companionSettings(base.world,base.branch?.head_scene_id,base.world_time)),
       resource_memory:{complete:assets.complete,issues:assets.issues||[]},
-      causal_memory:assets.complete?assets.causal_memory:{complete:false,reason:assets.reason},
+      causal_memory:assets.complete?causalSceneBrief(assets.causal_memory,{actorNames:actors}):{complete:false,reason:assets.reason},
       character_memory:assets.complete?{complete:true,profiles:(assets.character_memory||[]).filter(p=>actors.some(name=>name.toLocaleLowerCase('ru')===p.name.toLocaleLowerCase('ru'))),warnings:assets.character_warnings||[]}:{complete:false,reason:assets.reason},
       psychological_memory:assets.complete?{complete:true,...actorDepth(assets.depth_memory,actors)}:{complete:false,reason:assets.reason},
       npc_autonomy:assets.complete?{complete:true,
@@ -1667,7 +1667,7 @@ async function call(name,args,env,identity) {
     const refs=live?await sourcePreflight(env,identity,id,'',[],base,assets):{installed:false,ready:false};
     return {...base,companion_settings:companionSettings(base.world,base.branch?.head_scene_id,base.world_time),
       companion_guidance:companionGuidance(companionSettings(base.world,base.branch?.head_scene_id,base.world_time)),
-      companion:resources,causal_memory:assets.complete?assets.causal_memory:{complete:false,reason:assets.reason},
+      companion:resources,causal_memory:assets.complete?causalSceneBrief(assets.causal_memory):{complete:false,reason:assets.reason},
       character_memory:assets.complete?{complete:true,profiles:assets.character_memory,warnings:assets.character_warnings}:{complete:false,reason:assets.reason},
       depth_summary:assets.complete?{relationships:assets.depth_memory.relationships.map(r=>({from:r.from,to:r.to,dimensions:r.dimensions})),actors:assets.depth_memory.psychology.map(p=>({name:p.name,aspects:p.aspects}))}:{complete:false,reason:assets.reason},
       reference_documents:refs};
@@ -1679,7 +1679,7 @@ async function call(name,args,env,identity) {
     const sources=live?await sourcePreflight(env,identity,id,'',[],base,assets):{installed:false,ready:false};
     return {...base,companion_settings:companionSettings(base.world,base.branch?.head_scene_id,base.world_time),
       companion_guidance:companionGuidance(companionSettings(base.world,base.branch?.head_scene_id,base.world_time)),
-      causal_memory:assets.complete?assets.causal_memory:{complete:false,reason:assets.reason},
+      causal_memory:assets.complete?causalSceneBrief(assets.causal_memory):{complete:false,reason:assets.reason},
       resource_summary:assets.complete?{complete:true,accounts:assets.accounts.map(a=>({person:a.person,currency:a.currency,scale:a.scale,known:a.known,balance:a.balance})),items:assets.items.map(i=>({id:i.id,label:i.label,owner:i.owner,holder:i.holder,exists:i.exists})),new_characters:assets.new_characters,issues:assets.issues}:{complete:false,reason:assets.reason},reference_documents:sources};
   }
   if(name==='get_branch_history') {
