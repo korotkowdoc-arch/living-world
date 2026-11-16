@@ -915,7 +915,7 @@ async function companionState(env,identity,id){
     character_memory:p.characters.characters.map(c=>({
      name:c.name,origin:c.origin,state:c.state,knowledge_count:c.knowledge.length,
      belief_count:c.beliefs.length,initial_role:c.initial?.role||'npc',
-     last_recorded_time:c.history.at(-1)?.world_time||null,last_event_type:c.history.at(-1)?.type||null})),
+     last_recorded_time:c.history.at(-1)?.world_time||null,last_event_type:c.history.at(-1)?.type||null,history_count:c.history.length})),
     character_warnings:p.characters.warnings,
     causal_memory:causalSummary(p.causality),depth_memory:p.depth,
     memory_provenance:{verified_source_head:true,
@@ -940,7 +940,7 @@ async function companionState(env,identity,id){
   issues:projection.issues,scanned_scenes:projection.scanned_scenes,
   character_memory:people.characters.map(c=>({name:c.name,origin:c.origin,state:c.state,knowledge_count:c.knowledge.length,belief_count:c.beliefs.length,
    initial_role:c.initial?.role||'npc',last_recorded_time:c.history.at(-1)?.world_time||null,
-   last_event_type:c.history.at(-1)?.type||null})),
+   last_event_type:c.history.at(-1)?.type||null,history_count:c.history.length})),
   character_warnings:people.warnings,causal_memory:causalSummary(causal),depth_memory:depth};
 }
 async function getRevisionSource(env,identity,id,targetId){
@@ -1651,7 +1651,7 @@ async function call(name,args,env,identity) {
       character_memory:assets.complete?{complete:true,profiles:(assets.character_memory||[]).filter(p=>actors.some(name=>name.toLocaleLowerCase('ru')===p.name.toLocaleLowerCase('ru'))),warnings:assets.character_warnings||[]}:{complete:false,reason:assets.reason},
       psychological_memory:assets.complete?{complete:true,...actorDepth(assets.depth_memory,actors)}:{complete:false,reason:assets.reason},
       npc_autonomy:assets.complete?{complete:true,
-       candidates:offscreenCandidateBrief({characters:assets.character_memory||[]},{recentScenes:(base.recent_scenes||[]).slice(-5),exclude:actors,limit:14}),
+       candidates:offscreenCandidateBrief({characters:assets.character_memory||[]},{recentScenes:(base.recent_scenes||[]).slice(-5),exclude:actors,limit:14,currentTime:base.world_time,cycle:assets.scanned_scenes}),
        rule:'Кандидаты — только повод проверить доступное время, цели и обстоятельства NPC, а не доказательство событий. Между двумя сценами живущие вне кадра персонажи вправе реально действовать, ошибаться, встречаться, узнавать новое. Если событие причинно состоялось, внеси npc_offscreen basis=simulated и изменения конкретных NPC в changes.characters с каналами знания; не приписывай Гарри невидимые события. Не создавай событий из прошлого уже сыгранных сцен.'}:{complete:false,reason:assets.reason},
       documents:live?await sourcePreflight(env,identity,id,intent,actors,base,assets):{installed:false,ready:false},
       narrative_checks:['Хронология и точное время','Цели, характер и изменения отношений','Что каждый знает и каким каналом','Травмы, состояние, ресурсы и местонахождение','Какие сцены и ветки аннулированы','Правила, глоссарий и актуальные изменения']}
