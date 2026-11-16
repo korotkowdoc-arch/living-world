@@ -63,26 +63,45 @@ const maybeAt=v=>{
  */
 export function validateDepthDelta(changes={},sceneText=''){
  if(!isObject(changes))throw Error('Последствия должны быть объектом.');
+ const offscreenIndex=new Map(safeArray(changes.npc_offscreen)
+  .filter(e=>isObject(e)&&e.basis==='simulated'&&e.id)
+  .map(e=>[e.id,e]));
+ const eventProof=(r,actor,ref)=>{
+  if(r.basis!==undefined&&r.basis!=='simulated'&&r.basis!=='narrated')
+   throw Error(ref+': недопустимое основание записи.');
+  if(r.basis==='simulated'){
+   const related=validatedId(r.related_offscreen_id,ref+'.related_offscreen_id');
+   const cause=offscreenIndex.get(related);
+   if(!cause||key(cause.actor)!==key(actor))
+    throw Error(ref+': изменение за кадром требует npc_offscreen basis=simulated с совпадающим действующим NPC.');
+   return {basis:'simulated',related_offscreen_id:related,evidence:''};
+  }
+  return {basis:'narrated',related_offscreen_id:'',evidence:proof(sceneText,r.evidence,ref)};
+ };
  const psychology=uniqueRecords(changes.psychology,'psychology',25).map((r,i)=>{
   const ref='psychology['+i+']';
+  if(r.basis==='simulated'&&r.certainty!=='interpretation')
+   throw Error(ref+': психологическое состояние вне кадра — только обоснованная интерпретация.');
   return {id:r.id,character:requireText(r.character,ref+'.character',120),
    aspect:requireEnum(r.aspect,PSYCHOLOGY_ASPECTS,ref+'.aspect'),
    observation:requireText(r.observation,ref+'.observation',1500),
    interpretation:field(r.interpretation,1400),
    certainty:requireEnum(r.certainty,INTERPRETATION_TYPES,ref+'.certainty'),
-   evidence:proof(sceneText,r.evidence,ref),
+   ...eventProof(r,r.character,ref),
    tension_with:field(r.tension_with,600)};
  });
  const relationships=uniqueRecords(changes.relationships,'relationships',30).map((r,i)=>{
   const ref='relationships['+i+']';
   const from=requireText(r.from,ref+'.from',120),to=requireText(r.to,ref+'.to',120);
   if(key(from)===key(to))throw Error(ref+': отношение к себе не считается отношением к другому.');
+  if(r.basis==='simulated'&&r.interpretation!=='interpretation')
+   throw Error(ref+': отношения вне кадра сохраняются как интерпретация, а не доказанное чтение мыслей.');
   return {id:r.id,from,to,
    dimension:requireEnum(r.dimension,RELATION_DIMENSIONS,ref+'.dimension'),
    shift:requireEnum(r.shift,RELATION_SHIFTS,ref+'.shift'),
    interpretation:requireEnum(r.interpretation,INTERPRETATION_TYPES,ref+'.interpretation'),
    rationale:requireText(r.rationale,ref+'.rationale',1500),
-   evidence:proof(sceneText,r.evidence,ref),
+   ...eventProof(r,from,ref),
    unresolved:!!r.unresolved};
  });
  const recollections=uniqueRecords(changes.recollections,'recollections',20).map((r,i)=>{
