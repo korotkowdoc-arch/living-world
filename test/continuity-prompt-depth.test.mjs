@@ -35,3 +35,19 @@ test('interface distinguishes managed story arcs from legacy notes',()=>{
  assert.match(app,/Исторические заметки на разбор/);
  assert.match(app,/m\.counts\.tracked_active/);
 });
+
+test('both GPT prompt routes omit unresolved historical note spam but keep managed arcs',()=>{
+ const old='Проверить токен из архива Morrow Vale';
+ const prompt=scenePackagePrompt('Продолжай.',{
+  facts:[],open_threads:[old],managed_threads:[{id:'y1-stone',
+   title:'Философский камень',status:'active',summary:'Противник продолжает готовиться'}],
+  offscreen_events:[],characters:{}
+ },'2015-04-01');
+ assert.ok(!prompt.includes(old));
+ assert.match(prompt,/legacy_unreviewed_count/);
+ assert.match(prompt,/y1-stone/);
+ const bridge=readFileSync(new URL('../bridge/index.js',import.meta.url),'utf8');
+ assert.match(bridge,/open_threads:\[\]/);
+ assert.match(bridge,/managed_threads:\(memory\.managed_threads/);
+ assert.match(bridge,/thread_updates/);
+});
