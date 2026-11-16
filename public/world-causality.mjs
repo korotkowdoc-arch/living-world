@@ -75,6 +75,25 @@ export function causalSummary(memory,{recentFacts=80,recentOffscreen=40,openThre
   unshown_open_threads:Math.max(0,memory.open_threads.length-openThreads),
   warnings:memory.warnings.slice(-30)};
 }
+/** Bounded default context, without losing anything in the searchable full archive.
+ * Old but relevant threads can be fetched on demand via get_causal_memory.
+ */
+export function causalSceneBrief(memory,{actorNames=[],maxOpen=32,maxFacts=24,maxOffscreen=14}={}){
+ if(!memory?.complete)return memory;
+ const open=Array.isArray(memory.open_threads)?memory.open_threads:[];
+ const names=actorNames.map(normalized).filter(Boolean);
+ const relevant=open.filter(e=>names.some(n=>normalized(e.text).includes(n))).slice(-12);
+ const selected=[...relevant,...open.slice(-maxOpen)];
+ const seen=new Set(),chosen=[];
+ for(const e of selected){const k=normalized(e.text);if(k&&!seen.has(k)){seen.add(k);chosen.push(e);}}
+ const total=memory.counts?.open_threads??(open.length+(memory.unshown_open_threads||0));
+ return {...memory,
+  facts:(memory.facts||[]).slice(-maxFacts),
+  offscreen_events:(memory.offscreen_events||[]).slice(-maxOffscreen),
+  open_threads:chosen.slice(-maxOpen),
+  unshown_open_threads:Math.max(0,total-Math.min(total,chosen.length)),
+  retrieval_note:'Это ограниченная выдача для экономии контекста. Полный журнал, включая старые открытые линии, доступен через get_causal_memory; отсутствие строки здесь не означает закрытие или отсутствие события.'};
+}
 export function searchCausalMemory(memory,{kind='fact',query='',offset=0,limit=40}={}){
  if(!memory?.complete)throw Error('История не восстановлена полностью.');
  if(!['fact','open_thread','resolved_thread','offscreen'].includes(kind))throw Error('Неизвестный тип причинной памяти.');
