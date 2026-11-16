@@ -61,6 +61,15 @@ export function projectCharacterMemory(baselines=[],scenes=[],{getDelta,seed=nul
    c.origin='scene';c.introduced_scene_id=scene.id;
    c.history.push({scene_id:scene.id,world_time:scene.world_time,type:'introduced',source:p.causal_link||''});
   }
+  // A confirmed offscreen action belongs to the acting NPC's chronology even
+  // when that person never appears in the reader-facing chapter.
+  for(const off of Array.isArray(delta.npc_offscreen)?delta.npc_offscreen:[]){
+   if(!clean(off?.actor)||!clean(off?.event))continue;
+   const c=ensure(off.actor);
+   c.history.push({scene_id:scene.id,world_time:off.happened_at||scene.world_time,
+    type:'offscreen',event:off.event,basis:off.basis||'narrated',
+    causal_basis:off.causal_basis||'',known_by:Array.isArray(off.known_by)?off.known_by:[]});
+  }
   for(const deltaChar of Array.isArray(delta.characters)?delta.characters:[]){
    const c=ensure(deltaChar.name);if(!c)continue;
    const changes={};
@@ -103,4 +112,30 @@ export function actorMemory(ledger,actorNames=[],{maxEntries=200}={}){
 export function knowledgeHas(ledger,actor,fact){
  const c=(ledger.characters||[]).find(x=>key(x.name)===key(actor));
  return !!c?.knowledge.some(x=>key(x.fact)===key(fact));
+}
+
+/** Bounded, non-authoritative NPC shortlist for the NEXT simulation interval.
+ * This never claims that an unseen event already happened. A model must record
+ * each new event separately with provenance before it enters canonical memory.
+ */
+export function offscreenCandidateBrief(ledger,{recentScenes=[],exclude=[],limit=12}={}){
+ const blocked=new Set(exclude.map(key));
+ const recent=recentScenes.map(s=>typeof s==='string'?s:String(s?.body||'')).join('\n').toLocaleLowerCase('ru');
+ const candidates=(ledger?.characters||[]).filter(c=>{
+  if(!c?.name||blocked.has(key(c.name))||c.initial?.role==='hero')return false;
+  const marker=c.name.toLocaleLowerCase('ru');
+  return !recent.includes(marker)&&!!(c.state?.goals||c.initial?.goals||c.history?.length);
+ }).map(c=>{
+  const history=Array.isArray(c.history)?c.history:[];
+  const last=history.at(-1);
+  return {name:c.name,location:c.state?.location||'не уточнено',
+   goals:c.state?.goals||c.initial?.goals||'не уточнены',
+   last_recorded_time:last?.world_time||null,
+   latest_event:last?.type||null,
+   knowledge_count:c.knowledge?.length||0,belief_count:c.beliefs?.length||0};
+ });
+ // Stale records are candidates for attention, not proof of new actions.
+ candidates.sort((a,b)=>(a.last_recorded_time||'').localeCompare(b.last_recorded_time||'')||
+  a.name.localeCompare(b.name,'ru'));
+ return candidates.slice(0,Math.max(0,Math.min(20,Number.isInteger(limit)?limit:12)));
 }
