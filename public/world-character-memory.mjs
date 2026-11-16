@@ -122,7 +122,7 @@ export function offscreenCandidateBrief(ledger,{recentScenes=[],exclude=[],limit
  const blocked=new Set(exclude.map(key));
  const recent=recentScenes.map(s=>typeof s==='string'?s:String(s?.body||'')).join('\n').toLocaleLowerCase('ru');
  const candidates=(ledger?.characters||[]).filter(c=>{
-  if(!c?.name||blocked.has(key(c.name))||c.initial?.role==='hero')return false;
+  if(!c?.name||blocked.has(key(c.name))||(c.initial?.role||c.initial_role)==='hero')return false;
   const marker=c.name.toLocaleLowerCase('ru');
   return !recent.includes(marker)&&!!(c.state?.goals||c.initial?.goals||c.history?.length);
  }).map(c=>{
@@ -130,9 +130,9 @@ export function offscreenCandidateBrief(ledger,{recentScenes=[],exclude=[],limit
   const last=history.at(-1);
   return {name:c.name,location:c.state?.location||'не уточнено',
    goals:c.state?.goals||c.initial?.goals||'не уточнены',
-   last_recorded_time:last?.world_time||null,
-   latest_event:last?.type||null,
-   knowledge_count:c.knowledge?.length||0,belief_count:c.beliefs?.length||0};
+   last_recorded_time:last?.world_time||c.last_recorded_time||null,
+   latest_event:last?.type||c.last_event_type||null,
+   knowledge_count:c.knowledge?.length??c.knowledge_count??0,belief_count:c.beliefs?.length??c.belief_count??0};
  });
  // Stale records are candidates for attention, not proof of new actions.
  candidates.sort((a,b)=>(a.last_recorded_time||'').localeCompare(b.last_recorded_time||'')||
