@@ -37,3 +37,16 @@ test('unknown resolved thread is an audit warning, not a fabricated previous pro
  assert.equal(log.warnings[0].code,'UNTRACKED_RESOLUTION');
  assert.equal(log.resolved_threads[0].opened_scene_id,null);
 });
+
+
+test('structured but unshown autonomous NPC events appear in causal offscreen search',()=>{
+ const scene={id:'x',world_time:'2015-04-04',body:'Гарри занимался чарами.',
+  changes:{npc_offscreen:[{id:'evt',actor:'Драко Малфой',event:'Написал матери письмо.',
+   happened_at:'2015-04-02',basis:'simulated',known_by:['Драко Малфой']}]}};
+ const log=projectCausalMemory([scene]);
+ assert.equal(log.counts.offscreen_events,1);
+ const result=searchCausalMemory(log,{kind:'offscreen',query:'Драко'});
+ assert.equal(result.total,1);
+ assert.equal(result.items[0].happened_at,'2015-04-02');
+ assert.deepEqual(result.items[0].known_by,['Драко Малфой']);
+});
