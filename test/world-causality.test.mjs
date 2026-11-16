@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {projectCausalMemory,causalSummary,searchCausalMemory} from '../public/world-causality.mjs';
+import {projectCausalMemory,causalSummary,causalSceneBrief,searchCausalMemory} from '../public/world-causality.mjs';
 import {activeLineage} from '../public/world-ledger.mjs';
 const a={id:'a',parent_scene_id:null,world_time:'1995-07',changes:{facts:['Гарри обещал вернуть книгу.'],open_threads:['Вернуть книгу'],offscreen_events:['Сосед уехал']}};
 const b={id:'b',parent_scene_id:'a',world_time:'1995-08',changes:{facts:['Гарри купил дом.'],resolved_threads:['Вернуть книгу']}};
@@ -49,4 +49,15 @@ test('structured but unshown autonomous NPC events appear in causal offscreen se
  assert.equal(result.total,1);
  assert.equal(result.items[0].happened_at,'2015-04-02');
  assert.deepEqual(result.items[0].known_by,['Драко Малфой']);
+});
+
+test('chat brief is bounded without erasing old or unrelated open threads',()=>{
+ const many=Array.from({length:100},(_,i)=>({id:'s'+i,world_time:'2015-03',changes:{open_threads:['Незавершённое обстоятельство '+i]}}));
+ many.push({id:'d',world_time:'2015-04',changes:{open_threads:['Драко ждёт ответа Люциуса']}});
+ const full=projectCausalMemory(many),preview=causalSceneBrief(causalSummary(full),{actorNames:['Драко']});
+ assert.equal(full.open_threads.length,101);
+ assert.ok(preview.open_threads.length<=32);
+ assert.ok(preview.open_threads.some(x=>x.text.includes('Драко')));
+ assert.ok(preview.unshown_open_threads>=69);
+ assert.equal(searchCausalMemory(full,{kind:'open_thread',query:'обстоятельство 1'}).total>0,true);
 });
