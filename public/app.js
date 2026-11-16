@@ -567,8 +567,9 @@ async function loadAssets(refreshHead=true){
  state.allWorldRows=all;
  state.assets=projectCompanion(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{},strict:false});
  state.characterLedger=projectCharacterMemory(state.characters,lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
- const applicableAudit=state.world?.id===LEGACY_405_AUDIT.world_id&&branch.id===LEGACY_405_AUDIT.branch_id&&
-  lineage.some(s=>s.id===LEGACY_405_AUDIT.base_head_scene_id)?LEGACY_405_AUDIT:null;
+ const knownAudit=typeof LEGACY_405_AUDIT==='undefined'?null:LEGACY_405_AUDIT;
+ const applicableAudit=knownAudit&&state.world?.id===knownAudit.world_id&&branch.id===knownAudit.branch_id&&
+  lineage.some(s=>s.id===knownAudit.base_head_scene_id)?knownAudit:null;
  state.legacyAudit=applicableAudit;
  state.causalLedger=projectCausalMemory(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{},legacyAudit:applicableAudit});
  state.depthLedger=projectWorldDepth(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
