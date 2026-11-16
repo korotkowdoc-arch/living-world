@@ -569,6 +569,7 @@ async function loadAssets(refreshHead=true){
  state.characterLedger=projectCharacterMemory(state.characters,lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
  const applicableAudit=state.world?.id===LEGACY_405_AUDIT.world_id&&branch.id===LEGACY_405_AUDIT.branch_id&&
   lineage.some(s=>s.id===LEGACY_405_AUDIT.base_head_scene_id)?LEGACY_405_AUDIT:null;
+ state.legacyAudit=applicableAudit;
  state.causalLedger=projectCausalMemory(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{},legacyAudit:applicableAudit});
  state.depthLedger=projectWorldDepth(lineage,{getDelta:s=>readSceneNote(s.prompt_note)?.delta||{}});
  state.assetIssue=null;
@@ -1335,7 +1336,7 @@ case 'sim-copy':{
  const decision=selected?selected.label+'. '+selected.description:'';
  const clock=document.getElementById('story-clock')?.value||storyClock(w);
  if(!validStoryClock(clock))throw Error('Укажи игровую дату.');
- const memory=compactMemory(makeContinuity(state.characters,state.memoryScenes));
+ const memory=compactMemory(makeContinuity(state.characters,state.memoryScenes,state.legacyAudit||null));
  const prompt=simulationPrompt(w,state.characters,memory,state.scenes,{kind,span,decision,clock});
  await clipboard(prompt);
  notify('Запрос симуляции скопирован. В ChatGPT получи JSON, затем вставь через «Сцена + последствия».');return;
@@ -1360,8 +1361,8 @@ case 'sim-auto':{
  await openWorld(w.id);state.view='story';render();
  notify('Время продвинулось до '+result.world_time+'. Сцена и последствия сохранены.');return;
 }
-case 'copy-scene-prompt':if(!state.world)throw Error('Нет мира');if(!validStoryClock(document.getElementById('story-clock')?.value||storyClock()))throw Error('Сначала установи текущий период в разделе «Мир» (например, 1999-06).');await clipboard(scenePrompt(state.world,state.characters,state.scenes,state.storyMode||'story',document.getElementById('story-note')?.value||'',document.getElementById('scene-length')?.value||state.sceneLength)+'\n\nАКТУАЛЬНАЯ ПАМЯТЬ ВЕТКИ (собственные знания каждого отделяй от общих):\n'+JSON.stringify(compactMemory(makeContinuity(state.characters,state.memoryScenes)),null,2));return;
-case 'copy-scene-packet':{if(!state.world)throw Error('Нет мира');const basic=scenePrompt(state.world,state.characters,state.scenes,state.storyMode||'story',document.getElementById('story-note')?.value||'',document.getElementById('scene-length')?.value||state.sceneLength);const clock=document.getElementById('story-clock')?.value||storyClock();if(!validStoryClock(clock))throw Error('Сначала установи текущий период в разделе «Мир» (например, 1999-06).');await clipboard(scenePackagePrompt(basic,makeContinuity(state.characters,state.memoryScenes),clock));return;}
+case 'copy-scene-prompt':if(!state.world)throw Error('Нет мира');if(!validStoryClock(document.getElementById('story-clock')?.value||storyClock()))throw Error('Сначала установи текущий период в разделе «Мир» (например, 1999-06).');await clipboard(scenePrompt(state.world,state.characters,state.scenes,state.storyMode||'story',document.getElementById('story-note')?.value||'',document.getElementById('scene-length')?.value||state.sceneLength)+'\n\nАКТУАЛЬНАЯ ПАМЯТЬ ВЕТКИ (собственные знания каждого отделяй от общих):\n'+JSON.stringify(compactMemory(makeContinuity(state.characters,state.memoryScenes,state.legacyAudit||null)),null,2));return;
+case 'copy-scene-packet':{if(!state.world)throw Error('Нет мира');const basic=scenePrompt(state.world,state.characters,state.scenes,state.storyMode||'story',document.getElementById('story-note')?.value||'',document.getElementById('scene-length')?.value||state.sceneLength);const clock=document.getElementById('story-clock')?.value||storyClock();if(!validStoryClock(clock))throw Error('Сначала установи текущий период в разделе «Мир» (например, 1999-06).');await clipboard(scenePackagePrompt(basic,makeContinuity(state.characters,state.memoryScenes,state.legacyAudit||null),clock));return;}
 case 'demo-scene':await appendScene(demoScene(state.world,state.characters,state.scenes.length),'demo');return;
 case 'revise':{const scene=state.scenes.find(s=>s.id===el.dataset.id);if(!scene)throw Error('Сцена не найдена');state.revision={scene,prefix:'',note:''};state.modal={type:'revision',scene};render();return;}
 case 'revision-mark':markRevision();return;
