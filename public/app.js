@@ -404,19 +404,21 @@ function renderMemory(){
  const m=state.causalLedger;
  if(!m)return heading('Причинная память','Сыгранные факты','История хранится по действующей ветке, а не как пересказ последних сообщений.')+
   '<div class="attention">Полный журнал ещё не пересчитан. Не считай пустой экран доказательством отсутствия фактов.</div>'+btn('memory-reload','Загрузить всю память','gold');
- const kinds=[['fact','Факты'],['open_thread','Открытые линии'],['resolved_thread','Закрытые линии'],['offscreen','Вне кадра']];
+ const kinds=[['fact','Факты'],['storyline','Сюжетные линии с жизненным циклом'],['open_thread','Исторические заметки на разбор'],['resolved_thread','Старые закрытые заметки'],['offscreen','Вне кадра']];
  const page=searchCausalMemory(m,{kind:state.memoryKind,query:state.memoryQuery,offset:state.memoryOffset,limit:40});
- const renderEvent=e=>`<li><b>${x(e.text)}</b><p class="hint">Сцена: ${x(e.scene_id||e.last_scene_id||e.opened_scene_id||'неизвестно')} · ${x(e.world_time||e.last_at||'время не зафиксировано')}</p></li>`;
- const active=m.open_threads.slice(-80).map(e=>`<li><b>${x(e.text)}</b><span class="hint"> · открыта в сцене ${x(e.opened_scene_id||'неизвестно')}</span></li>`).join('');
+ const renderEvent=e=>`<li><b>${x(e.title||e.text)}</b>${e.status?`<span class="tag">${x(e.status)}</span>`:''}${e.summary?`<p>${x(e.summary)}</p>`:''}<p class="hint">Сцена: ${x(e.scene_id||e.last_scene_id||e.opened_scene_id||'неизвестно')} · ${x(e.world_time||e.last_at||'время не зафиксировано')}</p></li>`;
+ const managed=m.managed_threads||[];
+ const active=managed.filter(t=>t.status==='active').map(e=>`<li><b>${x(e.title)}</b><p class="hint">${x(e.kind)} · ${x(e.summary)}</p></li>`).join('');
+ const paused=managed.filter(t=>t.status==='paused').map(e=>`<li><b>${x(e.title)}</b><p class="hint">Пауза: ${x(e.summary)}</p></li>`).join('');
  const box=(title,body)=>`<div class="panel stack"><h2 class="section-title">${x(title)}</h2>${body}</div>`;
  return `${heading('Действующая ветка','Причинная память','Восстановлена по всей действующей цепочке. Старые обещания и события доступны через поиск.',btn('memory-reload','Обновить из Supabase'))}
- <div class="panel"><div class="row between"><b>Сцен проанализировано: ${m.scanned_scenes}</b><span class="tag">${m.counts.facts} фактов · ${m.counts.open_threads} открытых линий</span></div>
+ <div class="panel"><div class="row between"><b>Сцен проанализировано: ${m.scanned_scenes}</b><span class="tag">${m.counts.facts} фактов · ${m.counts.tracked_active||0} активных линий · ${m.counts.legacy_unreviewed??m.counts.open_threads} архивных заметок</span></div>
  <div class="form two" style="margin-top:15px"><div class="field"><label for="memory-kind">Тип сведений</label><select id="memory-kind">${kinds.map(([value,label])=>opt(value,label,state.memoryKind)).join('')}</select></div>
  <div class="field"><label for="memory-query">Найти старый факт, обещание или событие</label><input id="memory-query" class="input" value="${x(state.memoryQuery)}" placeholder="Например, наследство, мантия, обещал"></div></div>
  <div class="row" style="margin-top:12px">${btn('memory-search','Искать по всей ветке')}</div></div>
  ${box('Результаты ('+page.total+')',`<ul>${page.items.map(renderEvent).join('')||'<li>По этому запросу ничего не найдено.</li>'}</ul><div class="row">${state.memoryOffset>0?btn('memory-prev','Предыдущие'):''}${page.next_offset!==null?btn('memory-next','Следующие'):''}</div>`)}
  <div class="grid">
- ${box('Незакрытые сюжетные линии ('+m.counts.open_threads+')',`<ul>${active||'<li>В структурированной памяти нет открытых линий.</li>'}</ul>${m.counts.open_threads>80?'<p class="hint">Показаны последние 80. Остальные находятся поиском по типу «Открытые линии».</p>':''}`)}
+ ${box('Действующие арки ('+(m.counts.tracked_active||0)+')',`<ul>${active||'<li>Новые структурированные линии ещё не зарегистрированы. Это НЕ означает, что в истории нет текущих угроз: старые записи требуют пересмотра.</li>'}</ul><p class="hint">На паузе: ${m.counts.tracked_paused||0}, завершено: ${m.counts.tracked_resolved||0}, выведено в архив: ${m.counts.tracked_archived||0}.</p>${paused?`<details><summary>На паузе</summary><ul>${paused}</ul></details>`:''}<p class="hint">Исторических незакрытых заметок: ${m.counts.legacy_unreviewed??m.counts.open_threads}. Это не равно числу реальных сюжетных арок. Они сохранены для проверки и поиска, не считаются обязательными заданиями.</p>`)}
  ${box('События вне кадра ('+m.counts.offscreen_events+')',`<ul>${m.offscreen_events.slice(-40).map(renderEvent).join('')||'<li>Пока не зафиксированы.</li>'}</ul>`)}
  </div>
  ${m.warnings.length?`<div class="attention">В журнале обнаружены ${m.warnings.length} закрытых линий без ранее найденного открытия. Проверь источник.</div>`:''}
