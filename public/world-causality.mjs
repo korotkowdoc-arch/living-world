@@ -48,6 +48,15 @@ export function projectCausalMemory(scenes=[],{getDelta,seed=null}={}){
   for(const value of Array.isArray(c.offscreen_events)?c.offscreen_events:[]){
    if(trim(value))offscreen_events.push(event(value.trim(),'offscreen'));
   }
+  // Structured NPC events are canonical offscreen events too. In the past they
+  // were stored in depth memory only, leaving the causal/offscreen index empty.
+  for(const off of Array.isArray(c.npc_offscreen)?c.npc_offscreen:[]){
+   if(!trim(off?.actor)||!trim(off?.event))continue;
+   offscreen_events.push({...event(off.actor+': '+off.event,'offscreen'),
+    event_id:off.id||null,actor:off.actor,happened_at:off.happened_at||scene.world_time,
+    basis:off.basis||'narrated',known_by:Array.isArray(off.known_by)?off.known_by:[],
+    causal_basis:off.causal_basis||''});
+  }
  }
  const active=Array.from(threads.values()).filter(t=>t.status==='open');
  const resolved=Array.from(threads.values()).filter(t=>t.status==='resolved');
