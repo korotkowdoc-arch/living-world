@@ -123,9 +123,17 @@ export function offscreenCandidateBrief(ledger,{recentScenes=[],exclude=[],limit
  const recent=recentScenes.map(s=>typeof s==='string'?s:String(s?.body||'')).join('\n').toLocaleLowerCase('ru');
  const year=Number(String(currentTime).slice(0,4))||null;
  const cap=Math.max(0,Math.min(20,Number.isInteger(limit)?limit:14));
- const all=(ledger?.characters||[]).filter(c=>c?.name&&!blocked.has(key(c.name))&&
-  (c.initial?.role||c.initial_role)!=='hero'&&
-  !!(c.state?.goals||c.initial?.goals||c.history?.length)).map(c=>{
+ const all=(ledger?.characters||[]).filter(c=>{
+  if(!c?.name||blocked.has(key(c.name))||(c.initial?.role||c.initial_role)==='hero')return false;
+  const health=String(c.state?.health||'').trim().toLocaleLowerCase('ru');
+  const location=String(c.state?.location||'').trim().toLocaleLowerCase('ru');
+  const goals=String(c.state?.goals||'').trim().toLocaleLowerCase('ru');
+  // Archival/deceased profiles are evidence, not actors who can live offscreen.
+  if(/^(мёртв|мертв|умер|умерла|погиб|погибла|скончал|dead|deceased)/i.test(health))return false;
+  if(/^(умер|умерла|погиб|погибла)/i.test(location))return false;
+  if(/^(не применимо|не установлены|не установлено)(?:[.\s]|$)/i.test(goals))return false;
+  return !!(goals||c.initial?.goals||c.history?.length);
+ }).map(c=>{
   const history=Array.isArray(c.history)?c.history:[];
   const last=history.at(-1);
   const stamp=last?.world_time||c.last_recorded_time||null;
