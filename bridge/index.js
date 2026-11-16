@@ -1,8 +1,8 @@
 import {handleAiRequest} from './ai.js';
 import {extractCompanionChanges,activeLineage,projectCompanion,validateNextEvents} from '../public/world-ledger.mjs';
 import {latestDocumentVersions,buildSourcePreflight,findDocExcerpts} from '../public/reference-documents.mjs';
-import {projectCharacterMemory,actorMemory} from '../public/world-character-memory.mjs';
-import {validateDepthDelta,depthSemanticWarnings,projectWorldDepth,actorDepth,compareWorldBranches,PSYCHOLOGY_ASPECTS,RELATION_DIMENSIONS} from '../public/world-depth.mjs';
+import {projectCharacterMemory,actorMemory,offscreenCandidateBrief} from '../public/world-character-memory.mjs';
+import {validateDepthDelta,validateOffscreenWindow,depthSemanticWarnings,projectWorldDepth,actorDepth,compareWorldBranches,PSYCHOLOGY_ASPECTS,RELATION_DIMENSIONS} from '../public/world-depth.mjs';
 import {RETRO_INDEX_KEY_PREFIX,retroKey,makeRetroIndex,activeRetroMemories,searchRetroMemories,retroIndexCoverage} from '../public/retrospective-index.mjs';
 import {auditNarrativeScene} from '../public/narrative-audit.mjs';
 import {isReplayableCheckpoint,replayFromCheckpoint} from '../public/checkpoint-replay.mjs';
@@ -399,9 +399,11 @@ const subjectiveRecall=object({
 const offscreenEvent=object({
  id:{type:'string',maxLength:80},actor:{type:'string',maxLength:120},
  happened_at:{type:'string',maxLength:32},location:{type:'string',maxLength:200},
- event:{type:'string',maxLength:1200},basis:{type:'string',enum:['narrated','witnessed','reported']},
- evidence:evidenceProof,known_by:{type:'array',maxItems:20,items:{type:'string',maxLength:120}}
-},['id','actor','event','basis','evidence']);
+ event:{type:'string',maxLength:1200},basis:{type:'string',enum:['narrated','witnessed','reported','simulated']},
+ evidence:{type:'string',maxLength:700},causal_basis:{type:'string',maxLength:1200},
+ knowledge_channels:{type:'array',maxItems:20,items:object({person:{type:'string',maxLength:120},via:{type:'string',maxLength:400}},['person','via'])},
+ known_by:{type:'array',maxItems:20,items:{type:'string',maxLength:120}}
+},['id','actor','event','basis']);
 const npcIntention=object({
  id:{type:'string',maxLength:80},actor:{type:'string',maxLength:120},
  plan:{type:'string',maxLength:1100},motive:{type:'string',maxLength:900},
@@ -1034,6 +1036,14 @@ async function appendSceneWithReceipt(env,identity,body,expected){
 async function verifySceneBeforeCommit(env,identity,id,stamp,delta,state){
  const previous=state.scenes?.at(-1)?.world_time||state.world?.genesis_choices?.current_period||null;
  if(previous&&!isNondecreasingStoryTime(previous,stamp))throw Error('Новая сцена откатывает время назад без валидной режиссёрской правки.');
+ validateOffscreenWindow(delta,previous,stamp);
+ if((delta.npc_offscreen||[]).some(e=>e.basis==='simulated')){
+  const full=await companionState(env,identity,id);
+  if(!full.complete)throw Error('Нельзя проверить жизнь NPC: память мира неполна.');
+  const known=new Set([...(full.character_memory||[]).map(c=>String(c.name||'').toLocaleLowerCase('ru')),...(delta.new_characters||[]).map(c=>String(c.name||'').toLocaleLowerCase('ru'))]);
+  for(const e of delta.npc_offscreen){if(e.basis==='simulated'&&!known.has(e.actor.toLocaleLowerCase('ru')))
+   throw Error('Нельзя симулировать неизвестного NPC задним числом: '+e.actor+'. Сначала введи персонажа причинно.');}
+ }
  if((delta.economy||[]).length||(delta.items||[]).length||(delta.new_characters||[]).length){
   const current=await companionState(env,identity,id);
   if(!current.complete)throw Error('Нельзя проверить операции: архив ресурсов неполон. '+(current.reason||''));
@@ -1393,7 +1403,7 @@ async function call(name,args,env,identity) {
     confirmed_offscreen:selected.confirmed_offscreen,
     intended_not_yet_happened:selected.npc_intentions,
     rules:['Учитывай реальные даты и расстояния','Не сообщай герою о неизвестных ему событиях',
-     'Не выдавай намерения NPC за события','Фиксируй совершившееся только если оно действительно прозвучало в валидной художественной сцене',
+     'Не выдавай намерения NPC за события','Новые события NPC, произошедшие между сценами, оформляй как npc_offscreen с basis=simulated, временем, местом, причинной опорой и каналами знания; они не обязаны появляться в художественном тексте',
      'У NPC есть свои цели, препятствия и возможность отказаться, даже если это неудобно сюжету']};
   }
   if(name==='get_memory_review_queue'){
@@ -1637,6 +1647,9 @@ async function call(name,args,env,identity) {
       causal_memory:assets.complete?assets.causal_memory:{complete:false,reason:assets.reason},
       character_memory:assets.complete?{complete:true,profiles:(assets.character_memory||[]).filter(p=>actors.some(name=>name.toLocaleLowerCase('ru')===p.name.toLocaleLowerCase('ru'))),warnings:assets.character_warnings||[]}:{complete:false,reason:assets.reason},
       psychological_memory:assets.complete?{complete:true,...actorDepth(assets.depth_memory,actors)}:{complete:false,reason:assets.reason},
+      npc_autonomy:assets.complete?{complete:true,
+       candidates:offscreenCandidateBrief({characters:assets.character_memory||[]},{recentScenes:(base.recent_scenes||[]).slice(-5),exclude:actors,limit:14}),
+       rule:'Кандидаты — только повод проверить доступное время, цели и обстоятельства NPC, а не доказательство событий. Между двумя сценами живущие вне кадра персонажи вправе реально действовать, ошибаться, встречаться, узнавать новое. Если событие причинно состоялось, внеси npc_offscreen basis=simulated и изменения конкретных NPC в changes.characters с каналами знания; не приписывай Гарри невидимые события. Не создавай событий из прошлого уже сыгранных сцен.'}:{complete:false,reason:assets.reason},
       documents:live?await sourcePreflight(env,identity,id,intent,actors,base,assets):{installed:false,ready:false},
       narrative_checks:['Хронология и точное время','Цели, характер и изменения отношений','Что каждый знает и каким каналом','Травмы, состояние, ресурсы и местонахождение','Какие сцены и ветки аннулированы','Правила, глоссарий и актуальные изменения']}
   }
