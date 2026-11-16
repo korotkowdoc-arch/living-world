@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {projectCharacterMemory,actorMemory,knowledgeHas} from '../public/world-character-memory.mjs';
+import {projectCharacterMemory,actorMemory,knowledgeHas,offscreenCandidateBrief} from '../public/world-character-memory.mjs';
 import {activeLineage} from '../public/world-ledger.mjs';
 const base=[
  {role:'hero',name:'Гарри',goals:'Поступить в школу',knowledge:'Знает только своё детство',location:'Лондон'},
@@ -47,4 +47,23 @@ test('reintroduced known NPC gets warning rather than a second identity',()=>{
  const state=projectCharacterMemory(base,[old]);
  assert.equal(state.characters.length,2);
  assert.equal(state.warnings[0].code,'DUPLICATE_NPC_INTRODUCTION');
+});
+
+
+test('Draco changes offscreen after a long absence without granting Harry his secrets',()=>{
+ const cast=[...base,{role:'npc',name:'Драко Малфой',goals:'Получить независимость от отца',location:'Хогвартс'}];
+ const filler=Array.from({length:40},(_,j)=>({id:'f'+j,world_time:'2015-03',body:'Гарри с Лией гуляли.',changes:{}}));
+ const event={id:'npc',world_time:'2015-04-03',body:'Гарри играл с Уиллом.',changes:{
+  npc_offscreen:[{id:'private',actor:'Драко Малфой',event:'Поссорился с Люциусом',
+   happened_at:'2015-04-02',basis:'simulated',known_by:['Драко Малфой']}],
+  characters:[{name:'Драко Малфой',goals:'Найти собственный способ заработать',
+   learned:[{fact:'Люциус отказался поддержать новую идею',via:'Личная ссора'}]}]}};
+ const ledger=projectCharacterMemory(cast,[...filler,event]);
+ const draco=ledger.characters.find(c=>c.name==='Драко Малфой');
+ assert.equal(draco.state.goals,'Найти собственный способ заработать');
+ assert.ok(draco.history.some(x=>x.type==='offscreen'&&x.event==='Поссорился с Люциусом'));
+ assert.equal(knowledgeHas(ledger,'Драко Малфой','Люциус отказался поддержать новую идею'),true);
+ assert.equal(knowledgeHas(ledger,'Гарри','Люциус отказался поддержать новую идею'),false);
+ const candidates=offscreenCandidateBrief(ledger,{recentScenes:['Гарри с Лией гуляли.']});
+ assert.ok(candidates.some(c=>c.name==='Драко Малфой'));
 });
