@@ -52,6 +52,7 @@ export function replayFromCheckpoint(snapshot,newScenes=[],{
   complete:true,scanned_scenes:scanned,facts:snapshot.causal_facts,
   offscreen_events:snapshot.causal_offscreen_events,
   open_threads:snapshot.open_threads,resolved_threads:snapshot.resolved_threads,
+  managed_threads:snapshot.managed_threads||[],
   warnings:snapshot.causal_warnings||[]
  }});
  const depth=projectWorldDepth(newScenes,{getDelta:read,seed:{

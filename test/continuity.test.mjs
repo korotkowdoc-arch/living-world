@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {parseScenePackage, packSceneNote, makeContinuity, readSceneNote, scenePackagePrompt, validStoryClock} from '../public/continuity.mjs';
 const base = { name:'Мира', role:'npc', knowledge:'Знает о торговле', location:'Лавка', mood:'Спокойна', goals:'Сохранить дело' };
-const p = { scene:'Мира закрыла лавку и отправилась на набережную.', world_time:'1998-09-01T09:00:00', changes:{facts:['Мира закрыла лавку'],open_threads:['Найти пропавший товар'],resolved_threads:[],offscreen_events:['Поставщик уехал'],characters:[{name:'Мира',location:'Набережная',mood:'Тревожится',learned:[{fact:'Поставщик уехал',via:'Лично увидела экипаж'}],beliefs:['Кража связана с конкурентом']}]} };
+const p = { scene:'Мира закрыла лавку и отправилась на набережную.', world_time:'1998-09-01T09:00:00', changes:{facts:['Мира закрыла лавку'],open_threads:[],resolved_threads:[],offscreen_events:['Поставщик уехал'],characters:[{name:'Мира',location:'Набережная',mood:'Тревожится',learned:[{fact:'Поставщик уехал',via:'Лично увидела экипаж'}],beliefs:['Кража связана с конкурентом']}]} };
 test('parse fenced full scene package',()=>{const out=parseScenePackage('```json\n'+JSON.stringify(p)+'\n```');assert.equal(out.scene,p.scene);assert.equal(out.changes.characters[0].learned[0].via,'Лично увидела экипаж');});
 test('reject learning without a channel',()=>{const bad=structuredClone(p);bad.changes.characters[0].learned=[{fact:'Тайна сделки'}];assert.throws(()=>parseScenePackage(JSON.stringify(bad)),/fact и via/);});
 test('reject invalid JSON without silently accepting a partial result',()=>{assert.throws(()=>parseScenePackage('{"scene": "broken'),/JSON/);});
@@ -10,7 +10,8 @@ test('store scene changes in existing note field',()=>{const c=parseScenePackage
 test('plain legacy director notes remain valid and are ignored by change extractor',()=>{assert.equal(readSceneNote('Просто текст заметки'),null);});
 test('active branch excludes invalidated events, resolves exact open threads and keeps personal channels',()=>{
  const d=parseScenePackage(JSON.stringify(p)).changes;
- const accepted={id:'1',prompt_note:packSceneNote(d)};
+ // Old saved scenes may still contain free-text threads; only NEW packets are blocked.
+ const accepted={id:'1',prompt_note:packSceneNote({...d,open_threads:['Найти пропавший товар']})};
  const discarded={id:'2',prompt_note:packSceneNote({facts:['НЕВАЛИДНАЯ ВЕТКА'],open_threads:[],resolved_threads:[],offscreen_events:[],characters:[]})};
  const solved={id:'3',prompt_note:packSceneNote({facts:[],open_threads:[],resolved_threads:['Найти пропавший товар'],offscreen_events:[],characters:[]})};
  const mem=makeContinuity([base],[accepted,solved]);

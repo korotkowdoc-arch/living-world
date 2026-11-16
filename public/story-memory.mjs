@@ -151,7 +151,7 @@ function projectionAt(scenes,characters){
 function sceneRecord(scene){
  const delta=read(scene);
  return {...source(scene),structured:!!readSceneNote(scene.prompt_note),
-  changes:{facts:arr(delta.facts),open_threads:arr(delta.open_threads),
+  changes:{facts:arr(delta.facts),thread_updates:arr(delta.thread_updates),open_threads:arr(delta.open_threads),
    resolved_threads:arr(delta.resolved_threads),offscreen_events:arr(delta.offscreen_events),
    characters:arr(delta.characters),economy:arr(delta.economy),items:arr(delta.items),
    new_characters:arr(delta.new_characters),memories:arr(delta.memories),
@@ -188,6 +188,7 @@ function makeSnapshot({world,branch,lineage,characters,stage,kind,handoff_note='
   character_warnings:people.warnings,depth_warnings:depth.warnings,
   chronology:allScenes,
   open_threads:causal.open_threads,resolved_threads:causal.resolved_threads,
+  managed_threads:causal.managed_threads,
   characters:people.characters.map(c=>({
    name:c.name,origin:c.origin,initial:c.initial,state:c.state,introduced_scene_id:c.introduced_scene_id,
    knowledge:c.knowledge,beliefs:c.beliefs,history:c.history
