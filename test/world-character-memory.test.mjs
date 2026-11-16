@@ -86,3 +86,12 @@ test('preflight shortlist favors persistent cast over 2010 one-offs and rotates 
  assert.notDeepEqual(a.filter(x=>x.name.startsWith('Прохожий')).map(x=>x.name),
   b.filter(x=>x.name.startsWith('Прохожий')).map(x=>x.name));
 });
+
+test('dead archival figures and unsupported unknown goals cannot become active offscreen NPCs',()=>{
+ const ledger={characters:[
+  {name:'Драко Малфой',origin:'baseline',state:{goals:'Учиться и спорить с отцом'},last_recorded_time:'2015-03-17'},
+  {name:'Артур Морроу',origin:'scene',state:{health:'Мёртв.',location:'Умер в 2005 году.',goals:'Не применимо.'},last_recorded_time:'2015-03-27'},
+  {name:'Эллис Вейл',origin:'scene',state:{health:'Неизвестно.',location:'Неизвестно',goals:'Не установлены.'},last_recorded_time:'2015-03-24'}]};
+ const actual=offscreenCandidateBrief(ledger,{currentTime:'2015-03-31',limit:12});
+ assert.deepEqual(actual.map(x=>x.name),['Драко Малфой']);
+});
