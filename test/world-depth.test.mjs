@@ -96,3 +96,43 @@ test('NPC simulation never leaks secret knowledge without a channel',()=>{
  const valid=validateDepthDelta({npc_offscreen:[{...base,knowledge_channels:[{person:'Гарри Поттер',via:'Драко переслал письмо Гарри'}]}]},'Гарри ничего не узнал.');
  assert.equal(valid.npc_offscreen[0].knowledge_channels[0].via,'Драко переслал письмо Гарри');
 });
+
+test('offscreen actors can evolve multidimensional relationships without narrating private meetings to Harry',()=>{
+ const off={id:'private-talk',actor:'Драко Малфой',happened_at:'2015-04-02',
+  event:'Драко встретился с Пэнси и поссорился с ней о письме Люциуса.',
+  location:'Хогвартс',basis:'simulated',known_by:['Драко Малфой'],
+  causal_basis:'Ранее установлен конфликт Драко с семейным влиянием и его самостоятельное общение с Пэнси.'};
+ const delta={
+  npc_offscreen:[off],
+  psychology:[{id:'draco-conflict',basis:'simulated',related_offscreen_id:'private-talk',
+   character:'Драко Малфой',aspect:'inner_conflict',observation:'Хочет независимости, но зависит от семьи.',
+   certainty:'interpretation'}],
+  relationships:[{id:'draco-pansy',basis:'simulated',related_offscreen_id:'private-talk',
+   from:'Драко Малфой',to:'Пэнси Паркинсон',dimension:'irritation',shift:'increased',
+   interpretation:'interpretation',rationale:'Драко разозлился из-за спора.',unresolved:true}]};
+ const text='Гарри и Лия отдыхали и не знали, что происходило у Малфоя.';
+ const parsed=validateDepthDelta(delta,text);
+ assert.equal(parsed.psychology[0].evidence,'');
+ assert.equal(parsed.relationships[0].basis,'simulated');
+ assert.equal(parsed.relationships[0].related_offscreen_id,'private-talk');
+ const ledger=projectWorldDepth([{id:'new',world_time:'2015-04-04',changes:parsed}]);
+ assert.equal(ledger.relationships.find(e=>e.from==='Драко Малфой').dimensions.irritation.shift,'increased');
+ assert.ok(ledger.psychology.some(e=>e.name==='Драко Малфой'));
+ const packet=parseScenePackage(JSON.stringify({scene:text,world_time:'2015-04-04',changes:delta}));
+ assert.equal(packet.changes.relationships[0].basis,'simulated');
+});
+test('no phantom offscreen romance without linked actual autonomous event',()=>{
+ const text='Гарри играл в карты.';
+ const rel={id:'fake',basis:'simulated',related_offscreen_id:'missing',from:'Драко Малфой',
+  to:'Пэнси Паркинсон',dimension:'affection',shift:'increased',
+  interpretation:'interpretation',rationale:'Думает о ней.'};
+ assert.throws(()=>validateDepthDelta({relationships:[rel]},text),/npc_offscreen basis=simulated/);
+ const off={id:'draco',actor:'Драко Малфой',happened_at:'2015-04-02',
+  event:'Сказал Пэнси об отказе отца.',basis:'simulated',causal_basis:'Предыдущий конфликт.'};
+ assert.throws(()=>validateDepthDelta({npc_offscreen:[off],
+  relationships:[{...rel,related_offscreen_id:'draco',from:'Гарри Поттер'}]},text),
+  /совпадающим действующим NPC/);
+ assert.throws(()=>validateDepthDelta({npc_offscreen:[off],
+  psychology:[{id:'mind',basis:'simulated',related_offscreen_id:'draco',character:'Драко Малфой',
+   aspect:'desire',observation:'Наверняка влюбился',certainty:'explicit'}]},text),/интерпретация/);
+});
