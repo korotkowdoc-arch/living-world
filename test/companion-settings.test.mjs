@@ -82,10 +82,15 @@ test('PWA syncs to Supabase; OAuth preflight and world state return those settin
 
 
 test('guidance protects actual autonomous offscreen life and preserves yearly main threat',()=>{
- const guidance=companionGuidance(companionSettings(world,sceneId,'2015-03-31'));
+ const guidance=companionGuidance(companionSettings({...world,name:'Гарри Поттер'},sceneId,'2015-03-31'));
  assert.match(guidance.autonomous_npc_simulation,/npc_offscreen/);
  assert.match(guidance.main_arc,/противники/);
  assert.match(guidance.everyday_life,/свободы/);
  assert.match(guidance.y1_current_focus,/Философский камень/);
  assert.match(guidance.institutional_boundaries,/Студенты/);
+});
+
+test('Stone Y1 focus never leaks into later years or unrelated worlds',()=>{
+ assert.equal(companionGuidance(companionSettings({...world,name:'Другой мир'},sceneId,'2015-03-31')).y1_current_focus,null);
+ assert.equal(companionGuidance(companionSettings({...world,name:'Гарри Поттер'},sceneId,'2016-09-01')).y1_current_focus,null);
 });
