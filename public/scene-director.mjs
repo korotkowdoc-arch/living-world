@@ -118,13 +118,26 @@ export function sceneDirectorBrief({
  if(!time.source_ready)warnings.push('Нет проверенного календаря Year Anchors. Не заменяй его воспоминанием о каноне.');
  if(report.coverage?.untagged_scenes)warnings.push('Есть неразмеченные эпизоды. Их жанр, романтика и развитие сюжета не известны анализатору.');
  if(streak.count>=3)warnings.push('Подряд '+streak.count+' сцены с одним фокусом; проверь самостоятельные процессы и отношения.');
+ // A presentation-only variety pass. Review every independent causal category
+ // even when ten active mysteries would otherwise occupy the entire prompt.
+ // This does NOT rank or select the next scene, and doesn't create events.
+ const review=[],seenKinds=new Set(),seenIds=new Set();
+ for(const candidate of opportunities){
+  if(seenKinds.has(candidate.kind))continue;
+  seenKinds.add(candidate.kind);seenIds.add(candidate.id);review.push(candidate);
+ }
+ for(const candidate of opportunities){
+  if(review.length>=16)break;
+  if(seenIds.has(candidate.id))continue;
+  seenIds.add(candidate.id);review.push(candidate);
+ }
  return {version:2,world_name:txt(world?.name)||null,current_clock:clock||null,
   complete:!!complete,calendar:time,pacing:report,
   actors_reviewed:actors.filter(a=>a.motive_known).length,
   active_threads:active.length,paused_threads:paused.length,
   npc_life:npcLife||{complete:false,reason:'Полная память самостоятельной жизни NPC недоступна.'},
   npc_schedule:npcSchedule||{complete:false,reason:'Подтверждённое расписание недоступно.'},
-  opportunities:opportunities.slice(0,16),warnings,
+  opportunities:review.slice(0,16),warnings,
   selection_policy:'Нет числовых весов, квот и автоматического выбора сюжета. Возможности не становятся сценами без причинной инициативы, времени и доступа. Непрерывный разговор, бой или интимный эпизод не разрывается ради переключения темы.'};
 }
 export function sceneDirectorGuidance(director=null){
