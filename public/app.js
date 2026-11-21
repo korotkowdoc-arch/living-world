@@ -1,6 +1,9 @@
 import {narrativePacingBrief} from './narrative-pacing.mjs';
 import {calendarDirectorBrief} from './calendar-director.mjs';
 import {sceneDirectorBrief} from './scene-director.mjs';
+import {projectCharacterMemory} from './world-character-memory.mjs';
+import {projectWorldDepth} from './world-depth.mjs';
+import {npcLifeBrief} from './npc-life.mjs';
 import {escapeHTML as esc, cleanText, parseGenesis, genesisPrompt, scenePrompt, revisionPrompt, demoGenesis, demoScene, CHARACTER_FIELDS, QUICK_GENESIS_STEPS, quickGenesisPrompt} from './logic.mjs';
 import {parseScenePackage,packSceneNote,readSceneNote,makeContinuity,compactMemory,scenePackagePrompt,validStoryClock,isNondecreasingStoryTime} from './continuity.mjs';
 import {simulationPrompt,SIMULATION_SPANS} from './simulation.mjs';
@@ -264,13 +267,17 @@ function uiSceneDirector(w){
  const clock=storyClock(w);
  const complete=state.memoryScenes.length<200;
  const memory=makeContinuity(state.characters,state.memoryScenes,state.legacyAudit||null);
+ const currentGet=s=>readSceneNote(s.prompt_note)?.delta||{};
+ const characters=projectCharacterMemory(state.characters,state.memoryScenes,{getDelta:currentGet});
+ const depth=projectWorldDepth(state.memoryScenes,{getDelta:currentGet});
+ const life=npcLifeBrief({characters:characters.characters,depth,complete});
  const pacing=narrativePacingBrief(state.memoryScenes,{complete,currentTime:clock});
  const sources=typeof w?.timeline==='string'&&w.timeline.trim()
   ?[{category:'world_timeline',content:w.timeline,reference:'world.timeline'}]:[];
  return sceneDirectorBrief({world:w,clock,scenes:state.memoryScenes,pacing,
   calendar:calendarDirectorBrief({sources,scenes:state.memoryScenes,clock,complete}),
   causalMemory:{managed_threads:memory.managed_threads||[]},
-  characters:state.characters,complete});
+  characters:characters.characters,npcLife:life,complete});
 }
 
 function renderNarrativePacingPanel(){
@@ -293,6 +300,9 @@ function renderNarrativePacingPanel(){
   <h3 class="section-title">Календарные окна</h3>
   <p class="hint">${x(director.calendar.source_ready?'Источники календаря обнаружены. Даты — окна проверки, а не предрешённые сцены.':'В поле timeline нет структурированного Year Anchors: список календаря нельзя восстановить по памяти о каноне.')}</p>
   ${director.calendar.review.length?`<ul>${director.calendar.review.slice(0,5).map(e=>`<li><b>${x(e.id)}</b> · ${x(e.window)} · ${x(e.title)} <span class="hint">(${x(e.state)})</span></li>`).join('')}</ul>`:''}
+  <h3 class="section-title">Самостоятельная жизнь NPC</h3>
+  <p class="hint">Намерение не равно совершённому действию; открытые планы могли устареть. Это проверка причин, а не автоматическое назначение следующего эпизода.</p>
+  ${director.npc_life.actor_profiles?.length?`<ul>${director.npc_life.actor_profiles.slice(0,6).map(c=>`<li><b>${x(c.name)}</b>: ${x(c.goals||'цель уточняется')}${c.pending_plans?.length?' · '+x(c.pending_plans[0].state)+': '+x(c.pending_plans[0].plan):''}${c.social_connections?.length?' · социальных связей в журнале: '+c.social_connections.length:''}</li>`).join('')}</ul>`:'<p class="hint">Ещё нет подтверждённых личных событий.</p>'}
   <h3 class="section-title">Возможности следующей сцены</h3>
   <ul>${director.opportunities.slice(0,7).map(e=>`<li><b>${x(e.title)}</b> · ${x(e.reason)}</li>`).join('')}</ul>
   ${btn('director-copy','Скопировать запрос полного режиссёрского обзора')}
