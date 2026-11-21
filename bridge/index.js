@@ -692,6 +692,15 @@ function activeCheckpoint(doc,ancestorIds){
  return ['LW_STATE_CHECKPOINT_V1',CHAT_CHECKPOINT_FORMAT].includes(body?.format)&&
   ancestorIds instanceof Set&&ancestorIds.has(String(body.source_head).toLowerCase());
 }
+function buildDirectorFor(base,assets,sourceContext,npcCandidates=[]){
+ const cal=sourceContext?.anchor_calendar||calendarDirectorBrief({
+  sources:base?.world?.timeline?[{category:'world_timeline',content:base.world.timeline,reference:'world.timeline'}]:[],
+  clock:base?.world_time||'',complete:false});
+ return sceneDirectorBrief({world:base?.world||{},clock:base?.world_time||'',
+  pacing:assets?.narrative_pacing||null,calendar:cal,
+  causalMemory:assets?.causal_memory||null,characters:base?.characters||[],
+  npcCandidates,complete:assets?.complete===true});
+}
 async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,assets=null){
  const docStore=await sourceDocList(env,identity,id,{full:true});
  if(!docStore.installed)return {installed:false,ready:false,reason:docStore.message,
@@ -722,6 +731,13 @@ async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,ass
   }
  }
  const ref=buildSourcePreflight(yearReconciliation.documents.filter(d=>d.doc_key!==STAGE_CONTROL_KEY&&!d.doc_key?.startsWith(RETRO_INDEX_KEY_PREFIX)),{intent,actors,maxExcerptChars:34000});
+ const anchorSources=yearReconciliation.documents.filter(d=>d.category==='year_anchors')
+  .map(d=>({category:'year_anchors',content:d.content||'',reference:d.doc_key+'@'+d.revision}));
+ if(typeof base?.world?.timeline==='string'&&base.world.timeline.trim())
+  anchorSources.push({category:'world_timeline',content:base.world.timeline,reference:'world.timeline'});
+ const anchorCalendar=calendarDirectorBrief({sources:anchorSources,clock:base?.world_time||'',
+  recorded:assets?.calendar_history_complete?assets.calendar_history:null,
+  complete:!!assets?.complete&&assets?.calendar_history_complete===true});
  const kinds=new Set(ref.manifest.map(d=>d.category));
  const findings=[];
  for(const issue of yearReconciliation.warnings){
@@ -739,6 +755,7 @@ async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,ass
  if(assets?.complete===false)findings.push({severity:'warning',code:'INCOMPLETE_ASSET_MEMORY',message:'Состояние денег и предметов не восстановлено полностью.'});
  if(assets?.issues?.length)findings.push({severity:'warning',code:'LEDGER_ISSUES',message:'В учёте ресурсов обнаружены несогласованные операции: '+assets.issues.length});
  return {installed:true,ready:!!base&&!findings.some(f=>f.severity==='warning'),findings,
+  anchor_calendar:anchorCalendar,
   source_hierarchy:[
    'PROJECT CORE RULES: обязательные глобальные правила, если не противоречат более поздним явным режиссёрским изменениям правил.',
    'Валидные сыгранные сцены и CURRENT STATE: доказанные события; отменённый хвост никогда не существовал.',
@@ -961,6 +978,7 @@ async function companionState(env,identity,id){
      last_recorded_time:c.history.at(-1)?.world_time||null,last_event_type:c.history.at(-1)?.type||null,history_count:c.history.length})),
     character_warnings:p.characters.warnings,
     causal_memory:causalSummary(p.causality),depth_memory:p.depth,
+    calendar_history:[],calendar_history_complete:false,
     narrative_pacing:{complete:false,reason:'После checkpoint нельзя достоверно восстановить распределение внимания для всего окна сцен.'},
     memory_provenance:{verified_source_head:true,
      checkpoint:recovered.selected.doc.doc_key,
@@ -986,6 +1004,7 @@ async function companionState(env,identity,id){
    initial_role:c.initial?.role||'npc',last_recorded_time:c.history.at(-1)?.world_time||null,
    last_event_type:c.history.at(-1)?.type||null,history_count:c.history.length})),
   character_warnings:people.warnings,causal_memory:causalSummary(causal),depth_memory:depth,
+  calendar_history:projectCalendarHistory(lineage),calendar_history_complete:true,
   narrative_pacing:narrativePacingBrief(lineage,{complete:true,currentTime:lineage.at(-1)?.world_time||null,managedThreads:causal.managed_threads})};
 }
 async function getRevisionSource(env,identity,id,targetId){
