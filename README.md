@@ -67,6 +67,13 @@ MIT (see `LICENSE`).
 
 Read [docs/AUTOMATION.md](docs/AUTOMATION.md). The private Worker generates and atomically saves a single scene or simulated time interval directly in Supabase; rapid character genesis is generated and offered for approval. This feature requires a configured OpenAI API account and server-side key. No credentials are embedded in public Pages code.
 
+## Literary playtest: genuine 30-scene acceptance
+
+The [30-scene literary playtest protocol](docs/LITERARY_PLAYTEST_30.md) distinguishes **30 genuinely saved ChatGPT scenes** from synthetic unit-test fixtures.
+- A read-only `get_literary_playtest_report` inspects the last 30 saved scenes **on the active branch** and produces evidence-bound distribution metrics and review questions. It does not create scenes, read invalidated branches or call the OpenAI API.
+- It explicitly reports missing annotations as unknown; no automatic literary quality score is claimed.
+- Actual literary playtesting must still be performed in a clean world, with human review after the saved sequence. Running CI tests does **not** complete this acceptance.
+
 ## NPC Scheduling V1 — meetings, availability and travel uncertainty
 
 The [NPC Scheduling V1](docs/NPC_SCHEDULING_V1.md) module tracks only **source-confirmed, exact one-off appointments** in the active story branch. It distinguishes tentative proposals from confirmed commitments and requires evidence to cancel, complete, confirm or reschedule them.
