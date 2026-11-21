@@ -552,6 +552,13 @@ const tools = [
   { name:'get_world_depth',description:'Глубокая психология, история интерпретаций, направленные многомерные отношения, личные переосмысления и подтверждённые события NPC. Из ВСЕЙ действующей ветки.',inputSchema:object({
     world_id:uuid,actor_names:{type:'array',maxItems:15,items:{type:'string',maxLength:120}}
   },['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_npc_meeting_feasibility',description:'Только чтение: проверь пересекающиеся договорённости и неизвестные поездки для конкретного точного интервала. Не утверждай, что NPC свободен или согласен.',inputSchema:object({
+   world_id:uuid,
+   participants:{type:'array',minItems:1,maxItems:12,items:{type:'string',minLength:1,maxLength:120}},
+   start_at:{type:'string',minLength:16,maxLength:16},
+   end_at:{type:'string',minLength:16,maxLength:16},
+   location:{type:'string',maxLength:240}
+  },['world_id','participants','start_at','end_at']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_npc_life',description:'Режиссёрский обзор автономности NPC, действительных намерений, их состояний, источников и направленных отношений. Только чтение текущей ветки. Планы не являются событиями.',inputSchema:object({world_id:uuid},['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_npc_offscreen_brief',description:'Без записи и выдумывания событий: доступные цели, знания, положение NPC и планы, которые ЕЩЁ НЕ произошли. Перед внекадровой сценой сверяй эти ограничения.',inputSchema:object({
     world_id:uuid,actor_names:{type:'array',maxItems:12,items:{type:'string',maxLength:120}}
@@ -1503,10 +1510,20 @@ async function call(name,args,env,identity) {
     ...selected,all_relationships_count:depth.relationships.length,
     warning:'Интерпретации и противоречивые чувства остаются субъективными. Не называй их объективными фактами.'};
   }
+  if(name==='get_npc_meeting_feasibility'){
+   const assets=live?await companionState(env,identity,id):{complete:false,reason:'Демо без проверенной памяти.'};
+   const base=branchState(live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState(),mode);
+   const meeting=npcMeetingFeasibility({characters:assets.character_memory||base.characters||[],
+    depth:assets.depth_memory||{},participants:args.participants,
+    start_at:args.start_at,end_at:args.end_at,location:args.location||'',
+    clock:base.world_time||'',complete:assets.complete===true&&assets.npc_schedule?.complete===true});
+   return {mode,world_id:id,branch_id:assets.branch_id||null,head_scene_id:assets.head_scene_id||null,meeting};
+  }
   if(name==='get_npc_life'){
    const assets=live?await companionState(env,identity,id):{complete:false,reason:'Демо не является подтверждённой историей.'};
    return {mode,world_id:id,branch_id:assets.branch_id||null,head_scene_id:assets.head_scene_id||null,
-    npc_life:assets.npc_life||{complete:false,reason:assets.reason||'Память недоступна.'}};
+    npc_life:assets.npc_life||{complete:false,reason:assets.reason||'Память недоступна.'},
+    npc_schedule:assets.npc_schedule||{complete:false,reason:'Расписание недоступно.'}};
   }
   if(name==='get_npc_offscreen_brief'){
    if(!live)throw Error('Нельзя строить жизнь NPC из демоданных.');
@@ -1783,6 +1800,7 @@ async function call(name,args,env,identity) {
       npc_autonomy:assets.complete?{complete:true,
        candidates:npcCandidates,
        live_profiles:assets.npc_life||{complete:false},
+       schedule:assets.npc_schedule||{complete:false},
        rule:'Кандидаты — только повод проверить доступное время, цели и обстоятельства NPC, а не доказательство событий. Между двумя сценами живущие вне кадра персонажи вправе реально действовать, ошибаться, встречаться, узнавать новое. Если событие причинно состоялось, внеси npc_offscreen basis=simulated и изменения конкретных NPC в changes.characters с каналами знания; не приписывай Гарри невидимые события. Не создавай событий из прошлого уже сыгранных сцен.'}:{complete:false,reason:assets.reason},
       documents:docs,
       narrative_checks:['Хронология и точное время','Цели, характер и изменения отношений','Что каждый знает и каким каналом','Травмы, состояние, ресурсы и местонахождение','Какие сцены и ветки аннулированы','Правила, глоссарий и актуальные изменения']}
