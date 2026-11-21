@@ -144,7 +144,7 @@ export function calendarDirectorBrief({sources=[],scenes=[],recorded=null,clock=
    else state='window_review';
   }else if(a.precision==='relative'){
    const no=Number(a.id.slice(3)),preceding=a.id.slice(0,3)+pad(no-1);
-   state=no>1&&statuses.has(preceding)?'dependency_ready':'dependency_review';
+   state=no>1&&['occurred','altered'].includes(statuses.get(preceding)?.outcome)?'dependency_ready':'dependency_review';
   }
   return {...a,state,recorded:recorded||null};
  });
