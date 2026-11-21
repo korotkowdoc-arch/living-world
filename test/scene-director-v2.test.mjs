@@ -46,6 +46,23 @@ test('parser takes calendar windows only from an explicit source and preserves p
  assert.equal(parseAnchorCalendar([{category:'other',content:anchors}]).anchors.length,0);
 });
 
+test('half-month deadlines remain windows and relative follow-up needs a played predecessor',()=>{
+ const parsed=parseAnchorCalendar([{category:'year_anchors',reference:'test@1',
+  content:'Y1: 1998–1999\\nВторая половина июля 1998 | Y1-01 | Приглашение | Старт\\n'+
+   'Январь–первая половина февраля | Y1-09 | Зимняя линия | Окно'}]);
+ assert.equal(parsed.anchors.find(a=>a.id==='Y1-01').start,'1998-07-16');
+ assert.equal(parsed.anchors.find(a=>a.id==='Y1-01').end,'1998-07-31');
+ assert.equal(parsed.anchors.find(a=>a.id==='Y1-09').end,'1999-02-15');
+ const before=calendarDirectorBrief({sources:srcs,clock:'1999-06-16',complete:true});
+ assert.equal(before.review.some(x=>x.id==='Y1-13'),false);
+ const after=calendarDirectorBrief({sources:srcs,clock:'1999-06-16',complete:true,
+  recorded:[{id:'Y1-12',outcome:'occurred',scene_id:'x'}]});
+ assert.ok(after.review.some(x=>x.id==='Y1-13'&&x.state==='dependency_ready'));
+ const unavailable=calendarDirectorBrief({sources:srcs,clock:'1999-06-16',complete:true,
+  recorded:[{id:'Y1-12',outcome:'unavailable',scene_id:'x'}]});
+ assert.equal(unavailable.review.some(x=>x.id==='Y1-13'),false);
+});
+
 test('calendar review does not invent a played troll or impose a past missed anchor',()=>{
  const oct=calendarDirectorBrief({sources:srcs,clock:'1998-10-31',complete:true});
  assert.ok(oct.review.some(a=>a.id==='Y1-06'&&a.state==='window_review'));
