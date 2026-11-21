@@ -127,9 +127,9 @@ function storyInterval(v){
  const start=dateText(year,month,day||1),end=dateText(year,month,day||lastDay(year,month));
  return start&&end?{start,end,precision:day?'day':'month'}:null;
 }
-export function calendarDirectorBrief({sources=[],scenes=[],clock='',complete=false,limit=18}={}){
+export function calendarDirectorBrief({sources=[],scenes=[],recorded=null,clock='',complete=false,limit=18}={}){
  const parsed=parseAnchorCalendar(sources),current=storyInterval(clock);
- const historical=projectCalendarHistory(scenes);
+ const historical=Array.isArray(recorded)?recorded:projectCalendarHistory(scenes);
  const statuses=new Map(historical.map(u=>[u.id,u]));
  const rows=parsed.anchors.map(a=>{
   const recorded=statuses.get(a.id);
