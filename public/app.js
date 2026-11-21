@@ -1,8 +1,6 @@
 import {narrativePacingBrief} from './narrative-pacing.mjs';
 import {calendarDirectorBrief} from './calendar-director.mjs';
 import {sceneDirectorBrief} from './scene-director.mjs';
-import {projectCharacterMemory} from './world-character-memory.mjs';
-import {projectWorldDepth} from './world-depth.mjs';
 import {npcLifeBrief} from './npc-life.mjs';
 import {escapeHTML as esc, cleanText, parseGenesis, genesisPrompt, scenePrompt, revisionPrompt, demoGenesis, demoScene, CHARACTER_FIELDS, QUICK_GENESIS_STEPS, quickGenesisPrompt} from './logic.mjs';
 import {parseScenePackage,packSceneNote,readSceneNote,makeContinuity,compactMemory,scenePackagePrompt,validStoryClock,isNondecreasingStoryTime} from './continuity.mjs';
