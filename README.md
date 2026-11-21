@@ -67,6 +67,15 @@ MIT (see `LICENSE`).
 
 Read [docs/AUTOMATION.md](docs/AUTOMATION.md). The private Worker generates and atomically saves a single scene or simulated time interval directly in Supabase; rapid character genesis is generated and offered for approval. This feature requires a configured OpenAI API account and server-side key. No credentials are embedded in public Pages code.
 
+## NPC Life V1 — autonomous goals and multidimensional relationships
+
+NPC Life V1 turns current, valid-branch character changes and directed social history into a source-bound optional Director overview; see [NPC Life V1](docs/NPC_LIFE_V1.md).
+- `npc_intentions` remain **plans, not offscreen actions**; their lifecycle is tracked by optional, source-verified `npc_plan_updates`.
+- Deceased actors are never suggested as autonomous candidates. Plan completion requires evidence from the scene or confirmed NPC offscreen event; no stale plans are silently completed.
+- Relationship dimensions remain directed and independently recorded: affection, attraction, trust, irritation, resentment, boundaries, etc. No relationship scores or romance quotas.
+- Manual ChatGPT prompts and preflight use current character state, not just genesis baselines. Hidden PWA Director view shows goals/plans/links on request.
+- MCP exposes read-only `get_npc_life` after deployment and tool-list refresh. No background simulation and no extra OpenAI API calls.
+
 ## Scene Director V2 — calendar and next-scene review
 
 Scene Director V2 is a **read-only causal review**, integrated into scene preflight and the collapsed Director panel. It does not choose the next scene by score or force canonical participants or outcomes.
