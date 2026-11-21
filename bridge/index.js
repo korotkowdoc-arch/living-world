@@ -10,6 +10,7 @@ import {validateCalendarUpdates,projectCalendarHistory,calendarDirectorBrief} fr
 import {sceneDirectorBrief,sceneDirectorGuidance} from '../public/scene-director.mjs';
 import {npcLifeBrief,validateNpcPlanTransitions} from '../public/npc-life.mjs';
 import {validateNpcScheduleTransitions,npcScheduleBrief,npcMeetingFeasibility} from '../public/npc-schedule.mjs';
+import {literaryPlaytestReport} from '../public/literary-playtest.mjs';
 import {isReplayableCheckpoint,replayFromCheckpoint} from '../public/checkpoint-replay.mjs';
 import {parseCheckpointDoc} from '../public/story-memory.mjs';
 import {savedSceneStatus} from '../public/save-receipt.mjs';
@@ -552,6 +553,7 @@ const tools = [
   { name:'get_world_depth',description:'Глубокая психология, история интерпретаций, направленные многомерные отношения, личные переосмысления и подтверждённые события NPC. Из ВСЕЙ действующей ветки.',inputSchema:object({
     world_id:uuid,actor_names:{type:'array',maxItems:15,items:{type:'string',maxLength:120}}
   },['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_literary_playtest_report',description:'Прочитай 30 действительно сохранённых сцен действующей ветки: темп, отношения, календарь, инициативы NPC и пробелы разметки. Ничего не генерирует, не записывает и не присваивает художественный вердикт.',inputSchema:object({world_id:uuid},['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_npc_meeting_feasibility',description:'Только чтение: проверь пересекающиеся договорённости и неизвестные поездки для конкретного точного интервала. Не утверждай, что NPC свободен или согласен.',inputSchema:object({
    world_id:uuid,
    participants:{type:'array',minItems:1,maxItems:12,items:{type:'string',minLength:1,maxLength:120}},
@@ -1509,6 +1511,17 @@ async function call(name,args,env,identity) {
     source_head:full.state.branch.head_scene_id,scanned_scenes:depth.scanned_scenes,
     ...selected,all_relationships_count:depth.relationships.length,
     warning:'Интерпретации и противоречивые чувства остаются субъективными. Не называй их объективными фактами.'};
+  }
+  if(name==='get_literary_playtest_report'){
+   if(!live)return {mode,world_id:id,ready_for_human_review:false,
+    reason:'Демонстрационные сцены не являются литературным прогоном в реальном мире.'};
+   const full=await loadFullWorldLineage(env,identity,id);
+   if(!full.complete)return {mode,world_id:id,ready_for_human_review:false,
+    reason:'Нельзя подтвердить целиком действующую ветку: '+full.reason};
+   const report=literaryPlaytestReport(full.lineage,{
+    getDelta:s=>readSceneNote(s.prompt_note)?.delta||{},complete:true,required:30});
+   return {mode,world_id:id,branch_id:full.state.branch.id,
+    head_scene_id:full.state.branch.head_scene_id,report};
   }
   if(name==='get_npc_meeting_feasibility'){
    const assets=live?await companionState(env,identity,id):{complete:false,reason:'Демо без проверенной памяти.'};
