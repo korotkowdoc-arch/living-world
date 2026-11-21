@@ -38,7 +38,7 @@ test('director sees a repeated investigation and meaningful areas neglected, not
  assert.deepEqual(result.underrepresented_review,['main','relationship','character','everyday']);
  assert.ok(result.signals.some(s=>s.code==='SINGLE_THREAD_SPOTLIGHT'));
  assert.ok(result.signals.some(s=>s.code==='INVESTIGATION_STALLED'&&s.thread_id==='lia-record'));
- assert.match(narrativePacingGuidance(result),/не создавай зацепку/);
+ assert.match(narrativePacingGuidance(result),/Не придумывай зацепку/);
  assert.match(narrativePacingGuidance(result),/не назначай обязательный секс/);
 });
 
