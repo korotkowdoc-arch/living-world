@@ -9,6 +9,7 @@ import {validateNarrativeBeats,narrativePacingBrief,narrativePacingGuidance} fro
 import {validateCalendarUpdates,projectCalendarHistory,calendarDirectorBrief} from '../public/calendar-director.mjs';
 import {sceneDirectorBrief,sceneDirectorGuidance} from '../public/scene-director.mjs';
 import {npcLifeBrief,validateNpcPlanTransitions} from '../public/npc-life.mjs';
+import {validateNpcScheduleTransitions,npcScheduleBrief,npcMeetingFeasibility} from '../public/npc-schedule.mjs';
 import {isReplayableCheckpoint,replayFromCheckpoint} from '../public/checkpoint-replay.mjs';
 import {parseCheckpointDoc} from '../public/story-memory.mjs';
 import {savedSceneStatus} from '../public/save-receipt.mjs';
@@ -424,6 +425,19 @@ const npcIntention=object({
  plan:{type:'string',maxLength:1100},motive:{type:'string',maxLength:900},
  obstacle:{type:'string',maxLength:900},evidence:evidenceProof
 },['id','actor','plan','motive','evidence']);
+const npcScheduleUpdate=object({
+ id:{type:'string',minLength:1,maxLength:80},
+ action:{type:'string',enum:['create','confirm','reschedule','cancel','complete']},
+ actor:{type:'string',minLength:1,maxLength:120},
+ reason:{type:'string',minLength:1,maxLength:900},
+ basis:{type:'string',enum:['scene','offscreen']},
+ evidence:{type:'string',maxLength:700},
+ related_offscreen_id:{type:'string',maxLength:80},
+ participants:{type:'array',maxItems:12,items:{type:'string',maxLength:120}},
+ start_at:{type:'string',maxLength:16},end_at:{type:'string',maxLength:16},
+ location:{type:'string',maxLength:240},purpose:{type:'string',maxLength:650},
+ state:{type:'string',enum:['tentative','confirmed']}
+},['id','action','actor','reason']);
 const npcPlanUpdate=object({
  intention_id:{type:'string',minLength:1,maxLength:80},actor:{type:'string',minLength:1,maxLength:120},
  status:{type:'string',enum:['active','paused','blocked','completed','abandoned','superseded']},
@@ -464,6 +478,7 @@ const changes = object({
   npc_offscreen:{type:'array',maxItems:15,items:offscreenEvent},
   npc_intentions:{type:'array',maxItems:20,items:npcIntention},
   npc_plan_updates:{type:'array',maxItems:20,items:npcPlanUpdate},
+  npc_schedule_updates:{type:'array',maxItems:12,items:npcScheduleUpdate},
   economy:{type:'array',items:economic,maxItems:35},items:{type:'array',items:itemChange,maxItems:40},new_characters:{type:'array',items:emergingCharacter,maxItems:15},
   characters:{type:'array', maxItems:30, items:object({
     name:{type:'string'}, ...fields, beliefs:strings,
@@ -710,7 +725,8 @@ function buildDirectorFor(base,assets,sourceContext,npcCandidates=[]){
  return sceneDirectorBrief({world:base?.world||{},clock:base?.world_time||'',
   pacing:assets?.narrative_pacing||null,calendar:cal,
   causalMemory:assets?.causal_memory||null,characters:assets?.character_memory||base?.characters||[],
-  npcCandidates,npcLife:assets?.npc_life||null,complete:assets?.complete===true});
+  npcCandidates,npcLife:assets?.npc_life||null,npcSchedule:assets?.npc_schedule||null,
+  complete:assets?.complete===true});
 }
 async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,assets=null){
  const docStore=await sourceDocList(env,identity,id,{full:true});
@@ -990,6 +1006,9 @@ async function companionState(env,identity,id){
     character_warnings:p.characters.warnings,
     causal_memory:causalSummary(p.causality),depth_memory:p.depth,
     npc_life:npcLifeBrief({characters:p.characters.characters,depth:p.depth,complete:true}),
+    npc_schedule:npcScheduleBrief({characters:p.characters.characters,depth:p.depth,
+      clock:data.scenes?.at(-1)?.world_time||data.world?.clock_start||'',
+      complete:Array.isArray(p.depth.npc_schedule_updates)}),
     calendar_history:[],calendar_history_complete:false,
     narrative_pacing:{complete:false,reason:'После checkpoint нельзя достоверно восстановить распределение внимания для всего окна сцен.'},
     memory_provenance:{verified_source_head:true,
@@ -1017,6 +1036,8 @@ async function companionState(env,identity,id){
    last_event_type:c.history.at(-1)?.type||null,history_count:c.history.length})),
   character_warnings:people.warnings,causal_memory:causalSummary(causal),depth_memory:depth,
   npc_life:npcLifeBrief({characters:people.characters,depth,complete:true}),
+  npc_schedule:npcScheduleBrief({characters:people.characters,depth,
+    clock:lineage.at(-1)?.world_time||data.world?.clock_start||'',complete:true}),
   calendar_history:projectCalendarHistory(lineage),calendar_history_complete:true,
   narrative_pacing:narrativePacingBrief(lineage,{complete:true,currentTime:lineage.at(-1)?.world_time||null,managedThreads:causal.managed_threads})};
 }
@@ -1122,6 +1143,14 @@ async function verifySceneBeforeCommit(env,identity,id,stamp,delta,state){
   validateThreadTransitions(resource.causal_memory?.managed_threads||[],delta.thread_updates);
  }
 
+ if((delta.npc_schedule_updates||[]).length){
+  const resource=await companionState(env,identity,id);
+  if(!resource.complete)throw Error('Нельзя проверить расписание NPC: полная память недоступна.');
+  if(!resource.npc_schedule?.complete)
+   throw Error('Нельзя проверить расписание NPC: checkpoint не содержит проверяемого архива встреч.');
+  validateNpcScheduleTransitions(resource.depth_memory||{},delta.npc_schedule_updates,
+   [...(resource.character_memory||[]),...(delta.new_characters||[])],stamp);
+ }
  if((delta.npc_plan_updates||[]).length){
   const resource=await companionState(env,identity,id);
   if(!resource.complete)throw Error('Нельзя изменить план NPC: полный журнал недоступен.');
