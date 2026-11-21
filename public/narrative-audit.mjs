@@ -19,7 +19,7 @@ export function auditNarrativeScene({scene='',world_time='',previous_time='',cha
   issues.push(issue('TIME_REGRESSION','error','Время новой сцены раньше уже сыгранной.'));
  try{validateNarrativeBeats(changes.narrative_beats,body);}
  catch(e){issues.push(issue('INVALID_NARRATIVE_BEATS','error',e.message));}
- try{validateCompanionDelta(changes);
+ try{validateCompanionDelta(changes);}
  catch(e){issues.push(issue('INVALID_RESOURCES','error',e.message));}
  try{validateSceneMemories(changes.memories,body);}
  catch(e){issues.push(issue('UNVERIFIED_MEMORY_QUOTE','error',e.message));}
