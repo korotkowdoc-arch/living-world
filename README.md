@@ -67,6 +67,17 @@ MIT (see `LICENSE`).
 
 Read [docs/AUTOMATION.md](docs/AUTOMATION.md). The private Worker generates and atomically saves a single scene or simulated time interval directly in Supabase; rapid character genesis is generated and offered for approval. This feature requires a configured OpenAI API account and server-side key. No credentials are embedded in public Pages code.
 
+## Game System V1.1 — narrative pacing without extra API calls
+
+The app now has an evidence-bound **narrative pacing analyzer**, documented in [GAME SYSTEM V1.1](docs/GAME_SYSTEM_V1_1.md). It highlights repeated investigation scenes, reviews calendar and neglected relationship/life directions, and lets investigations pause when no new source exists. It is **not** a quota system: important continuous scenes and independent NPC agency take precedence.
+
+- Manual ChatGPT scene prompts and time-skip prompts include hidden editorial pacing rules; no additional model request is made.
+- New scene packages optionally include `changes.narrative_beats` with a literal quotation from the saved scene. Old scenes remain **unclassified**, not silently interpreted.
+- OAuth `get_scene_preflight`, `get_story_context` and `get_world_state` expose `narrative_pacing` and `narrative_guidance`. The separate read-only `get_narrative_pacing` is an **on-demand director view**; the literary interface stays uncluttered.
+- Existing world history and alternative branches are never migrated or rewritten. To restart the Harry Potter AU, create a new world and select only its source documents, not the old played Y1.
+- Deploy the updated bridge and refresh its OAuth tool list to use the new director command. Subscription-first manual scenes still work without an OpenAI API key.
+- These are evidence-linked advisory warnings, not a guarantee that the language model will always choose the perfect next scene.
+
 ## Primary mode — ChatGPT + companion state
 
 Long-form scenes are authored in ChatGPT on the user's subscription. **LIVING WORLD is the archive and causal ledger**, not a requirement to manually copy the text. The OAuth MCP bridge now exposes read tools for world state, active-branch history and `get_companion_state`, and a user-approved `save_scene_package` write tool. The live Worker must advertise `writes_enabled:true`; the separate OpenAI API gateway remains strictly optional and is not the primary user journey.
