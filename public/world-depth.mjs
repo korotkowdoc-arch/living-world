@@ -5,6 +5,7 @@
  */
 import {projectCausalMemory} from './world-causality.mjs';
 import {projectCharacterMemory} from './world-character-memory.mjs';
+import {validateNpcPlanUpdates} from './npc-life.mjs';
 export const PSYCHOLOGY_ASPECTS=Object.freeze(['trait','value','fear','desire','habit','boundary','coping','trigger','self_image','inner_conflict','motivation']);
 export const RELATION_DIMENSIONS=Object.freeze(['trust','respect','affection','irritation','fear','attraction','loyalty','resentment','comfort','jealousy','solidarity','distance']);
 export const RELATION_SHIFTS=Object.freeze(['increased','decreased','unchanged','ambivalent','emerged']);
@@ -148,7 +149,8 @@ export function validateDepthDelta(changes={},sceneText=''){
    evidence:proof(sceneText,r.evidence,ref),
    status:'intention_not_completed'};
  });
- return {psychology,relationships,recollections,npc_offscreen,npc_intentions};
+ const npc_plan_updates=validateNpcPlanUpdates(changes.npc_plan_updates,sceneText,npc_offscreen);
+ return {psychology,relationships,recollections,npc_offscreen,npc_intentions,npc_plan_updates};
 }
 
 /** Simulated events advance only the current new interval, not already-played history.
@@ -189,7 +191,7 @@ const read=s=>s.changes??s.delta??{};
  * No numeric "affection score" and no false reconciliation of opposing feelings.
  */
 export function projectWorldDepth(scenes=[],{getDelta,seed=null}={}){
- const get=getDelta||read,people=new Map(),links=new Map(),recollections=[],offscreen=[],plans=[],warnings=[];
+ const get=getDelta||read,people=new Map(),links=new Map(),recollections=[],offscreen=[],plans=[],planUpdates=[],warnings=[];
  const actor=v=>{
   const k=key(v);if(!people.has(k))people.set(k,{name:v,observations:[],aspects:{},latest_emotions:[]});
   return people.get(k);
@@ -214,6 +216,7 @@ export function projectWorldDepth(scenes=[],{getDelta,seed=null}={}){
   recollections.push(...seed.recollections.map(e=>({...e})));
   offscreen.push(...seed.confirmed_offscreen.map(e=>({...e})));
   plans.push(...seed.npc_intentions.map(e=>({...e})));
+  planUpdates.push(...safeArray(seed.npc_plan_updates).map(e=>({...e})));
   if(Array.isArray(seed.warnings))warnings.push(...seed.warnings);
  }
  for(const scene of scenes){
@@ -245,10 +248,11 @@ export function projectWorldDepth(scenes=[],{getDelta,seed=null}={}){
   }
   for(const e of safeArray(delta.npc_offscreen))if(e?.actor&&e?.event)offscreen.push(ref(scene,e));
   for(const e of safeArray(delta.npc_intentions))if(e?.actor&&e?.plan)plans.push(ref(scene,e));
+  for(const e of safeArray(delta.npc_plan_updates))if(e?.intention_id&&e?.actor)planUpdates.push(ref(scene,e));
  }
  return {complete:true,scanned_scenes:(seed?.scanned_scenes||0)+scenes.length,psychology:Array.from(people.values()),
   relationships:Array.from(links.values()),recollections,confirmed_offscreen:offscreen,
-  npc_intentions:plans,warnings};
+  npc_intentions:plans,npc_plan_updates:planUpdates,warnings};
 }
 export function actorDepth(ledger,actorNames=[],{maxHistory=100}={}){
  const wanted=new Set(actorNames.map(key));
