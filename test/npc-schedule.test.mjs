@@ -158,6 +158,27 @@ test('Scene Director reports commitments as review opportunities, never as autom
  assert.match(sceneDirectorGuidance(brief),/пустой календарь не доказывает свободу/);
 });
 
+test('many investigation threads cannot hide the only available social or schedule review',()=>{
+ const threads=Array.from({length:20},(_,i)=>({
+  id:'mystery-'+i,kind:'background',status:'active',title:'Старая загадка '+i
+ }));
+ const schedule=npcScheduleBrief({depth:{npc_schedule_updates:[appointment]},
+  clock:'1998-09-04T12:00',complete:true});
+ const life={complete:true,actor_profiles:[{name:'Лия',pending_plans:[{
+  id:'lia-talk',state:'active',plan:'Встреча с подругой',opened_scene_id:'old-scene'
+ }],social_connections:[]}]};
+ const director=sceneDirectorBrief({clock:'1998-09-04T12:00',
+  causalMemory:{managed_threads:threads},npcLife:life,npcSchedule:schedule,complete:true});
+ assert.ok(director.opportunities.some(x=>x.kind==='thread'));
+ assert.ok(director.opportunities.some(x=>x.kind==='npc_schedule'));
+ assert.ok(director.opportunities.some(x=>x.kind==='npc_life'));
+ const top=director.opportunities.slice(0,10).map(x=>x.kind);
+ assert.ok(top.includes('thread'));
+ assert.ok(top.includes('npc_schedule'));
+ assert.ok(top.includes('npc_life'));
+ assert.match(sceneDirectorGuidance(director),/Лия/);
+});
+
 test('MCP and hidden PWA wire schedules to full scene ancestry',()=>{
  const worker=readFileSync(new URL('../bridge/index.js',import.meta.url),'utf8');
  const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
