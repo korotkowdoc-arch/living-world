@@ -47,7 +47,7 @@ function sceneDelta(scene){
  * Caller must supply only the active, confirmed branch lineage.
  */
 export function narrativePacingBrief(scenes=[],{complete=false,window=12,currentTime=null,managedThreads=[]}={}){
- const recent=arr(scenes).slice(-Math.min(24,Math.max(1,Math.floor(window)||12)));
+ const recent=arr(scenes).slice(-Math.min(60,Math.max(1,Math.floor(window)||12)));
  const rows=recent.map(s=>{
   const values=arr(sceneDelta(s).narrative_beats);
   const beats=values.filter(b=>b&&NARRATIVE_DOMAINS.includes(b.domain)&&NARRATIVE_PROGRESS.includes(b.progress));
