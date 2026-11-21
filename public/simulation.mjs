@@ -1,3 +1,5 @@
+import {sceneDirectorBrief,sceneDirectorGuidance} from './scene-director.mjs';
+import {calendarDirectorBrief} from './calendar-director.mjs';
 import {narrativePacingGuidance} from './narrative-pacing.mjs';
 /** Single-batch simulation prompt. No autonomous/background API calls.
  * Every batch needs an explicit approved scene packet; only valid scene ancestry counts.
@@ -40,6 +42,10 @@ ${JSON.stringify(summary,null,2)}
 
 ${narrativePacingGuidance()}
 
+${sceneDirectorGuidance(sceneDirectorBrief({world,clock:starting,scenes:latestScenes,
+ calendar:calendarDirectorBrief({sources:[{category:'world_timeline',content:world.timeline||'',reference:'world.timeline'}],scenes:latestScenes,clock:starting,complete:false}),
+ causalMemory:{managed_threads:memory?.managed_threads||[]},characters,complete:false}))}
+
 ПРОЦЕДУРА:
 1. Продвинь мир максимум на указанный период, учитывая реальный возраст, дорогу, обучение, здоровье, работу, доходы и жизнь NPC вне кадра.
 2. Пиши умеренно коротко, в форме исторической хроники/дневника (примерно 300–900 слов). Каждый действительно важный узел — событие → чья-то реакция → последствия. Не делай длинную литературную сцену: это ускоренный режим.
@@ -47,7 +53,8 @@ ${narrativePacingGuidance()}
 4. Если выбор игрока нужен, закончи текущий отрезок на моменте решения и предложи 2–4 правдоподобных альтернативы без гарантированных исходов; в конце игрок сам выбирает. Если выбора нет, decisions=[].
 5. Важное: если игрок велел остановить симуляцию, следующая обычная сцена начинается точно с подтверждённого конца отрезка. Уже утверждённые события — канон, предположения — нет. NPC с собственной жизнью могут появляться по причинным каналам, но секреты им автоматически не известны.
 6. При продвижении мира не отдавай весь период одной загадке. Считай реально прожитые отношения, учёбу, быт и календарные узлы. После двух безрезультатных проверок дело может ждать новой независимой причины; никаких придуманных улик.
-7. Время world_time выставь на фактический конец отрезка, НЕ начальное. Сохраняй точность известной даты: YYYY-MM если число неизвестно, YYYY-MM-DD если известен день, или точный timestamp. Не придумывай дату/время без основания. Никогда не возвращай часы назад.
+7. При подтверждённом исходе документированного Year Anchor добавь changes.calendar_updates с дословной опорой на хронику; если источника календаря нет — оставь []. Никакого воспроизведения канона по памяти.
+8. Время world_time выставь на фактический конец отрезка, НЕ начальное. Сохраняй точность известной даты: YYYY-MM если число неизвестно, YYYY-MM-DD если известен день, или точный timestamp. Не придумывай дату/время без основания. Никогда не возвращай часы назад.
 
 Ответь ТОЛЬКО одним валидным JSON-объектом БЕЗ Markdown:
 {
@@ -59,6 +66,7 @@ ${narrativePacingGuidance()}
   "open_threads":[],
   "thread_updates":[],
   "narrative_beats":[],
+  "calendar_updates":[],
   "resolved_threads":["Точные строки ранее закрытых open_threads"],
   "offscreen_events":["Достоверные события других людей с реальными каналами"],
   "characters":[{"name":"Имя","location":"Если изменилось","health":"Если изменилось","mood":"Если изменилось","goals":"Если изменились","relationships":"Если изменились","inventory":"Если изменилось","learned":[{"fact":"Узнанный факт","via":"Через что узнал"}],"beliefs":["Субъективные убеждения"]}]

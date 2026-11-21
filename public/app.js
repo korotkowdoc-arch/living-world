@@ -1,4 +1,6 @@
 import {narrativePacingBrief} from './narrative-pacing.mjs';
+import {calendarDirectorBrief} from './calendar-director.mjs';
+import {sceneDirectorBrief} from './scene-director.mjs';
 import {escapeHTML as esc, cleanText, parseGenesis, genesisPrompt, scenePrompt, revisionPrompt, demoGenesis, demoScene, CHARACTER_FIELDS, QUICK_GENESIS_STEPS, quickGenesisPrompt} from './logic.mjs';
 import {parseScenePackage,packSceneNote,readSceneNote,makeContinuity,compactMemory,scenePackagePrompt,validStoryClock,isNondecreasingStoryTime} from './continuity.mjs';
 import {simulationPrompt,SIMULATION_SPANS} from './simulation.mjs';
@@ -258,9 +260,21 @@ function renderSimulationPanel(w){
  return `<div class="panel" style="margin-bottom:18px"><h2 class="section-title">Время и жизнь персонажа</h2><p class="sub">Режимы используют ту же действующую ветку, её память и текущую дату. Переключение не отменяет прошлое.</p>${controls}${panel}</div>`;
 }
 
+function uiSceneDirector(w){
+ const clock=storyClock(w);
+ const complete=state.memoryScenes.length<200;
+ const memory=makeContinuity(state.characters,state.memoryScenes,state.legacyAudit||null);
+ const pacing=narrativePacingBrief(state.memoryScenes,{complete,currentTime:clock});
+ const sources=typeof w?.timeline==='string'&&w.timeline.trim()
+  ?[{category:'world_timeline',content:w.timeline,reference:'world.timeline'}]:[];
+ return sceneDirectorBrief({world:w,clock,scenes:state.memoryScenes,pacing,
+  calendar:calendarDirectorBrief({sources,scenes:state.memoryScenes,clock,complete}),
+  causalMemory:{managed_threads:memory.managed_threads||[]},
+  characters:state.characters,complete});
+}
+
 function renderNarrativePacingPanel(){
- const brief=narrativePacingBrief(state.memoryScenes,{complete:state.memoryScenes.length<200,
-  currentTime:storyClock(state.world)});
+ const director=uiSceneDirector(state.world),brief=director.pacing;
  const names={main:'Основной сюжет',investigation:'Расследования',relationship:'Отношения',
   character:'Личные линии',everyday:'Повседневная жизнь',institutional:'Институции'};
  const counts=Object.entries(brief.domain_scene_counts).map(([domain,count])=>
@@ -275,7 +289,14 @@ function renderNarrativePacingPanel(){
   <p class="hint">${x(brief.coverage.note)}</p>
   <div class="row" style="margin-top:8px;flex-wrap:wrap">${counts}</div>
   <div style="margin-top:12px"><strong>Что проверить перед продолжением</strong>${findings}</div>
-  <p class="hint">Старые сцены не классифицируются по догадкам. Для полного серверного обзора после обновления OAuth-моста вызови get_narrative_pacing. Во время непрерывной важной сцены не прерывай действие ради баланса.</p>
+  <div class="divider" style="margin:12px 0"></div>
+  <h3 class="section-title">Календарные окна</h3>
+  <p class="hint">${x(director.calendar.source_ready?'Источники календаря обнаружены. Даты — окна проверки, а не предрешённые сцены.':'В поле timeline нет структурированного Year Anchors: список календаря нельзя восстановить по памяти о каноне.')}</p>
+  ${director.calendar.review.length?`<ul>${director.calendar.review.slice(0,5).map(e=>`<li><b>${x(e.id)}</b> · ${x(e.window)} · ${x(e.title)} <span class="hint">(${x(e.state)})</span></li>`).join('')}</ul>`:''}
+  <h3 class="section-title">Возможности следующей сцены</h3>
+  <ul>${director.opportunities.slice(0,7).map(e=>`<li><b>${x(e.title)}</b> · ${x(e.reason)}</li>`).join('')}</ul>
+  ${btn('director-copy','Скопировать запрос полного режиссёрского обзора')}
+  <p class="hint">Старые сцены не классифицируются по догадкам. Для полного серверного обзора через OAuth используй get_scene_director; во время непрерывной важной сцены не прерывай действие ради баланса.</p>
  </details>`;
 }
 
@@ -1384,8 +1405,9 @@ case 'sim-auto':{
  await openWorld(w.id);state.view='story';render();
  notify('Время продвинулось до '+result.world_time+'. Сцена и последствия сохранены.');return;
 }
-case 'copy-scene-prompt':if(!state.world)throw Error('Нет мира');if(!validStoryClock(document.getElementById('story-clock')?.value||storyClock()))throw Error('Сначала установи текущий период в разделе «Мир» (например, 1999-06).');await clipboard(scenePrompt(state.world,state.characters,state.scenes,state.storyMode||'story',document.getElementById('story-note')?.value||'',document.getElementById('scene-length')?.value||state.sceneLength,narrativePacingBrief(state.memoryScenes,{complete:state.memoryScenes.length<200,currentTime:storyClock()}))+'\n\nАКТУАЛЬНАЯ ПАМЯТЬ ВЕТКИ (собственные знания каждого отделяй от общих):\n'+JSON.stringify(compactMemory(makeContinuity(state.characters,state.memoryScenes,state.legacyAudit||null)),null,2));return;
-case 'copy-scene-packet':{if(!state.world)throw Error('Нет мира');const basic=scenePrompt(state.world,state.characters,state.scenes,state.storyMode||'story',document.getElementById('story-note')?.value||'',document.getElementById('scene-length')?.value||state.sceneLength,narrativePacingBrief(state.memoryScenes,{complete:state.memoryScenes.length<200,currentTime:storyClock()}));const clock=document.getElementById('story-clock')?.value||storyClock();if(!validStoryClock(clock))throw Error('Сначала установи текущий период в разделе «Мир» (например, 1999-06).');await clipboard(scenePackagePrompt(basic,makeContinuity(state.characters,state.memoryScenes,state.legacyAudit||null),clock));return;}
+case 'director-copy':if(!state.world)throw Error('Сначала выбери мир.');await clipboard('LIVING WORLD Bridge OAuth. Для мира '+state.world.id+' вызови get_scene_director, затем прочитай scene_director, календарь и guidance. Покажи мне режиссёрский обзор как отдельный запрос, не продолжай художественную сцену и не меняй события. Не импортируй канон в недоступные источники.');return;
+case 'copy-scene-prompt':if(!state.world)throw Error('Нет мира');if(!validStoryClock(document.getElementById('story-clock')?.value||storyClock()))throw Error('Сначала установи текущий период в разделе «Мир» (например, 1999-06).');await clipboard(scenePrompt(state.world,state.characters,state.scenes,state.storyMode||'story',document.getElementById('story-note')?.value||'',document.getElementById('scene-length')?.value||state.sceneLength,uiSceneDirector(state.world).pacing,uiSceneDirector(state.world))+'\n\nАКТУАЛЬНАЯ ПАМЯТЬ ВЕТКИ (собственные знания каждого отделяй от общих):\n'+JSON.stringify(compactMemory(makeContinuity(state.characters,state.memoryScenes,state.legacyAudit||null)),null,2));return;
+case 'copy-scene-packet':{if(!state.world)throw Error('Нет мира');const basic=scenePrompt(state.world,state.characters,state.scenes,state.storyMode||'story',document.getElementById('story-note')?.value||'',document.getElementById('scene-length')?.value||state.sceneLength,uiSceneDirector(state.world).pacing,uiSceneDirector(state.world));const clock=document.getElementById('story-clock')?.value||storyClock();if(!validStoryClock(clock))throw Error('Сначала установи текущий период в разделе «Мир» (например, 1999-06).');await clipboard(scenePackagePrompt(basic,makeContinuity(state.characters,state.memoryScenes,state.legacyAudit||null),clock));return;}
 case 'demo-scene':await appendScene(demoScene(state.world,state.characters,state.scenes.length),'demo');return;
 case 'revise':{const scene=state.scenes.find(s=>s.id===el.dataset.id);if(!scene)throw Error('Сцена не найдена');state.revision={scene,prefix:'',note:''};state.modal={type:'revision',scene};render();return;}
 case 'revision-mark':markRevision();return;

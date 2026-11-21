@@ -67,6 +67,20 @@ MIT (see `LICENSE`).
 
 Read [docs/AUTOMATION.md](docs/AUTOMATION.md). The private Worker generates and atomically saves a single scene or simulated time interval directly in Supabase; rapid character genesis is generated and offered for approval. This feature requires a configured OpenAI API account and server-side key. No credentials are embedded in public Pages code.
 
+## Scene Director V2 — calendar and next-scene review
+
+Scene Director V2 is a **read-only causal review**, integrated into scene preflight and the collapsed Director panel. It does not choose the next scene by score or force canonical participants or outcomes.
+
+- Full Year Anchor documents are parsed by the live OAuth bridge from the **current world's own** latest `year_anchors` documents. The local PWA can also parse explicit `Y1-06 | ...` rows in `world.timeline`; it never substitutes book knowledge for an absent source.
+- Each deadline is an **evidence-bound calendar window**, with exact dates only when supplied, month ranges where appropriate and dependency-only windows that never claim an exact day.
+- Optional `changes.calendar_updates` records `occurred`, `altered`, or `unavailable` for a source ID with an exact citation to the new scene or a confirmed NPC event; only the valid branch counts.
+- Overdue windows are flagged **unconfirmed**, not fabricated or replayed into a later month.
+- `get_scene_preflight`, `get_story_context` and `get_world_state` include a `scene_director` summary. Read-only `get_scene_director` is available on director request after bridge deploy and OAuth tool refresh.
+- The hidden PWA Director block shows source status, calendar windows and possible independent narrative directions.
+- A deterministic **30-scene fixture** checks the anti-loop review. This does not replace a genuine 30-scene ChatGPT literary playtest, which must be carried out interactively.
+
+See [Scene Director V2 design and limitations](docs/SCENE_DIRECTOR_V2.md). No extra OpenAI API request is made to calculate its review.
+
 ## Game System V1.1 — narrative pacing without extra API calls
 
 The app now has an evidence-bound **narrative pacing analyzer**, documented in [GAME SYSTEM V1.1](docs/GAME_SYSTEM_V1_1.md). It highlights repeated investigation scenes, reviews calendar and neglected relationship/life directions, and lets investigations pause when no new source exists. It is **not** a quota system: important continuous scenes and independent NPC agency take precedence.
