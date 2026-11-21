@@ -45,9 +45,12 @@ function parseWindow(label,range){
   const at=dateText(y1,first.month,numbers.at(-1));
   if(at)return {precision:'day',start:at,end:at,reason:'День указан непосредственно в источнике.'};
  }
- const start=dateText(y1,first.month,1),end=dateText(y2,last.month,lastDay(y2,last.month));
+ const halfFirst=first.month===last.month&&/вторая половина/.test(input);
+ const halfLast=/первая половина/.test(input);
+ const start=dateText(y1,first.month,halfFirst?16:1);
+ const end=dateText(y2,last.month,halfLast?15:lastDay(y2,last.month));
  if(!start||!end||start>end)return {precision:'unresolved_year',start:null,end:null,reason:'Неоднозначный порядок месяцев.'};
- return {precision:first.month===last.month?'month':'month_range',start,end,
+ return {precision:halfFirst||halfLast?'half_month':first.month===last.month?'month':'month_range',start,end,
   reason:'Месячное окно: точный день не указан, календарная дата события не назначена.'};
 }
 export function parseAnchorCalendar(sources=[]){
@@ -139,10 +142,13 @@ export function calendarDirectorBrief({sources=[],scenes=[],recorded=null,clock=
    if(current.start>a.end)state='past_unconfirmed';
    else if(current.end<a.start)state='upcoming';
    else state='window_review';
-  }else if(a.precision==='relative')state='dependency_review';
+  }else if(a.precision==='relative'){
+   const no=Number(a.id.slice(3)),preceding=a.id.slice(0,3)+pad(no-1);
+   state=no>1&&statuses.has(preceding)?'dependency_ready':'dependency_review';
+  }
   return {...a,state,recorded:recorded||null};
  });
- const follow=rows.filter(x=>['window_review','past_unconfirmed'].includes(x.state));
+ const follow=rows.filter(x=>['window_review','past_unconfirmed','dependency_ready'].includes(x.state));
  const soon=rows.filter(x=>x.state==='upcoming').slice(0,Math.max(0,limit));
  const dependency=rows.filter(x=>x.state==='dependency_review').slice(0,5);
  return {complete:!!complete&&parsed.complete,source_ready:parsed.complete,
