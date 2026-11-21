@@ -54,7 +54,7 @@ test('calendar review does not invent a played troll or impose a past missed anc
  assert.ok(november.review.some(a=>a.id==='Y1-07'&&a.state==='window_review'));
  assert.ok(november.upcoming.some(a=>a.id==='Y1-09'));
  assert.equal(oct.review.some(a=>a.id==='Y1-13'),false);
- assert.match(november.rule,/НЕ разыгрывай его задним числом/);
+ assert.match(november.rule,/нельзя разыгрывать задним числом/);
 });
 
 test('confirmed calendar updates are source-bound and branch-bound',()=>{
