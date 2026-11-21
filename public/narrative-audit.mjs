@@ -5,6 +5,7 @@ import {validateDepthDelta,depthSemanticWarnings} from './world-depth.mjs';
 import {validateSceneMemories} from './story-memory.mjs';
 import {validateCompanionDelta} from './world-ledger.mjs';
 import {validStoryClock,isNondecreasingStoryTime} from './continuity.mjs';
+import {validateNarrativeBeats} from './narrative-pacing.mjs';
 const norm=v=>String(v??'').normalize('NFC').toLocaleLowerCase('ru').replace(/ё/g,'е').trim();
 const arr=v=>Array.isArray(v)?v:[];
 const issue=(code,severity,detail,source_scene_id=null)=>({code,severity,detail,source_scene_id});
@@ -16,6 +17,8 @@ export function auditNarrativeScene({scene='',world_time='',previous_time='',cha
  if(!validStoryClock(world_time))issues.push(issue('INVALID_STORY_TIME','error','Время сцены задано некорректно.'));
  else if(previous_time&&!isNondecreasingStoryTime(previous_time,world_time))
   issues.push(issue('TIME_REGRESSION','error','Время новой сцены раньше уже сыгранной.'));
+ try{validateNarrativeBeats(changes.narrative_beats,body);}
+ catch(e){issues.push(issue('INVALID_NARRATIVE_BEATS','error',e.message));}
  try{validateCompanionDelta(changes);}
  catch(e){issues.push(issue('INVALID_RESOURCES','error',e.message));}
  try{validateSceneMemories(changes.memories,body);}
