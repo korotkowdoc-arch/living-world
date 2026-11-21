@@ -24,7 +24,7 @@ const row=(id,parent,delta,body=phrase)=>({id,parent_scene_id:parent,world_time:
 test('NPC plan transitions require an exact scene quote or a linked offscreen event',()=>{
  assert.deepEqual(validateNpcPlanUpdates(undefined,phrase),[]);
  assert.equal(validateNpcPlanUpdates([update],phrase)[0].basis,'scene');
- assert.throws(()=>validateNpcPlanUpdates([{...update,evidence:'Не было этой реплики.'}],phrase),/дословную/);
+ assert.throws(()=>validateNpcPlanUpdates([{...update,evidence:'Не было этой реплики.'}],phrase),/дословная опора/);
  assert.throws(()=>validateNpcPlanUpdates([{...update,status:'magically_finished'}],phrase),/статус/);
  assert.throws(()=>validateNpcPlanUpdates([{...update,actor:'Пэнси',basis:'offscreen',related_offscreen_id:'off-1'}],
  phrase,[{id:'off-1',actor:'Лия'}]),/должны совпадать/);
