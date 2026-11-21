@@ -48,7 +48,7 @@ test('parser takes calendar windows only from an explicit source and preserves p
 
 test('half-month deadlines remain windows and relative follow-up needs a played predecessor',()=>{
  const parsed=parseAnchorCalendar([{category:'year_anchors',reference:'test@1',
-  content:'Y1: 1998–1999\\nВторая половина июля 1998 | Y1-01 | Приглашение | Старт\\n'+
+  content:'Y1: 1998–1999\nВторая половина июля 1998 | Y1-01 | Приглашение | Старт\n'+
    'Январь–первая половина февраля | Y1-09 | Зимняя линия | Окно'}]);
  assert.equal(parsed.anchors.find(a=>a.id==='Y1-01').start,'1998-07-16');
  assert.equal(parsed.anchors.find(a=>a.id==='Y1-01').end,'1998-07-31');
