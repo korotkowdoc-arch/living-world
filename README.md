@@ -67,6 +67,23 @@ MIT (see `LICENSE`).
 
 Read [docs/AUTOMATION.md](docs/AUTOMATION.md). The private Worker generates and atomically saves a single scene or simulated time interval directly in Supabase; rapid character genesis is generated and offered for approval. This feature requires a configured OpenAI API account and server-side key. No credentials are embedded in public Pages code.
 
+## Literary playtest: genuine 30-scene acceptance
+
+The [30-scene literary playtest protocol](docs/LITERARY_PLAYTEST_30.md) distinguishes **30 genuinely saved ChatGPT scenes** from synthetic unit-test fixtures.
+- A read-only `get_literary_playtest_report` inspects the last 30 saved scenes **on the active branch** and produces evidence-bound distribution metrics and review questions. It does not create scenes, read invalidated branches or call the OpenAI API.
+- It explicitly reports missing annotations as unknown; no automatic literary quality score is claimed.
+- Actual literary playtesting must still be performed in a clean world, with human review after the saved sequence. Running CI tests does **not** complete this acceptance.
+
+## NPC Scheduling V1 — meetings, availability and travel uncertainty
+
+The [NPC Scheduling V1](docs/NPC_SCHEDULING_V1.md) module tracks only **source-confirmed, exact one-off appointments** in the active story branch. It distinguishes tentative proposals from confirmed commitments and requires evidence to cancel, complete, confirm or reschedule them.
+
+- The pure local planner blocks overlapping confirmed appointments by shared participant; it never treats an empty calendar as guaranteed free time.
+- Distinct locations require a manual travel/feasibility review; it does not invent journey times, working hours, school schedules or consent.
+- `changes.npc_schedule_updates` are included in saved scenes, full branch projection and checkpoints; incomplete old checkpoints cannot assert full coverage.
+- Director mode reveals scheduled opportunities and unresolved expired commitments without forcing a scene or retroactively completing a missed event.
+- Read-only MCP `get_npc_meeting_feasibility` checks a specific exact time window after production deploy, without an extra OpenAI API request.
+
 ## NPC Life V1 — autonomous goals and multidimensional relationships
 
 NPC Life V1 turns current, valid-branch character changes and directed social history into a source-bound optional Director overview; see [NPC Life V1](docs/NPC_LIFE_V1.md).

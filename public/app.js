@@ -2,6 +2,7 @@ import {narrativePacingBrief} from './narrative-pacing.mjs';
 import {calendarDirectorBrief} from './calendar-director.mjs';
 import {sceneDirectorBrief} from './scene-director.mjs';
 import {npcLifeBrief} from './npc-life.mjs';
+import {npcScheduleBrief} from './npc-schedule.mjs';
 import {escapeHTML as esc, cleanText, parseGenesis, genesisPrompt, scenePrompt, revisionPrompt, demoGenesis, demoScene, CHARACTER_FIELDS, QUICK_GENESIS_STEPS, quickGenesisPrompt} from './logic.mjs';
 import {parseScenePackage,packSceneNote,readSceneNote,makeContinuity,compactMemory,scenePackagePrompt,validStoryClock,isNondecreasingStoryTime} from './continuity.mjs';
 import {simulationPrompt,SIMULATION_SPANS} from './simulation.mjs';
@@ -269,13 +270,14 @@ function uiSceneDirector(w){
  const characters=projectCharacterMemory(state.characters,state.memoryScenes,{getDelta:currentGet});
  const depth=projectWorldDepth(state.memoryScenes,{getDelta:currentGet});
  const life=npcLifeBrief({characters:characters.characters,depth,complete});
+ const schedule=npcScheduleBrief({characters:characters.characters,depth,clock,complete});
  const pacing=narrativePacingBrief(state.memoryScenes,{complete,currentTime:clock});
  const sources=typeof w?.timeline==='string'&&w.timeline.trim()
   ?[{category:'world_timeline',content:w.timeline,reference:'world.timeline'}]:[];
  return sceneDirectorBrief({world:w,clock,scenes:state.memoryScenes,pacing,
   calendar:calendarDirectorBrief({sources,scenes:state.memoryScenes,clock,complete}),
   causalMemory:{managed_threads:memory.managed_threads||[]},
-  characters:characters.characters,npcLife:life,complete});
+  characters:characters.characters,npcLife:life,npcSchedule:schedule,complete});
 }
 
 function renderNarrativePacingPanel(){
@@ -301,6 +303,10 @@ function renderNarrativePacingPanel(){
   <h3 class="section-title">Самостоятельная жизнь NPC</h3>
   <p class="hint">Намерение не равно совершённому действию; открытые планы могли устареть. Это проверка причин, а не автоматическое назначение следующего эпизода.</p>
   ${director.npc_life.actor_profiles?.length?`<ul>${director.npc_life.actor_profiles.slice(0,6).map(c=>`<li><b>${x(c.name)}</b>: ${x(c.goals||'цель уточняется')}${c.pending_plans?.length?' · '+x(c.pending_plans[0].state)+': '+x(c.pending_plans[0].plan):''}${c.social_connections?.length?' · социальных связей в журнале: '+c.social_connections.length:''}</li>`).join('')}</ul>`:'<p class="hint">Ещё нет подтверждённых личных событий.</p>'}
+  <h3 class="section-title">Договорённости и встречи</h3>
+  <p class="hint">Подтверждённые часы — только из сохранённых событий. Предложение не равно согласию; нет записей — не значит, что человек свободен.</p>
+  ${director.npc_schedule.upcoming?.length?`<ul>${director.npc_schedule.upcoming.slice(0,6).map(e=>`<li><b>${x(e.purpose)}</b> · ${x(e.start_at)}–${x(e.end_at)} · ${x(e.location)} · ${x(e.state==='confirmed'?'подтверждено':'предложено')} · ${x(e.participants.join(', '))}</li>`).join('')}</ul>`:'<p class="hint">В проверяемой части ветки не записаны точные обязательства.</p>'}
+  ${director.npc_schedule.totals?.past_unresolved?'<p class="hint">Есть встречи с истёкшим временем без подтверждённого исхода: '+director.npc_schedule.totals.past_unresolved+'. Не считать их состоявшимися автоматически.</p>':''}
   <h3 class="section-title">Возможности следующей сцены</h3>
   <ul>${director.opportunities.slice(0,7).map(e=>`<li><b>${x(e.title)}</b> · ${x(e.reason)}</li>`).join('')}</ul>
   ${btn('director-copy','Скопировать запрос полного режиссёрского обзора')}

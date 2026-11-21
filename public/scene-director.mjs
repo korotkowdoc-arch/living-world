@@ -19,7 +19,7 @@ function namedActors(actors){
 /** The output indicates what merits examination; it cannot prove the next scene. */
 export function sceneDirectorBrief({
  world={},clock='',scenes=[],pacing=null,calendar=null,causalMemory=null,
- characters=[],npcCandidates=[],npcLife=null,complete=false
+ characters=[],npcCandidates=[],npcLife=null,npcSchedule=null,complete=false
 }={}){
  const report=pacing||narrativePacingBrief(scenes,{complete,currentTime:clock});
  const time=calendar||calendarDirectorBrief({scenes,clock,complete:false});
@@ -75,6 +75,21 @@ export function sceneDirectorBrief({
    'Проверь календарные и независимые силы, а не заполняй отсутствие основного сюжета случайной угрозой.',
    'narrative_attention','consider_only');
  }
+ for(const commitment of list(npcSchedule?.upcoming).slice(0,5)){
+  const currentDay=txt(clock).length>=10?txt(clock).slice(0,10):null;
+  const dueToday=!!currentDay&&commitment.start_at?.slice(0,10)<=currentDay;
+  push('npc_schedule','appointment:'+commitment.id,commitment.purpose||commitment.id,
+   'Записано '+(commitment.state==='confirmed'?'подтверждённое':'предложенное')+
+   ' обязательство '+commitment.start_at+'–'+commitment.end_at+' в '+commitment.location+
+   '. Путь, настроение, здоровье и согласие должны быть проверены. Не утверждай явку до события.',
+   'recorded_appointment',dueToday?'time_window_review':'future_commitment',
+   commitment.last_scene_id||commitment.opened_scene_id||null);
+ }
+ for(const unresolved of list(npcSchedule?.past_unresolved).slice(0,3)){
+  push('npc_schedule','unverified:'+unresolved.id,unresolved.id,
+   'Назначенное время истекло, но нет подтверждённого исхода; не объявляй встречу состоявшейся или сорванной и не разыгрывай её задним числом.',
+   'unresolved_past_schedule','evidence_review',unresolved.source_scene_id);
+ }
  for(const actor of list(npcLife?.actor_profiles).slice(0,8)){
   const plans=list(actor.pending_plans).filter(p=>['active','unresolved','paused','blocked'].includes(p.state));
   if(!plans.length&&!list(actor.social_connections).length)continue;
@@ -103,12 +118,26 @@ export function sceneDirectorBrief({
  if(!time.source_ready)warnings.push('Нет проверенного календаря Year Anchors. Не заменяй его воспоминанием о каноне.');
  if(report.coverage?.untagged_scenes)warnings.push('Есть неразмеченные эпизоды. Их жанр, романтика и развитие сюжета не известны анализатору.');
  if(streak.count>=3)warnings.push('Подряд '+streak.count+' сцены с одним фокусом; проверь самостоятельные процессы и отношения.');
+ // A presentation-only variety pass. Review every independent causal category
+ // even when ten active mysteries would otherwise occupy the entire prompt.
+ // This does NOT rank or select the next scene, and doesn't create events.
+ const review=[],seenKinds=new Set(),seenIds=new Set();
+ for(const candidate of opportunities){
+  if(seenKinds.has(candidate.kind))continue;
+  seenKinds.add(candidate.kind);seenIds.add(candidate.id);review.push(candidate);
+ }
+ for(const candidate of opportunities){
+  if(review.length>=16)break;
+  if(seenIds.has(candidate.id))continue;
+  seenIds.add(candidate.id);review.push(candidate);
+ }
  return {version:2,world_name:txt(world?.name)||null,current_clock:clock||null,
   complete:!!complete,calendar:time,pacing:report,
   actors_reviewed:actors.filter(a=>a.motive_known).length,
   active_threads:active.length,paused_threads:paused.length,
   npc_life:npcLife||{complete:false,reason:'Полная память самостоятельной жизни NPC недоступна.'},
-  opportunities:opportunities.slice(0,16),warnings,
+  npc_schedule:npcSchedule||{complete:false,reason:'Подтверждённое расписание недоступно.'},
+  opportunities:review.slice(0,16),warnings,
   selection_policy:'Нет числовых весов, квот и автоматического выбора сюжета. Возможности не становятся сценами без причинной инициативы, времени и доступа. Непрерывный разговор, бой или интимный эпизод не разрывается ради переключения темы.'};
 }
 export function sceneDirectorGuidance(director=null){
@@ -128,7 +157,7 @@ export function sceneDirectorGuidance(director=null){
 4. Загадку можно отложить после бесплодных проверок без новой независимой информации. Не создавай новую бумажку, свидетеля или ложный след только чтобы продлить расследование.
 5. Социальная, романтическая и взрослая интимная жизнь не исчезают из-за квеста; правдоподобные встречи, желания и конфликты требуют собственных причин и свободного поведения участников. Секс не обязателен по таймеру.
 6. NPC могут жить вне кадра, но намерение и предположение — не свершившийся факт. Доступ к чужой информации только через реальные каналы. В каждом новом отрезке времени проверяй независимые планы и возможности существенных NPC, включая тех, кто не присутствует рядом с Гарри. Подтверждённое событие записывай как npc_offscreen с реальной датой/причиной, а изменение намерения — в npc_plan_updates с исходным ID; до записи план НЕ выполнен.
-6а. Социальные связи направленные и многомерные (доверие может сосуществовать с раздражением и желанием). Изменения мотивированы пережитым, не превращай персонажей в удобных любовных интересов; не выдавай цитаты памяти за чтение мыслей.
+6а. Перед назначенной встречей проверь участников, расписание, согласие, расстояние, реальную дорогу, работу, усталость и доступность по известным фактам. Пересекающиеся подтверждённые договорённости нельзя выполнять одновременно; пустой календарь не доказывает свободу. При истёкшем времени не приписывай встрече исход без источника. Точный час неизвестен — не выдумывай его.\n6б. Социальные связи направленные и многомерные (доверие может сосуществовать с раздражением и желанием). Изменения мотивированы пережитым, не превращай персонажей в удобных любовных интересов; не выдавай цитаты памяти за чтение мыслей.
 7. Ни один пункт ниже не назначает обязательную следующую сцену. При неполной памяти запрашивай источник прежде чем утверждать пропущенные события.
 КАЛЕНДАРНЫЕ ПРОВЕРКИ: ${calendarText}
 ДОПУСТИМЫЕ НАПРАВЛЕНИЯ:

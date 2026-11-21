@@ -6,6 +6,7 @@
 import {projectCausalMemory} from './world-causality.mjs';
 import {projectCharacterMemory} from './world-character-memory.mjs';
 import {validateNpcPlanUpdates} from './npc-life.mjs';
+import {validateNpcScheduleUpdates} from './npc-schedule.mjs';
 export const PSYCHOLOGY_ASPECTS=Object.freeze(['trait','value','fear','desire','habit','boundary','coping','trigger','self_image','inner_conflict','motivation']);
 export const RELATION_DIMENSIONS=Object.freeze(['trust','respect','affection','irritation','fear','attraction','loyalty','resentment','comfort','jealousy','solidarity','distance']);
 export const RELATION_SHIFTS=Object.freeze(['increased','decreased','unchanged','ambivalent','emerged']);
@@ -150,7 +151,8 @@ export function validateDepthDelta(changes={},sceneText=''){
    status:'intention_not_completed'};
  });
  const npc_plan_updates=validateNpcPlanUpdates(changes.npc_plan_updates,sceneText,npc_offscreen);
- return {psychology,relationships,recollections,npc_offscreen,npc_intentions,npc_plan_updates};
+ const npc_schedule_updates=validateNpcScheduleUpdates(changes.npc_schedule_updates,sceneText,npc_offscreen);
+ return {psychology,relationships,recollections,npc_offscreen,npc_intentions,npc_plan_updates,npc_schedule_updates};
 }
 
 /** Simulated events advance only the current new interval, not already-played history.
@@ -191,7 +193,7 @@ const read=s=>s.changes??s.delta??{};
  * No numeric "affection score" and no false reconciliation of opposing feelings.
  */
 export function projectWorldDepth(scenes=[],{getDelta,seed=null}={}){
- const get=getDelta||read,people=new Map(),links=new Map(),recollections=[],offscreen=[],plans=[],planUpdates=[],warnings=[];
+ const get=getDelta||read,people=new Map(),links=new Map(),recollections=[],offscreen=[],plans=[],planUpdates=[],scheduleUpdates=[],warnings=[];
  const actor=v=>{
   const k=key(v);if(!people.has(k))people.set(k,{name:v,observations:[],aspects:{},latest_emotions:[]});
   return people.get(k);
@@ -217,6 +219,8 @@ export function projectWorldDepth(scenes=[],{getDelta,seed=null}={}){
   offscreen.push(...seed.confirmed_offscreen.map(e=>({...e})));
   plans.push(...seed.npc_intentions.map(e=>({...e})));
   planUpdates.push(...safeArray(seed.npc_plan_updates).map(e=>({...e})));
+  scheduleUpdates.push(...safeArray(seed.npc_schedule_updates).map(e=>({...e})));
+
   if(Array.isArray(seed.warnings))warnings.push(...seed.warnings);
  }
  for(const scene of scenes){
@@ -249,10 +253,11 @@ export function projectWorldDepth(scenes=[],{getDelta,seed=null}={}){
   for(const e of safeArray(delta.npc_offscreen))if(e?.actor&&e?.event)offscreen.push(ref(scene,e));
   for(const e of safeArray(delta.npc_intentions))if(e?.actor&&e?.plan)plans.push(ref(scene,e));
   for(const e of safeArray(delta.npc_plan_updates))if(e?.intention_id&&e?.actor)planUpdates.push(ref(scene,e));
+  for(const e of safeArray(delta.npc_schedule_updates))if(e?.id&&e?.actor)scheduleUpdates.push(ref(scene,e));
  }
  return {complete:true,scanned_scenes:(seed?.scanned_scenes||0)+scenes.length,psychology:Array.from(people.values()),
   relationships:Array.from(links.values()),recollections,confirmed_offscreen:offscreen,
-  npc_intentions:plans,npc_plan_updates:planUpdates,warnings};
+  npc_intentions:plans,npc_plan_updates:planUpdates,npc_schedule_updates:scheduleUpdates,warnings};
 }
 export function actorDepth(ledger,actorNames=[],{maxHistory=100}={}){
  const wanted=new Set(actorNames.map(key));
@@ -263,7 +268,9 @@ export function actorDepth(ledger,actorNames=[],{maxHistory=100}={}){
    .map(l=>({...l,history:l.history.slice(-maxHistory)})),
   recollections:ledger.recollections.filter(r=>wanted.has(key(r.actor))).slice(-maxHistory),
   confirmed_offscreen:ledger.confirmed_offscreen.filter(r=>wanted.has(key(r.actor))).slice(-maxHistory),
-  npc_intentions:ledger.npc_intentions.filter(r=>wanted.has(key(r.actor))).slice(-maxHistory)
+  npc_intentions:ledger.npc_intentions.filter(r=>wanted.has(key(r.actor))).slice(-maxHistory),
+  npc_schedule_updates:safeArray(ledger.npc_schedule_updates).filter(r=>wanted.has(key(r.actor))||
+    safeArray(r.participants).some(p=>wanted.has(key(p)))).slice(-maxHistory)
  };
 }
 export function compareWorldBranches(left=[],right=[],{getDelta}={}){

@@ -9,6 +9,8 @@ import {validateNarrativeBeats,narrativePacingBrief,narrativePacingGuidance} fro
 import {validateCalendarUpdates,projectCalendarHistory,calendarDirectorBrief} from '../public/calendar-director.mjs';
 import {sceneDirectorBrief,sceneDirectorGuidance} from '../public/scene-director.mjs';
 import {npcLifeBrief,validateNpcPlanTransitions} from '../public/npc-life.mjs';
+import {validateNpcScheduleTransitions,npcScheduleBrief,npcMeetingFeasibility} from '../public/npc-schedule.mjs';
+import {literaryPlaytestReport} from '../public/literary-playtest.mjs';
 import {isReplayableCheckpoint,replayFromCheckpoint} from '../public/checkpoint-replay.mjs';
 import {parseCheckpointDoc} from '../public/story-memory.mjs';
 import {savedSceneStatus} from '../public/save-receipt.mjs';
@@ -424,6 +426,19 @@ const npcIntention=object({
  plan:{type:'string',maxLength:1100},motive:{type:'string',maxLength:900},
  obstacle:{type:'string',maxLength:900},evidence:evidenceProof
 },['id','actor','plan','motive','evidence']);
+const npcScheduleUpdate=object({
+ id:{type:'string',minLength:1,maxLength:80},
+ action:{type:'string',enum:['create','confirm','reschedule','cancel','complete']},
+ actor:{type:'string',minLength:1,maxLength:120},
+ reason:{type:'string',minLength:1,maxLength:900},
+ basis:{type:'string',enum:['scene','offscreen']},
+ evidence:{type:'string',maxLength:700},
+ related_offscreen_id:{type:'string',maxLength:80},
+ participants:{type:'array',maxItems:12,items:{type:'string',maxLength:120}},
+ start_at:{type:'string',maxLength:16},end_at:{type:'string',maxLength:16},
+ location:{type:'string',maxLength:240},purpose:{type:'string',maxLength:650},
+ state:{type:'string',enum:['tentative','confirmed']}
+},['id','action','actor','reason']);
 const npcPlanUpdate=object({
  intention_id:{type:'string',minLength:1,maxLength:80},actor:{type:'string',minLength:1,maxLength:120},
  status:{type:'string',enum:['active','paused','blocked','completed','abandoned','superseded']},
@@ -464,6 +479,7 @@ const changes = object({
   npc_offscreen:{type:'array',maxItems:15,items:offscreenEvent},
   npc_intentions:{type:'array',maxItems:20,items:npcIntention},
   npc_plan_updates:{type:'array',maxItems:20,items:npcPlanUpdate},
+  npc_schedule_updates:{type:'array',maxItems:12,items:npcScheduleUpdate},
   economy:{type:'array',items:economic,maxItems:35},items:{type:'array',items:itemChange,maxItems:40},new_characters:{type:'array',items:emergingCharacter,maxItems:15},
   characters:{type:'array', maxItems:30, items:object({
     name:{type:'string'}, ...fields, beliefs:strings,
@@ -537,6 +553,14 @@ const tools = [
   { name:'get_world_depth',description:'Глубокая психология, история интерпретаций, направленные многомерные отношения, личные переосмысления и подтверждённые события NPC. Из ВСЕЙ действующей ветки.',inputSchema:object({
     world_id:uuid,actor_names:{type:'array',maxItems:15,items:{type:'string',maxLength:120}}
   },['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_literary_playtest_report',description:'Прочитай 30 действительно сохранённых сцен действующей ветки: темп, отношения, календарь, инициативы NPC и пробелы разметки. Ничего не генерирует, не записывает и не присваивает художественный вердикт.',inputSchema:object({world_id:uuid},['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name:'get_npc_meeting_feasibility',description:'Только чтение: проверь пересекающиеся договорённости и неизвестные поездки для конкретного точного интервала. Не утверждай, что NPC свободен или согласен.',inputSchema:object({
+   world_id:uuid,
+   participants:{type:'array',minItems:1,maxItems:12,items:{type:'string',minLength:1,maxLength:120}},
+   start_at:{type:'string',minLength:16,maxLength:16},
+   end_at:{type:'string',minLength:16,maxLength:16},
+   location:{type:'string',maxLength:240}
+  },['world_id','participants','start_at','end_at']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_npc_life',description:'Режиссёрский обзор автономности NPC, действительных намерений, их состояний, источников и направленных отношений. Только чтение текущей ветки. Планы не являются событиями.',inputSchema:object({world_id:uuid},['world_id']),annotations:{readOnlyHint:true,openWorldHint:false} },
   { name:'get_npc_offscreen_brief',description:'Без записи и выдумывания событий: доступные цели, знания, положение NPC и планы, которые ЕЩЁ НЕ произошли. Перед внекадровой сценой сверяй эти ограничения.',inputSchema:object({
     world_id:uuid,actor_names:{type:'array',maxItems:12,items:{type:'string',maxLength:120}}
@@ -710,7 +734,8 @@ function buildDirectorFor(base,assets,sourceContext,npcCandidates=[]){
  return sceneDirectorBrief({world:base?.world||{},clock:base?.world_time||'',
   pacing:assets?.narrative_pacing||null,calendar:cal,
   causalMemory:assets?.causal_memory||null,characters:assets?.character_memory||base?.characters||[],
-  npcCandidates,npcLife:assets?.npc_life||null,complete:assets?.complete===true});
+  npcCandidates,npcLife:assets?.npc_life||null,npcSchedule:assets?.npc_schedule||null,
+  complete:assets?.complete===true});
 }
 async function sourcePreflight(env,identity,id,intent='',actors=[],base=null,assets=null){
  const docStore=await sourceDocList(env,identity,id,{full:true});
@@ -990,6 +1015,9 @@ async function companionState(env,identity,id){
     character_warnings:p.characters.warnings,
     causal_memory:causalSummary(p.causality),depth_memory:p.depth,
     npc_life:npcLifeBrief({characters:p.characters.characters,depth:p.depth,complete:true}),
+    npc_schedule:npcScheduleBrief({characters:p.characters.characters,depth:p.depth,
+      clock:data.scenes?.at(-1)?.world_time||data.world?.clock_start||'',
+      complete:Array.isArray(p.depth.npc_schedule_updates)}),
     calendar_history:[],calendar_history_complete:false,
     narrative_pacing:{complete:false,reason:'После checkpoint нельзя достоверно восстановить распределение внимания для всего окна сцен.'},
     memory_provenance:{verified_source_head:true,
@@ -1017,6 +1045,8 @@ async function companionState(env,identity,id){
    last_event_type:c.history.at(-1)?.type||null,history_count:c.history.length})),
   character_warnings:people.warnings,causal_memory:causalSummary(causal),depth_memory:depth,
   npc_life:npcLifeBrief({characters:people.characters,depth,complete:true}),
+  npc_schedule:npcScheduleBrief({characters:people.characters,depth,
+    clock:lineage.at(-1)?.world_time||data.world?.clock_start||'',complete:true}),
   calendar_history:projectCalendarHistory(lineage),calendar_history_complete:true,
   narrative_pacing:narrativePacingBrief(lineage,{complete:true,currentTime:lineage.at(-1)?.world_time||null,managedThreads:causal.managed_threads})};
 }
@@ -1122,6 +1152,14 @@ async function verifySceneBeforeCommit(env,identity,id,stamp,delta,state){
   validateThreadTransitions(resource.causal_memory?.managed_threads||[],delta.thread_updates);
  }
 
+ if((delta.npc_schedule_updates||[]).length){
+  const resource=await companionState(env,identity,id);
+  if(!resource.complete)throw Error('Нельзя проверить расписание NPC: полная память недоступна.');
+  if(!resource.npc_schedule?.complete)
+   throw Error('Нельзя проверить расписание NPC: checkpoint не содержит проверяемого архива встреч.');
+  validateNpcScheduleTransitions(resource.depth_memory||{},delta.npc_schedule_updates,
+   [...(resource.character_memory||[]),...(delta.new_characters||[])],stamp);
+ }
  if((delta.npc_plan_updates||[]).length){
   const resource=await companionState(env,identity,id);
   if(!resource.complete)throw Error('Нельзя изменить план NPC: полный журнал недоступен.');
@@ -1474,10 +1512,31 @@ async function call(name,args,env,identity) {
     ...selected,all_relationships_count:depth.relationships.length,
     warning:'Интерпретации и противоречивые чувства остаются субъективными. Не называй их объективными фактами.'};
   }
+  if(name==='get_literary_playtest_report'){
+   if(!live)return {mode,world_id:id,ready_for_human_review:false,
+    reason:'Демонстрационные сцены не являются литературным прогоном в реальном мире.'};
+   const full=await loadFullWorldLineage(env,identity,id);
+   if(!full.complete)return {mode,world_id:id,ready_for_human_review:false,
+    reason:'Нельзя подтвердить целиком действующую ветку: '+full.reason};
+   const report=literaryPlaytestReport(full.lineage,{
+    getDelta:s=>readSceneNote(s.prompt_note)?.delta||{},complete:true,required:30});
+   return {mode,world_id:id,branch_id:full.state.branch.id,
+    head_scene_id:full.state.branch.head_scene_id,report};
+  }
+  if(name==='get_npc_meeting_feasibility'){
+   const assets=live?await companionState(env,identity,id):{complete:false,reason:'Демо без проверенной памяти.'};
+   const base=branchState(live?await rpc('lw_bridge_v2_state',{p_world:id}):demoState(),mode);
+   const meeting=npcMeetingFeasibility({characters:assets.character_memory||base.characters||[],
+    depth:assets.depth_memory||{},participants:args.participants,
+    start_at:args.start_at,end_at:args.end_at,location:args.location||'',
+    clock:base.world_time||'',complete:assets.complete===true&&assets.npc_schedule?.complete===true});
+   return {mode,world_id:id,branch_id:assets.branch_id||null,head_scene_id:assets.head_scene_id||null,meeting};
+  }
   if(name==='get_npc_life'){
    const assets=live?await companionState(env,identity,id):{complete:false,reason:'Демо не является подтверждённой историей.'};
    return {mode,world_id:id,branch_id:assets.branch_id||null,head_scene_id:assets.head_scene_id||null,
-    npc_life:assets.npc_life||{complete:false,reason:assets.reason||'Память недоступна.'}};
+    npc_life:assets.npc_life||{complete:false,reason:assets.reason||'Память недоступна.'},
+    npc_schedule:assets.npc_schedule||{complete:false,reason:'Расписание недоступно.'}};
   }
   if(name==='get_npc_offscreen_brief'){
    if(!live)throw Error('Нельзя строить жизнь NPC из демоданных.');
@@ -1754,6 +1813,7 @@ async function call(name,args,env,identity) {
       npc_autonomy:assets.complete?{complete:true,
        candidates:npcCandidates,
        live_profiles:assets.npc_life||{complete:false},
+       schedule:assets.npc_schedule||{complete:false},
        rule:'Кандидаты — только повод проверить доступное время, цели и обстоятельства NPC, а не доказательство событий. Между двумя сценами живущие вне кадра персонажи вправе реально действовать, ошибаться, встречаться, узнавать новое. Если событие причинно состоялось, внеси npc_offscreen basis=simulated и изменения конкретных NPC в changes.characters с каналами знания; не приписывай Гарри невидимые события. Не создавай событий из прошлого уже сыгранных сцен.'}:{complete:false,reason:assets.reason},
       documents:docs,
       narrative_checks:['Хронология и точное время','Цели, характер и изменения отношений','Что каждый знает и каким каналом','Травмы, состояние, ресурсы и местонахождение','Какие сцены и ветки аннулированы','Правила, глоссарий и актуальные изменения']}
