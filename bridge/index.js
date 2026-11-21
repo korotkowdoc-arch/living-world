@@ -6,6 +6,8 @@ import {validateDepthDelta,validateOffscreenWindow,depthSemanticWarnings,project
 import {RETRO_INDEX_KEY_PREFIX,retroKey,makeRetroIndex,activeRetroMemories,searchRetroMemories,retroIndexCoverage} from '../public/retrospective-index.mjs';
 import {auditNarrativeScene} from '../public/narrative-audit.mjs';
 import {validateNarrativeBeats,narrativePacingBrief,narrativePacingGuidance} from '../public/narrative-pacing.mjs';
+import {validateCalendarUpdates,projectCalendarHistory,calendarDirectorBrief} from '../public/calendar-director.mjs';
+import {sceneDirectorBrief,sceneDirectorGuidance} from '../public/scene-director.mjs';
 import {isReplayableCheckpoint,replayFromCheckpoint} from '../public/checkpoint-replay.mjs';
 import {parseCheckpointDoc} from '../public/story-memory.mjs';
 import {savedSceneStatus} from '../public/save-receipt.mjs';
@@ -99,6 +101,7 @@ function parseScenePackage(raw) {
   Object.assign(changes,validateDepthDelta(c,result.scene));
   changes.thread_updates=validateThreadUpdates(c.thread_updates,result.scene,changes.npc_offscreen);
   changes.narrative_beats=validateNarrativeBeats(c.narrative_beats,result.scene);
+  changes.calendar_updates=validateCalendarUpdates(c.calendar_updates,result.scene,changes.npc_offscreen);
   return {scene:result.scene.trim(),world_time:result.world_time||null,changes,decisions};
 }
 function packSceneNote(changes, directorNote='',decisions=[]) {
@@ -434,7 +437,15 @@ const narrativeBeat=object({
   evidence:{type:'string',minLength:1,maxLength:600},
   thread_id:{type:'string',maxLength:80}
 },['domain','progress','evidence']);
+const calendarUpdate=object({
+  id:{type:'string',pattern:'^Y[1-7]-[0-9]{2}$'},
+  outcome:{type:'string',enum:['occurred','altered','unavailable']},
+  reason:{type:'string',minLength:1,maxLength:900},
+  source_kind:{type:'string',enum:['scene','offscreen']},
+  evidence:{type:'string',maxLength:650},source_ref:{type:'string',maxLength:80}
+},['id','outcome','reason']);
 const changes = object({
+  calendar_updates:{type:'array',maxItems:8,items:calendarUpdate},
   narrative_beats:{type:'array',maxItems:4,items:narrativeBeat},
   facts:strings, open_threads:strings, resolved_threads:strings, offscreen_events:strings,
   thread_updates:{type:'array',maxItems:8,items:storyThreadEvent},
