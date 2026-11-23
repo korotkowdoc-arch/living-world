@@ -1,14 +1,13 @@
-import {BRIDGE_SUPABASE_URL,BRIDGE_OWNER_USER_ID} from './bridge-config.js';
-import {knownOAuthClient,isTrustedCallback} from './trusted-clients.mjs';
+import {BRIDGE_OAUTH_CLIENT_ID,BRIDGE_OAUTH_REDIRECT_URI,BRIDGE_SUPABASE_URL,BRIDGE_OWNER_USER_ID} from './bridge-config.js';
 const $=selector=>document.querySelector(selector);
 const id=new URL(location.href).searchParams.get('authorization_id');
 const cfgKey='lw_cloud_config_v03';
 let client,details,user;
 function show(section,message){for(const item of ['setup','login','review'])$('#'+item).hidden=item!==section;$('#status').textContent=message;}
-function redirect(url){if(!isTrustedCallback(url))throw Error('Недопустимый адрес возврата.');location.assign(new URL(url).href);}
+function redirect(url){const target=new URL(url),expected=new URL(BRIDGE_OAUTH_REDIRECT_URI);if(target.origin!==expected.origin||target.pathname!==expected.pathname||target.username||target.password||target.hash)throw Error('Недопустимый адрес возврата.');location.assign(target.href);}
 function publicKey(key){if(key.startsWith('sb_publishable_'))return true;try{const parts=key.split('.');return parts.length===3&&JSON.parse(atob(parts[1].replace(/-/g,'+').replace(/_/g,'/'))).role==='anon';}catch{return false;}}
 async function initialize(){
- if(!id||!/^[A-Za-z0-9_-]{1,128}$/.test(id)||!BRIDGE_OWNER_USER_ID)throw Error('OAuth-запрос или публичная конфигурация не готовы.');
+ if(!id||!/^[A-Za-z0-9_-]{1,128}$/.test(id)||!BRIDGE_OAUTH_CLIENT_ID||!BRIDGE_OWNER_USER_ID)throw Error('OAuth-запрос или публичная конфигурация не готовы.');
  let config;try{config=JSON.parse(localStorage.getItem(cfgKey)||'null');}catch{}
  if(!config){$('#setup-form').elements.url.value=BRIDGE_SUPABASE_URL;show('setup','Подключи существующий проект Supabase.');return;}
  if(config.url!==BRIDGE_SUPABASE_URL||!publicKey(config.key))throw Error('Публичное подключение Supabase некорректно.');
@@ -22,10 +21,8 @@ async function initialize(){
  if(result.error||!result.data)throw Error('Supabase отклонил запрос авторизации'+(result.error?errorDetails(result.error):' (пустой ответ)'));
  details=result.data;
  if(details.redirect_url&&!details.authorization_id){redirect(details.redirect_url);return;}
- const trusted=knownOAuthClient(details);
- if(details.authorization_id!==id||!trusted)throw Error('Неизвестный OAuth-клиент или адрес возврата.');
- document.querySelector('h1').textContent=trusted.title;
- $('#consent-description').textContent=trusted.description;
+ if(details.authorization_id!==id||details.client?.id!==BRIDGE_OAUTH_CLIENT_ID)throw Error('Неизвестный OAuth-клиент.');
+ if(details.redirect_uri!==BRIDGE_OAUTH_REDIRECT_URI)throw Error('Неизвестный redirect URI.');
  $('#client').textContent=(details.client.name||'ChatGPT')+' · '+details.client.id;
  $('#redirect').textContent=details.redirect_uri;
  $('#scopes').textContent=details.scope||'email';
